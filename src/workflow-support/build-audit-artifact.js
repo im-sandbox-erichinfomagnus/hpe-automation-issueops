@@ -1,5 +1,58 @@
 'use strict';
 
+function hasNonEmptyArray(value) {
+  return Array.isArray(value) && value.length > 0;
+}
+
+function determineOperation(request = {}, runContext = {}) {
+  const explicitOperation = runContext.operation || request.operation;
+  if (explicitOperation) {
+    return explicitOperation;
+  }
+
+  const isTeamHierarchy = Boolean(
+    request.parent_team_slug ||
+      request.parent_team_name ||
+      hasNonEmptyArray(request.requested_child_links) ||
+      hasNonEmptyArray(request.duplicate_child_teams) ||
+      hasNonEmptyArray(request.conflicting_child_slugs) ||
+      hasNonEmptyArray(request.invalid_child_teams)
+  );
+
+  if (isTeamHierarchy) {
+    return 'team_hierarchy';
+  }
+
+  const isTeamRepoAccess = Boolean(
+    request.requested_permission_api_value ||
+      request.requested_permission_label ||
+      (request.team_slug && request.designated_approver_login) ||
+      hasNonEmptyArray(request.requested_repository_grants) ||
+      hasNonEmptyArray(request.duplicate_repositories) ||
+      hasNonEmptyArray(request.conflicting_repositories) ||
+      hasNonEmptyArray(request.invalid_repositories)
+  );
+
+  if (isTeamRepoAccess) {
+    return 'team_repo_access';
+  }
+
+  const isTeamCreation = Boolean(
+    request.intended_owner_login ||
+      hasNonEmptyArray(request.requested_teams) ||
+      hasNonEmptyArray(request.requested_team_detail) ||
+      hasNonEmptyArray(request.duplicate_team_names) ||
+      hasNonEmptyArray(request.conflicting_slugs) ||
+      hasNonEmptyArray(request.invalid_team_names)
+  );
+
+  if (isTeamCreation) {
+    return 'team_creation';
+  }
+
+  return 'team_membership';
+}
+
 function buildAuditArtifact(input = {}) {
   const request = input.request || {};
   const validation = input.validation || {};
@@ -8,9 +61,7 @@ function buildAuditArtifact(input = {}) {
   const reconciliationPlan = input.reconciliationPlan || input.reconciliation_plan || {};
   const executionOutcome = input.executionOutcome || input.execution_outcome || {};
   const runContext = input.runContext || input.run_context || {};
-  const isTeamRepoAccess = Array.isArray(request.requested_repository_grants);
-  const isTeamHierarchy = Array.isArray(request.requested_child_links);
-  const isTeamCreation = Array.isArray(request.requested_teams);
+  const operation = determineOperation(request, runContext);
 
   return {
     request: {
@@ -109,13 +160,7 @@ function buildAuditArtifact(input = {}) {
       run_id: runContext.run_id || process.env.GITHUB_RUN_ID || null,
       run_attempt: runContext.run_attempt || process.env.GITHUB_RUN_ATTEMPT || null,
       generated_at: new Date().toISOString(),
-      operation: isTeamRepoAccess
-        ? 'team_repo_access'
-        : isTeamHierarchy
-          ? 'team_hierarchy'
-          : isTeamCreation
-            ? 'team_creation'
-            : 'team_membership',
+      operation,
     },
   };
 }
@@ -126,5 +171,6 @@ function toAuditArtifactJson(input = {}) {
 
 module.exports = {
   buildAuditArtifact,
+  determineOperation,
   toAuditArtifactJson,
 };
