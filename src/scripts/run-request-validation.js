@@ -6,15 +6,19 @@ const path = require('path');
 const { buildExecutionOutcome } = require('../workflow-support/build-execution-outcome');
 const { buildAuditArtifact, toAuditArtifactJson } = require('../workflow-support/build-audit-artifact');
 const { createGitHubTeamApi } = require('../workflow-support/github-team-api');
+const { createGitHubTeamRepoApi } = require('../workflow-support/github-team-repo-api');
 const { loadWorkflowToken } = require('../workflow-support/load-workflow-token');
 const { parseTeamCreationRequest } = require('../workflow-support/parse-team-creation-request');
 const { parseTeamHierarchyRequest } = require('../workflow-support/parse-team-hierarchy-request');
 const { parseTeamMembershipRequest } = require('../workflow-support/parse-team-membership-request');
+const { parseTeamRepoAccessRequest } = require('../workflow-support/parse-team-repo-access-request');
 const { reconcileTeamCreation } = require('../workflow-support/reconcile-team-creation');
 const { reconcileTeamHierarchy } = require('../workflow-support/reconcile-team-hierarchy');
+const { reconcileTeamRepoAccess } = require('../workflow-support/reconcile-team-repo-access');
 const { validateTeamCreationRequest } = require('../workflow-support/validate-team-creation-request');
 const { validateTeamHierarchyRequest } = require('../workflow-support/validate-team-hierarchy-request');
 const { validateTeamMembershipRequest } = require('../workflow-support/validate-team-membership-request');
+const { validateTeamRepoAccessRequest } = require('../workflow-support/validate-team-repo-access-request');
 const { emitAuditSummary } = require('./emit-audit-summary');
 
 function parseParsedRequestJson(rawValue) {
@@ -38,8 +42,11 @@ function readParsedRequestFromEnv(env = process.env) {
 
   return {
     organization: env.PARSED_ORGANIZATION || '',
+    target_team: env.PARSED_TARGET_TEAM || '',
     parent_team: env.PARSED_PARENT_TEAM || '',
     designated_approver: env.PARSED_DESIGNATED_APPROVER || '',
+    requested_repositories: env.PARSED_REQUESTED_REPOSITORIES || '',
+    permission_level: env.PARSED_PERMISSION_LEVEL || '',
     requested_child_teams: env.PARSED_REQUESTED_CHILD_TEAMS || '',
     intended_owner: env.PARSED_INTENDED_OWNER || '',
     requested_team_names: env.PARSED_REQUESTED_TEAM_NAMES || '',
@@ -48,6 +55,17 @@ function readParsedRequestFromEnv(env = process.env) {
     business_justification: env.PARSED_BUSINESS_JUSTIFICATION || '',
     dry_run: env.PARSED_DRY_RUN || 'true',
   };
+}
+
+function isTeamRepoAccessParsedRequest(parsedRequest = {}) {
+  return Boolean(
+    parsedRequest.target_team ||
+    parsedRequest.parsed_target_team ||
+    parsedRequest.requested_repositories ||
+    parsedRequest.parsed_requested_repositories ||
+    parsedRequest.permission_level ||
+    parsedRequest.parsed_permission_level
+  );
 }
 
 function isTeamCreationParsedRequest(parsedRequest = {}) {
@@ -102,13 +120,40 @@ function buildMissingTokenHierarchyValidation(request) {
   };
 }
 
+function buildMissingTokenRepoAccessValidation(request) {
+  return {
+    is_valid: false,
+    request_status: 'validation_failed',
+    errors: ['Workflow token secret is missing. Configure ISSUEOPS_GITHUB_TOKEN or GITHUB_TOKEN for validation.'],
+    warnings: [],
+    organization_visible: false,
+    team_exists: false,
+    designated_approver_authorization: null,
+    requested_repository_grants: request.requested_repository_grants.map((grant) => ({
+      ...grant,
+      validation_status: 'rejected',
+      desired_action: 'reject',
+      execution_result: 'not_started',
+      failure_reason: 'missing_token',
+    })),
+    already_satisfied_repository_grants: [],
+    request: {
+      ...request,
+      request_status: 'validation_failed',
+    },
+  };
+}
+
 async function runRequestValidation(options = {}) {
   const env = options.env || process.env;
   const shouldSetProcessExitCode = options.setProcessExitCode !== false && env === process.env;
   const parsedRequest = readParsedRequestFromEnv(env);
+  const isTeamRepoAccess = isTeamRepoAccessParsedRequest(parsedRequest);
   const isTeamHierarchy = isTeamHierarchyParsedRequest(parsedRequest);
   const isTeamCreation = isTeamCreationParsedRequest(parsedRequest);
-  const request = (isTeamHierarchy
+  const request = (isTeamRepoAccess
+    ? parseTeamRepoAccessRequest
+    : isTeamHierarchy
     ? parseTeamHierarchyRequest
     : isTeamCreation
       ? parseTeamCreationRequest
@@ -131,7 +176,9 @@ async function runRequestValidation(options = {}) {
   try {
     const tokenInfo = loadWorkflowToken({ env, required: false });
     if (!tokenInfo.token) {
-      if (isTeamHierarchy) {
+      if (isTeamRepoAccess) {
+        validation = buildMissingTokenRepoAccessValidation(request);
+      } else if (isTeamHierarchy) {
         validation = buildMissingTokenHierarchyValidation(request);
       } else if (isTeamCreation) {
         validation = {
@@ -177,8 +224,28 @@ async function runRequestValidation(options = {}) {
         };
       }
     } else {
-      const api = options.api || createGitHubTeamApi({ token: tokenInfo.token });
-      if (isTeamHierarchy) {
+      const api = options.api || (isTeamRepoAccess
+        ? createGitHubTeamRepoApi({ token: tokenInfo.token })
+        : createGitHubTeamApi({ token: tokenInfo.token }));
+      if (isTeamRepoAccess) {
+        validation = await validateTeamRepoAccessRequest(request, {
+          getOrganization: ({ organization }) => api.getOrganization({ organization }),
+          getTeamBySlug: ({ organization, teamSlug }) =>
+            api.getTeamBySlug({ organization, teamSlug }),
+          getRepository: ({ owner, repo }) => api.getRepository({ owner, repo }),
+          getTeamRepositoryPermission: ({ organization, teamSlug, owner, repo }) =>
+            api.getTeamRepositoryPermission({ organization, teamSlug, owner, repo }),
+          getOrganizationMembership: ({ organization, username }) =>
+            api.getOrganizationMembership({ organization, username }),
+        });
+        reconciliationPlan = reconcileTeamRepoAccess({
+          request: validation.request,
+          requested_repository_grants: validation.requested_repository_grants,
+          organization_exists: validation.organization_visible,
+          team_exists: validation.team_exists,
+          dry_run: validation.request.dry_run,
+        });
+      } else if (isTeamHierarchy) {
         validation = await validateTeamHierarchyRequest(request, {
           getOrganization: ({ organization }) => api.getOrganization({ organization }),
           listTeams: ({ organization }) => api.listOrgTeams({ organization }),
@@ -238,16 +305,20 @@ async function runRequestValidation(options = {}) {
 
   const executionOutcome = buildExecutionOutcome({
     executionResults: [],
-    operationLabel: isTeamHierarchy ? 'child_link' : isTeamCreation ? 'team' : 'membership',
+    operationLabel: isTeamRepoAccess ? 'repository' : isTeamHierarchy ? 'child_link' : isTeamCreation ? 'team' : 'membership',
   });
 
   executionOutcome.summary = validation.is_valid
-    ? isTeamHierarchy
+    ? isTeamRepoAccess
+      ? 'Request is validated and stored as approval-ready. No repository-access mutation was attempted.'
+      : isTeamHierarchy
       ? 'Request is validated and stored as approval-ready. No child-team mutation was attempted.'
       : isTeamCreation
       ? 'Request is validated and stored as approval-ready. No team creation was attempted.'
       : 'Request is validated and stored as approval-ready. No membership mutation was attempted.'
-    : isTeamHierarchy
+    : isTeamRepoAccess
+      ? 'Request validation failed. No repository-access mutation was attempted.'
+      : isTeamHierarchy
       ? 'Request validation failed. No child-team mutation was attempted.'
       : isTeamCreation
       ? 'Request validation failed. No team creation was attempted.'
@@ -272,7 +343,7 @@ async function runRequestValidation(options = {}) {
     env.AUDIT_ARTIFACT_PATH ||
       path.join(
         'artifacts',
-        `${isTeamHierarchy ? 'add-child-teams' : isTeamCreation ? 'create-org-teams' : 'add-team-members'}-validation-${env.ISSUE_NUMBER || 'manual'}.json`
+        `${isTeamRepoAccess ? 'add-team-repo-access' : isTeamHierarchy ? 'add-child-teams' : isTeamCreation ? 'create-org-teams' : 'add-team-members'}-validation-${env.ISSUE_NUMBER || 'manual'}.json`
       )
   );
 
@@ -309,6 +380,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  isTeamRepoAccessParsedRequest,
   isTeamHierarchyParsedRequest,
   isTeamCreationParsedRequest,
   parseParsedRequestJson,

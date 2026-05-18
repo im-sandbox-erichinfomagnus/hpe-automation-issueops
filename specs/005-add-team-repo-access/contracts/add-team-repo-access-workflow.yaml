@@ -1,0 +1,187 @@
+name: add-team-repo-access-workflow-contract
+version: 1
+purpose: >-
+  Contract for the IssueOps workflow that requests approval for, validates, and
+  reconciles granting one existing team access to one or more existing
+  repositories in a GitHub organization from the central administration
+  repository.
+
+issue_form:
+  path: .github/ISSUE_TEMPLATE/add-team-repo-access.yml
+  required_fields:
+    - id: organization
+      type: input
+      description: Target GitHub organization slug.
+    - id: target_team
+      type: input
+      description: Existing GitHub team that should receive repository access.
+    - id: designated_approver
+      type: input
+      description: GitHub login of the single target organization owner who must approve the full request batch.
+    - id: requested_repositories
+      type: textarea
+      description: One or more existing repositories in the target organization, one per line.
+    - id: permission_level
+      type: dropdown
+      description: Single repository permission level to grant for the full request batch.
+    - id: business_justification
+      type: textarea
+      description: Reason for granting the requested team repository access.
+    - id: dry_run
+      type: dropdown
+      description: Whether to execute validation only or allow repository access mutation after approval.
+
+parser:
+  action: issue-ops/parser@v5
+  inputs:
+    body: ${{ github.event.issue.body }}
+    issue-form-template: add-team-repo-access.yml
+  outputs:
+    json: Parsed request payload as JSON string.
+    parsed_organization: Normalized organization field.
+    parsed_target_team: Parsed team field.
+    parsed_designated_approver: Parsed designated approver field.
+    parsed_requested_repositories: Parsed repository list before downstream normalization.
+    parsed_permission_level: Parsed requested permission level.
+    parsed_dry_run: Parsed dry-run selection.
+
+workflow_inputs:
+  validation:
+    - name: organization
+      required: true
+    - name: target_team
+      required: true
+    - name: designated_approver
+      required: true
+    - name: requested_repositories
+      required: true
+    - name: permission_level
+      required: true
+    - name: requester_login
+      required: true
+    - name: dry_run
+      required: true
+  approval_gate:
+    - name: approver_login
+      required: true
+    - name: designated_approver
+      required: true
+  reconciliation:
+    - name: execution_token_source
+      required: true
+      description: PAT-backed workflow token source.
+    - name: audit_artifact_path
+      required: true
+      description: Persisted validation and approval artifact used by the execution runner.
+    - name: approval_status
+      required: true
+      description: Approval gate outcome that must be `approved` before repository access mutation.
+  workflow_env:
+    - name: ISSUEOPS_GITHUB_TOKEN
+      required: true
+      description: PAT-backed organization secret used for validation, approval verification, and repository access mutation.
+    - name: GITHUB_TOKEN
+      required: true
+      description: Default GitHub Actions repository token used for standard workflow context operations.
+
+authorization:
+  requester_identity: github.event.issue.user.login
+  allowed_approvers:
+    - single designated target organization owner for the full request batch
+  execution_identity:
+    model: personal access token supplied to the workflow from ISSUEOPS_GITHUB_TOKEN
+    bootstrap: repository or organization Actions secret injection
+    required_permissions:
+      administration: write
+      members: read
+      metadata: read
+      issues: write
+
+validation_rules:
+  - The target organization must exist and be visible to the executing identity.
+  - The requested team must exist in the target organization.
+  - At least one requested repository must be supplied after normalization.
+  - Duplicate or conflicting repository identifiers must be rejected before reconciliation.
+  - The requested permission level must normalize to one of the supported built-in repository roles.
+  - The designated approver must be the same GitHub user who approves in the central repository and must currently be an active organization owner in the target organization.
+  - Archived repositories, missing repositories, and repositories outside the target organization must be rejected before mutation.
+  - Repositories with weaker existing team access that would require in-place permission changes must be rejected before mutation.
+  - Repository creation, repository-setting changes, team creation, team membership changes, permission removal, and permission downgrades must not be accepted by this workflow.
+
+reconciliation:
+  current_state_reads:
+    - target organization visibility lookup
+    - requested team lookup
+    - requested repository lookups
+    - per-repository team permission lookup for the requested team
+    - designated approver organization membership lookup
+    - latest repository state re-read before approved execution
+  mutation_rule: Grant only missing eligible repository access for the requested team.
+  no_op_rule: Report repositories that already satisfy the requested permission exactly or through stronger existing access without rewriting them.
+  partial_success_rule: Persist per-repository success or failure and surface required follow-up.
+  idempotency_rule: Re-running an already-satisfied approved request must not create duplicate repository grants or downgrade stronger access.
+
+rate_limit_handling:
+  inspect_headers:
+    - x-ratelimit-remaining
+    - x-ratelimit-reset
+    - retry-after
+  retry_policy:
+    strategy: bounded exponential backoff
+    retryable_conditions:
+      - transient secondary rate limit
+      - explicit retry-after guidance
+    non_retryable_conditions:
+      - invalid approval
+      - missing target organization
+      - missing team or repository
+      - archived repository
+      - weaker existing permission conflict
+
+observability:
+  outputs:
+    - GitHub step summary
+    - JSON audit artifact
+    - requester-facing workflow summary in the Actions run
+  required_fields:
+    - issue_number
+    - run_id
+    - requester_login
+    - approver_login
+    - approval_status
+    - assignment_status
+    - organization
+    - target_team
+    - designated_approver
+    - requested_repositories
+    - requested_permission_level
+    - granted_repositories
+    - noop_repositories
+    - rejected_repositories
+    - failed_repositories
+    - rollback_status
+    - failed_subset
+    - remediation_instructions
+    - reconciliation.repositories_to_grant
+    - reconciliation.repositories_already_satisfied
+  operator_notes:
+    - Central assignment is queue ownership only and does not authorize repository access mutation.
+    - Stronger existing repository access is treated as already satisfied and must not be downgraded.
+    - Requests that would require modifying weaker existing team access are rejected rather than auto-upgraded in this feature version.
+
+execution_examples:
+  approval_only:
+    expected_summary:
+      request_status: awaiting_approval
+      granted_repositories: 0
+      noop_repositories: 0
+  mixed_grant_and_noop:
+    expected_summary:
+      request_status: executed
+      granted_repositories: 1
+      noop_repositories: 1
+  idempotent_rerun:
+    expected_summary:
+      request_status: executed
+      granted_repositories: 0
+      noop_repositories: 1

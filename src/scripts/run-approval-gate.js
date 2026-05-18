@@ -41,6 +41,10 @@ function buildAssignmentNote(operation) {
     return 'Central issue assignment is for queue ownership only and does not authorize team creation.';
   }
 
+  if (operation === 'team_repo_access') {
+    return 'Central issue assignment is for queue ownership only and does not authorize repository access mutation.';
+  }
+
   return 'Central issue assignment is for queue ownership only and does not authorize membership mutation.';
 }
 
@@ -131,7 +135,9 @@ async function runApprovalGate(options = {}) {
           ? 'team_creation'
           : auditArtifact.metadata && auditArtifact.metadata.operation === 'team_hierarchy'
             ? 'team_hierarchy'
-          : 'team_membership',
+            : auditArtifact.metadata && auditArtifact.metadata.operation === 'team_repo_access'
+              ? 'team_repo_access'
+              : 'team_membership',
         issueComments,
         priorApprovalStatus: auditArtifact.approval && auditArtifact.approval.approval_status,
       },
@@ -162,6 +168,14 @@ async function runApprovalGate(options = {}) {
           : auditArtifact.approval.approval_status === 'invalidated'
             ? 'Approval was invalidated after the approval comment was removed. No team creation was attempted.'
             : 'Request is validated, centrally routed, and awaiting approval from the active intended owner. No team creation was attempted.'
+      : auditArtifact.metadata && auditArtifact.metadata.operation === 'team_repo_access'
+      ? auditArtifact.approval.approval_status === 'approved'
+        ? 'Request approval was granted by the authorized designated target organization owner. No repository-access mutation was attempted in this phase.'
+        : auditArtifact.approval.approval_status === 'denied'
+          ? 'Approval was denied because the approval comment did not come from the authorized designated target organization owner. No repository-access mutation was attempted.'
+          : auditArtifact.approval.approval_status === 'invalidated'
+            ? 'Approval was invalidated after the approval comment was removed. No repository-access mutation was attempted.'
+            : 'Request is validated, centrally routed, and awaiting approval from the designated target organization owner. No repository-access mutation was attempted.'
       : auditArtifact.approval.approval_status === 'approved'
         ? 'Request approval was granted by an organization owner. No membership mutation was attempted in this phase.'
         : auditArtifact.approval.approval_status === 'denied'

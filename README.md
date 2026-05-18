@@ -123,6 +123,9 @@ This list should be updated as new IssueOps workflows are added.
 - `add-child-teams`: Request, validate, approve, and reconcile attaching one or
 	more existing child teams under an existing parent team in a target
 	organization.
+- `add-team-repo-access`: Request, validate, approve, and reconcile granting
+	one existing GitHub team access to one or more existing repositories in a
+	target organization.
 
 Detailed design and operator guidance for the current operation live in:
 
@@ -132,6 +135,8 @@ Detailed design and operator guidance for the current operation live in:
 - [`specs/003-create-org-teams/contracts/create-org-teams-workflow.yaml`](specs/003-create-org-teams/contracts/create-org-teams-workflow.yaml)
 - [`specs/004-add-child-teams/quickstart.md`](specs/004-add-child-teams/quickstart.md)
 - [`specs/004-add-child-teams/contracts/add-child-teams-workflow.yaml`](specs/004-add-child-teams/contracts/add-child-teams-workflow.yaml)
+- [`specs/005-add-team-repo-access/quickstart.md`](specs/005-add-team-repo-access/quickstart.md)
+- [`specs/005-add-team-repo-access/contracts/add-team-repo-access-workflow.yaml`](specs/005-add-team-repo-access/contracts/add-team-repo-access-workflow.yaml)
 
 ## Repository Standards
 
@@ -180,6 +185,7 @@ specs/
 	001-add-team-members/  # Team membership workflow spec and contract
 	003-create-org-teams/  # Empty team creation workflow spec and contract
 	004-add-child-teams/   # Team hierarchy workflow spec and contract
+	005-add-team-repo-access/ # Team repository-access workflow spec and contract
 
 tests/
 	contract/         # Contract and parsing regression tests
@@ -221,6 +227,20 @@ The `add-child-teams` workflow is implemented and validated for:
 - execution that attaches only missing child-team links under the requested
 	parent team
 - no-op handling for already-satisfied hierarchy links on rerun
+- bounded retry for retryable rate-limit responses
+- auditable summaries and JSON artifact output
+
+The `add-team-repo-access` workflow is implemented and validated for:
+
+- request intake for one existing team, one shared permission level, and one or
+	more existing target repositories
+- validation of organization visibility, team existence, designated approver
+	authorization, duplicate or conflicting repository input, archived-repository
+	rejection, and weaker-existing-permission rejection
+- designated-approver approval by exact `approved` issue comment
+- execution that grants only missing eligible repository access
+- no-op handling for exact or stronger already-satisfied repository access on
+	rerun
 - bounded retry for retryable rate-limit responses
 - auditable summaries and JSON artifact output
 

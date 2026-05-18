@@ -103,6 +103,16 @@ function buildRateLimitContext(error = {}, options = {}) {
   };
 }
 
+function buildRepositoryGrantRateLimitContext(error = {}, options = {}) {
+  return buildRateLimitContext(error, {
+    operation: options.operation || 'team_repository_grant',
+    attempt: options.attempt || 1,
+    maxRetries: options.maxRetries || 3,
+    baseDelayMs: options.baseDelayMs,
+    maxDelayMs: options.maxDelayMs,
+  });
+}
+
 async function executeWithBoundedRetry(operation, options = {}) {
   const maxRetries = options.maxRetries || 3;
   const sleep = options.sleep || ((delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)));
@@ -176,6 +186,7 @@ async function executeWithBoundedRetry(operation, options = {}) {
 }
 
 module.exports = {
+  buildRepositoryGrantRateLimitContext,
   buildRateLimitContext,
   computeRetryDelayMs,
   createRetryPlan,

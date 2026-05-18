@@ -8,6 +8,7 @@ function buildAuditArtifact(input = {}) {
   const reconciliationPlan = input.reconciliationPlan || input.reconciliation_plan || {};
   const executionOutcome = input.executionOutcome || input.execution_outcome || {};
   const runContext = input.runContext || input.run_context || {};
+  const isTeamRepoAccess = Array.isArray(request.requested_repository_grants);
   const isTeamHierarchy = Array.isArray(request.requested_child_links);
   const isTeamCreation = Array.isArray(request.requested_teams);
 
@@ -19,11 +20,15 @@ function buildAuditArtifact(input = {}) {
       requester_login: request.requester_login,
       organization: request.organization,
       team_slug: request.team_slug,
+      team_name: request.team_name,
       parent_team_slug: request.parent_team_slug,
       parent_team_name: request.parent_team_name,
       requested_people: request.requested_people,
       intended_owner_login: request.intended_owner_login,
       designated_approver_login: request.designated_approver_login,
+      requested_permission_label: request.requested_permission_label,
+      requested_permission_api_value: request.requested_permission_api_value,
+      requested_repository_grants: request.requested_repository_grants || [],
       requested_teams: request.requested_teams || [],
       requested_child_links: request.requested_child_links || [],
       request_status: request.request_status,
@@ -35,6 +40,9 @@ function buildAuditArtifact(input = {}) {
       duplicate_child_teams: request.duplicate_child_teams || [],
       conflicting_child_slugs: request.conflicting_child_slugs || [],
       invalid_child_teams: request.invalid_child_teams || [],
+      duplicate_repositories: request.duplicate_repositories || [],
+      conflicting_repositories: request.conflicting_repositories || [],
+      invalid_repositories: request.invalid_repositories || [],
       dry_run: request.dry_run,
       submitted_at: request.submitted_at,
     },
@@ -46,11 +54,13 @@ function buildAuditArtifact(input = {}) {
       team_sync_blocked: validation.team_sync_blocked,
       requested_people: validation.requested_people || [],
       organization_visible: validation.organization_visible,
+      designated_approver_authorization: validation.designated_approver_authorization || null,
+      requested_repository_grants: validation.requested_repository_grants || [],
+      already_satisfied_repository_grants: validation.already_satisfied_repository_grants || [],
       intended_owner_membership: validation.intended_owner_membership || null,
       requested_teams: validation.requested_teams || [],
       existing_teams: validation.existing_teams || [],
       parent_team_exists: validation.parent_team_exists,
-      designated_approver_authorization: validation.designated_approver_authorization || null,
       requested_child_links: validation.requested_child_links || [],
       existing_child_links: validation.existing_child_links || [],
     },
@@ -78,6 +88,11 @@ function buildAuditArtifact(input = {}) {
       people_already_present: reconciliationPlan.people_already_present || [],
       people_rejected: reconciliationPlan.people_rejected || [],
       organization_exists: reconciliationPlan.organization_exists,
+      team_exists: reconciliationPlan.team_exists,
+      repositories_to_grant: reconciliationPlan.repositories_to_grant || [],
+      repositories_already_satisfied: reconciliationPlan.repositories_already_satisfied || [],
+      repositories_rejected: reconciliationPlan.repositories_rejected || [],
+      permission_strength_ladder: reconciliationPlan.permission_strength_ladder || [],
       parent_team_exists: reconciliationPlan.parent_team_exists,
       teams_to_create: reconciliationPlan.teams_to_create || [],
       teams_already_present: reconciliationPlan.teams_already_present || [],
@@ -94,7 +109,13 @@ function buildAuditArtifact(input = {}) {
       run_id: runContext.run_id || process.env.GITHUB_RUN_ID || null,
       run_attempt: runContext.run_attempt || process.env.GITHUB_RUN_ATTEMPT || null,
       generated_at: new Date().toISOString(),
-      operation: isTeamHierarchy ? 'team_hierarchy' : isTeamCreation ? 'team_creation' : 'team_membership',
+      operation: isTeamRepoAccess
+        ? 'team_repo_access'
+        : isTeamHierarchy
+          ? 'team_hierarchy'
+          : isTeamCreation
+            ? 'team_creation'
+            : 'team_membership',
     },
   };
 }

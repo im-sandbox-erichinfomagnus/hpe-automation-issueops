@@ -1,0 +1,13 @@
+{
+  "secondary_limit_error": {
+    "status": 403,
+    "payload": {
+      "message": "You have exceeded a secondary rate limit. Please wait a few minutes before you try again."
+    },
+    "headers": {
+      "retry-after": "2",
+      "x-ratelimit-remaining": "0",
+      "x-ratelimit-reset": "1893456000"
+    }
+  }
+}

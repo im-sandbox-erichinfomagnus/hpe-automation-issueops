@@ -8,15 +8,67 @@ function formatAuditSummary(auditArtifact = {}) {
   const validation = auditArtifact.validation || {};
   const assignment = auditArtifact.assignment || {};
   const approval = auditArtifact.approval || {};
+  const reconciliation = auditArtifact.reconciliation || {};
   const execution = auditArtifact.execution || {};
-  const isTeamHierarchy = Array.isArray(request.requested_child_links) && request.requested_child_links.length > 0;
-  const isTeamCreation = Array.isArray(request.requested_teams) && request.requested_teams.length > 0;
+  const isTeamRepoAccess = Array.isArray(request.requested_repository_grants) && (
+    request.requested_repository_grants.length > 0 ||
+    Boolean(request.requested_permission_api_value) ||
+    Boolean(request.team_slug && request.designated_approver_login)
+  );
+  const isTeamHierarchy = !isTeamRepoAccess && Array.isArray(request.requested_child_links) && request.requested_child_links.length > 0;
+  const isTeamCreation = !isTeamRepoAccess && Array.isArray(request.requested_teams) && request.requested_teams.length > 0;
 
   const hierarchyApprovalState = approval.approver_authorization_state && approval.approver_authorization_state !== 'unknown'
     ? approval.approver_authorization_state
     : validation.designated_approver_authorization
       ? validation.designated_approver_authorization.state || 'unknown'
       : 'n/a';
+  const repoAccessApprovalState = approval.approver_authorization_state && approval.approver_authorization_state !== 'unknown'
+    ? approval.approver_authorization_state
+    : validation.designated_approver_authorization
+      ? validation.designated_approver_authorization.state || 'unknown'
+      : 'n/a';
+
+  if (isTeamRepoAccess) {
+    return [
+      '# Add Team Repository Access Workflow Summary',
+      '',
+      `- Request ID: ${request.request_id || 'n/a'}`,
+      `- Repository: ${request.repository || 'n/a'}`,
+      `- Target organization: ${request.organization || 'n/a'}`,
+      `- Target team: ${request.team_slug || request.team_name || 'n/a'}`,
+      `- Requested permission: ${request.requested_permission_label || request.requested_permission_api_value || 'n/a'}`,
+      `- Designated approver: ${request.designated_approver_login || 'n/a'}`,
+      `- Requester: ${request.requester_login || 'n/a'}`,
+      `- Request status: ${request.request_status || 'submitted'}`,
+      `- Central assignment: ${assignment.assignment_status || 'not_attempted'}${assignment.assigned_login ? ` (${assignment.assigned_login})` : ''}`,
+      `- Approval: ${approval.approval_status || 'pending'} (${repoAccessApprovalState})`,
+      approval.approver_login ? `- Approver: ${approval.approver_login}` : null,
+      `- Validation: ${validation.is_valid ? 'passed' : 'failed'}`,
+      `- Repositories requested: ${(request.requested_repository_grants || []).length}`,
+      `- Granted repositories: ${execution.granted_count || execution.mutation_count || 0}`,
+      `- No-op repositories: ${execution.noop_count || (reconciliation.repositories_already_satisfied || []).length || 0}`,
+      `- Rejected repositories: ${execution.rejected_count || (reconciliation.repositories_rejected || []).length || 0}`,
+      `- Failed repositories: ${execution.failure_count || 0}`,
+      `- Rollback status: ${execution.rollback_status || 'not_needed'}`,
+      validation.warnings && validation.warnings.length > 0
+        ? `- Validation warnings: ${validation.warnings.join('; ')}`
+        : null,
+      validation.errors && validation.errors.length > 0
+        ? `- Validation errors: ${validation.errors.join('; ')}`
+        : null,
+      assignment.assignment_note ? `- Assignment note: ${assignment.assignment_note}` : null,
+      approval.decision_note ? `- Approval note: ${approval.decision_note}` : null,
+      '',
+      execution.summary || (validation.is_valid
+        ? approval.approval_status === 'approved'
+          ? 'Request is approved and eligible for repository-access execution. No repository-access mutation was attempted in this phase.'
+          : approval.approval_status === 'denied'
+            ? 'Approval was denied or invalid. No repository-access mutation was attempted.'
+            : 'Request is validated and ready for approval. No repository-access mutation was attempted.'
+        : 'Request validation failed. No repository-access mutation was attempted.'),
+    ].filter(Boolean).join('\n');
+  }
 
   if (isTeamHierarchy) {
     return [

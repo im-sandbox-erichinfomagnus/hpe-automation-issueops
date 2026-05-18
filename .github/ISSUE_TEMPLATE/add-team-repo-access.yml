@@ -1,0 +1,88 @@
+name: Add team repository access
+description: Request granting one existing GitHub team access to one or more existing repositories in a target GitHub organization.
+title: "[add-team-repo-access] <org>: <team>"
+labels:
+  - issueops
+  - add-team-repo-access
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this request to validate and, after approval in a later phase,
+        grant one existing GitHub team access to one or more existing
+        repositories in a target GitHub organization.
+
+  - type: input
+    id: organization
+    attributes:
+      label: Target organization
+      description: GitHub organization where the requested repository access should be applied.
+      placeholder: octo-org
+    validations:
+      required: true
+
+  - type: input
+    id: target_team
+    attributes:
+      label: Target team
+      description: Existing team that should receive the requested repository access.
+      placeholder: platform-engineering
+    validations:
+      required: true
+
+  - type: input
+    id: designated_approver
+    attributes:
+      label: Designated repository-access approver
+      description: GitHub login of the single target organization owner who must approve the full request batch.
+      placeholder: octocat
+    validations:
+      required: true
+
+  - type: textarea
+    id: requested_repositories
+    attributes:
+      label: Requested repositories
+      description: One existing repository per line. Duplicate repositories, mixed-organization requests, repository creation, permission removal, and permission downgrade requests are rejected.
+      placeholder: |
+        service-catalog
+        developer-portal
+      render: text
+    validations:
+      required: true
+
+  - type: dropdown
+    id: permission_level
+    attributes:
+      label: Requested permission level
+      description: Built-in repository role to grant for the full request batch. Custom roles are out of scope for this feature version.
+      options:
+        - read
+        - triage
+        - write
+        - maintain
+        - admin
+      default: 0
+    validations:
+      required: true
+
+  - type: textarea
+    id: business_justification
+    attributes:
+      label: Business justification
+      description: Explain why this team needs the requested repository access. This workflow validates and prepares approval-ready access requests before mutation.
+      placeholder: This team owns the service deployment and on-call response for the requested repositories.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: dry_run
+    attributes:
+      label: Dry-run mode
+      description: Validation runs without repository-access mutation when dry-run is enabled.
+      options:
+        - "true"
+        - "false"
+      default: 0
+    validations:
+      required: true
