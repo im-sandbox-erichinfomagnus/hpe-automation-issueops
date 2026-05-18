@@ -1,0 +1,215 @@
+'use strict';
+
+const fs = require('fs');
+const path = require('path');
+
+const { evaluateApprovalGate } = require('../workflow-support/approval-gate');
+const { buildAuditArtifact, toAuditArtifactJson } = require('../workflow-support/build-audit-artifact');
+const { createGitHubTeamApi } = require('../workflow-support/github-team-api');
+const { loadWorkflowToken } = require('../workflow-support/load-workflow-token');
+const { emitAuditSummary } = require('./emit-audit-summary');
+
+function readAuditArtifact(filePath) {
+  const resolvedPath = path.resolve(filePath);
+  return JSON.parse(fs.readFileSync(resolvedPath, 'utf8'));
+}
+
+function writeGitHubOutput(key, value, outputPath = process.env.GITHUB_OUTPUT) {
+  if (!outputPath) {
+    return;
+  }
+
+  fs.appendFileSync(outputPath, `${key}=${value}\n`, 'utf8');
+}
+
+function pickCentralIssueAssignee(assignableOwners = [], requesterLogin = '') {
+  const normalizedRequester = String(requesterLogin || '').toLowerCase();
+  const normalizedOwners = [...new Set(assignableOwners.map((login) => String(login || '').toLowerCase()).filter(Boolean))];
+  if (normalizedOwners.length === 0) {
+    return '';
+  }
+
+  return normalizedOwners.find((login) => login !== normalizedRequester) || normalizedOwners[0];
+}
+
+function buildAssignmentNote(operation) {
+  if (operation === 'team_hierarchy') {
+    return 'Central issue assignment is for queue ownership only and does not authorize team hierarchy mutation.';
+  }
+
+  if (operation === 'team_creation') {
+    return 'Central issue assignment is for queue ownership only and does not authorize team creation.';
+  }
+
+  return 'Central issue assignment is for queue ownership only and does not authorize membership mutation.';
+}
+
+async function runApprovalGate(options = {}) {
+  const env = options.env || process.env;
+  const shouldSetProcessExitCode = options.setProcessExitCode !== false && env === process.env;
+  const defaultArtifactName = 'add-team-members';
+  const artifactPath = path.resolve(
+    env.AUDIT_ARTIFACT_PATH ||
+      path.join('artifacts', `${defaultArtifactName}-validation-${env.ISSUE_NUMBER || 'manual'}.json`)
+  );
+  const auditArtifact = readAuditArtifact(artifactPath);
+  const operation = auditArtifact.metadata && auditArtifact.metadata.operation;
+
+  if (!auditArtifact.validation || auditArtifact.validation.is_valid !== true) {
+    writeGitHubOutput('approval-status', auditArtifact.approval && auditArtifact.approval.approval_status || 'not_requested', env.GITHUB_OUTPUT);
+    emitAuditSummary(auditArtifact, { summaryPath: env.GITHUB_STEP_SUMMARY, overwrite: true });
+    return auditArtifact;
+  }
+
+  auditArtifact.assignment = auditArtifact.assignment || {
+    assignment_status: 'not_attempted',
+    assigned_login: '',
+    assignment_note: '',
+    assigned_at: null,
+  };
+
+  const tokenInfo = loadWorkflowToken({ env, required: false });
+  if (!tokenInfo.token) {
+    auditArtifact.assignment = {
+      assignment_status: 'failed',
+      assigned_login: '',
+      assignment_note: 'Central issue assignment could not be evaluated because the workflow token secret is missing.',
+      assigned_at: null,
+    };
+    auditArtifact.approval = {
+      approval_status: 'pending',
+      approver_login: '',
+      approver_role: 'other',
+      approver_membership_state: 'unknown',
+      decision_source: 'comment',
+      decision_note: 'Approval could not be evaluated because the workflow token secret is missing.',
+    };
+  } else {
+    const api = options.api || createGitHubTeamApi({ token: tokenInfo.token });
+    const assignableOwners = await api.getAssignableOwners({
+      repository: auditArtifact.request.repository,
+    });
+    const selectedAssignee = pickCentralIssueAssignee(
+      assignableOwners,
+      auditArtifact.request.requester_login
+    );
+
+    if (!selectedAssignee) {
+      auditArtifact.assignment = {
+        assignment_status: 'failed',
+        assigned_login: '',
+        assignment_note: 'No assignable central-repository owner was available for queue ownership.',
+        assigned_at: null,
+      };
+    } else {
+      const assignmentResult = await api.addIssueAssignees({
+        repository: auditArtifact.request.repository,
+        issueNumber: auditArtifact.request.issue_number,
+        assignees: [selectedAssignee],
+      });
+      auditArtifact.assignment = {
+        assignment_status: assignmentResult.status || 'assigned',
+        assigned_login: selectedAssignee,
+        assignment_note: buildAssignmentNote(operation),
+        assigned_at: new Date().toISOString(),
+      };
+    }
+
+    const issueComments = await api.listIssueComments({
+      repository: auditArtifact.request.repository,
+      issueNumber: auditArtifact.request.issue_number,
+    });
+
+    auditArtifact.approval = await evaluateApprovalGate(
+      {
+        organization: auditArtifact.request.organization,
+        intendedOwnerLogin: auditArtifact.request.intended_owner_login,
+        designatedApproverLogin: auditArtifact.request.designated_approver_login,
+        parentTeamSlug: auditArtifact.request.parent_team_slug,
+        requestedChildLinks: auditArtifact.request.requested_child_links || [],
+        approvalMode: auditArtifact.metadata && auditArtifact.metadata.operation === 'team_creation'
+          ? 'team_creation'
+          : auditArtifact.metadata && auditArtifact.metadata.operation === 'team_hierarchy'
+            ? 'team_hierarchy'
+          : 'team_membership',
+        issueComments,
+        priorApprovalStatus: auditArtifact.approval && auditArtifact.approval.approval_status,
+      },
+      {
+        api,
+      }
+    );
+  }
+
+  auditArtifact.request.request_status =
+    auditArtifact.approval.approval_status === 'approved'
+      ? 'approved'
+      : 'awaiting_approval';
+  auditArtifact.execution.summary =
+    auditArtifact.metadata && auditArtifact.metadata.operation === 'team_hierarchy'
+      ? auditArtifact.approval.approval_status === 'approved'
+        ? 'Request approval was granted by the authorized designated hierarchy approver. No child-team mutation was attempted in this phase.'
+        : auditArtifact.approval.approval_status === 'denied'
+          ? 'Approval was denied because the approval comment did not come from the authorized designated hierarchy approver. No child-team mutation was attempted.'
+          : auditArtifact.approval.approval_status === 'invalidated'
+            ? 'Approval was invalidated after the approval comment was removed. No child-team mutation was attempted.'
+            : 'Request is validated, centrally routed, and awaiting approval from the designated hierarchy approver. No child-team mutation was attempted.'
+      : auditArtifact.metadata && auditArtifact.metadata.operation === 'team_creation'
+      ? auditArtifact.approval.approval_status === 'approved'
+        ? 'Request approval was granted by the active intended owner. No team creation was attempted in this phase.'
+        : auditArtifact.approval.approval_status === 'denied'
+          ? 'Approval was denied because the approval comment did not come from the active intended owner. No team creation was attempted.'
+          : auditArtifact.approval.approval_status === 'invalidated'
+            ? 'Approval was invalidated after the approval comment was removed. No team creation was attempted.'
+            : 'Request is validated, centrally routed, and awaiting approval from the active intended owner. No team creation was attempted.'
+      : auditArtifact.approval.approval_status === 'approved'
+        ? 'Request approval was granted by an organization owner. No membership mutation was attempted in this phase.'
+        : auditArtifact.approval.approval_status === 'denied'
+          ? 'Approval was denied because the approval comment did not come from an organization owner. No membership mutation was attempted.'
+          : auditArtifact.approval.approval_status === 'invalidated'
+            ? 'Approval was invalidated after the approval comment was removed. No membership mutation was attempted.'
+            : 'Request is validated and awaiting approval from an organization owner. No membership mutation was attempted.';
+
+  const updatedArtifact = buildAuditArtifact({
+    request: auditArtifact.request,
+    validation: auditArtifact.validation,
+    assignment: auditArtifact.assignment,
+    approval: auditArtifact.approval,
+    reconciliationPlan: auditArtifact.reconciliation,
+    executionOutcome: auditArtifact.execution,
+    runContext: auditArtifact.metadata,
+  });
+
+  fs.writeFileSync(artifactPath, toAuditArtifactJson({
+    request: updatedArtifact.request,
+    validation: updatedArtifact.validation,
+    assignment: updatedArtifact.assignment,
+    approval: updatedArtifact.approval,
+    executionOutcome: updatedArtifact.execution,
+    runContext: updatedArtifact.metadata,
+    reconciliationPlan: updatedArtifact.reconciliation,
+  }), 'utf8');
+
+  emitAuditSummary(updatedArtifact, { summaryPath: env.GITHUB_STEP_SUMMARY, overwrite: true });
+  writeGitHubOutput('approval-status', updatedArtifact.approval.approval_status, env.GITHUB_OUTPUT);
+  writeGitHubOutput('assigned-login', updatedArtifact.assignment.assigned_login || '', env.GITHUB_OUTPUT);
+
+  if (updatedArtifact.approval.approval_status === 'denied' && shouldSetProcessExitCode) {
+    process.exitCode = 1;
+  }
+
+  return updatedArtifact;
+}
+
+if (require.main === module) {
+  runApprovalGate().catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  buildAssignmentNote,
+  pickCentralIssueAssignee,
+  runApprovalGate,
+};

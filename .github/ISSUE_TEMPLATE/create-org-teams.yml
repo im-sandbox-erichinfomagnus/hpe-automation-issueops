@@ -1,0 +1,63 @@
+name: Create organization teams
+description: Request creating one or more empty teams in a GitHub organization.
+title: "[create-org-teams] <org>: <summary>"
+labels:
+  - issueops
+  - create-org-teams
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this request to validate and, after approval in a later phase,
+        create one or more empty teams in a target GitHub organization.
+
+  - type: input
+    id: organization
+    attributes:
+      label: Target organization
+      description: GitHub organization where the empty teams should be created.
+      placeholder: octo-org
+    validations:
+      required: true
+
+  - type: input
+    id: intended_owner
+    attributes:
+      label: Intended owner
+      description: GitHub login of the single owner who must approve this full request batch.
+      placeholder: octocat
+    validations:
+      required: true
+
+  - type: textarea
+    id: requested_team_names
+    attributes:
+      label: Requested team names
+      description: One empty team name per line. Do not include member usernames.
+      placeholder: |
+        Platform Engineering
+        Release Managers
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: business_justification
+    attributes:
+      label: Business justification
+      description: Explain why these teams are needed. Team membership population is handled by a separate workflow.
+      placeholder: New empty teams are required to support delegated ownership and future membership workflows.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: dry_run
+    attributes:
+      label: Dry-run mode
+      description: Validation should run without mutation until later phases enable approved execution.
+      options:
+        - "true"
+        - "false"
+      default: 0
+    validations:
+      required: true

@@ -1,0 +1,11 @@
+{
+  "existing_team": [
+    {
+      "id": 1,
+      "name": "Platform Engineering",
+      "slug": "platform-engineering",
+      "privacy": "closed"
+    }
+  ],
+  "no_existing_teams": []
+}

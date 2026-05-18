@@ -1,0 +1,30 @@
+{
+  "existing_team": {
+    "team": {
+      "exists": true,
+      "team_sync_blocked": false
+    },
+    "memberships": {
+      "octocat": {
+        "exists": true
+      },
+      "hubot": {
+        "exists": true
+      },
+      "ghost-user": {
+        "exists": false
+      }
+    }
+  },
+  "missing_team": {
+    "team": {
+      "exists": false,
+      "team_sync_blocked": false
+    },
+    "memberships": {
+      "octocat": {
+        "exists": true
+      }
+    }
+  }
+}

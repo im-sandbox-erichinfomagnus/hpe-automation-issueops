@@ -1,0 +1,73 @@
+name: Add child teams
+description: Request attaching one or more existing child teams under one existing parent team in a GitHub organization.
+title: "[add-child-teams] <org>: <parent-team>"
+labels:
+  - issueops
+  - add-child-teams
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this request to validate and, after approval in a later phase,
+        attach one or more existing child teams under one existing parent team
+        in a target GitHub organization.
+
+  - type: input
+    id: organization
+    attributes:
+      label: Target organization
+      description: GitHub organization where the requested team hierarchy change should be applied.
+      placeholder: octo-org
+    validations:
+      required: true
+
+  - type: input
+    id: parent_team
+    attributes:
+      label: Parent team
+      description: Existing parent team that should receive the requested child teams.
+      placeholder: platform-engineering
+    validations:
+      required: true
+
+  - type: input
+    id: designated_approver
+    attributes:
+      label: Designated hierarchy approver
+      description: GitHub login of the single approver who must be a current maintainer of the requested parent team and every requested child team in this batch.
+      placeholder: octocat
+    validations:
+      required: true
+
+  - type: textarea
+    id: requested_child_teams
+    attributes:
+      label: Requested child teams
+      description: One existing child team per line. Duplicate child teams, re-parenting requests, cycle-creating requests, and team-creation or member-management instructions are rejected.
+      placeholder: |
+        application-platform
+        release-engineering
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: business_justification
+    attributes:
+      label: Business justification
+      description: Explain why this hierarchy change is needed. This workflow only validates and prepares approval-ready hierarchy requests in this phase.
+      placeholder: These existing teams should roll up under the parent team to align delegated ownership and hierarchy reporting.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: dry_run
+    attributes:
+      label: Dry-run mode
+      description: Validation runs without hierarchy mutation in this phase. Keep dry-run enabled for request review and reconciliation preview.
+      options:
+        - "true"
+        - "false"
+      default: 0
+    validations:
+      required: true

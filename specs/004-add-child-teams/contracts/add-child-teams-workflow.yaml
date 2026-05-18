@@ -1,0 +1,158 @@
+name: add-child-teams-workflow-contract
+version: 1
+purpose: >-
+  Contract for the IssueOps workflow that requests approval for, validates, and
+  reconciles attaching one or more existing child teams under one existing
+  parent team in a GitHub organization from the central administration
+  repository.
+
+issue_form:
+  path: .github/ISSUE_TEMPLATE/add-child-teams.yml
+  required_fields:
+    - id: organization
+      type: input
+      description: Target GitHub organization slug.
+    - id: parent_team
+      type: input
+      description: Existing parent team to receive the requested child teams.
+    - id: designated_approver
+      type: input
+      description: GitHub login of the single hierarchy approver who must approve the full request batch.
+    - id: requested_child_teams
+      type: textarea
+      description: One or more existing child teams to attach under the requested parent, one per line.
+    - id: business_justification
+      type: textarea
+      description: Reason for changing the requested team hierarchy.
+    - id: dry_run
+      type: dropdown
+      description: Whether to execute validation only or allow hierarchy mutation after approval.
+
+parser:
+  action: issue-ops/parser@v5
+  inputs:
+    body: ${{ github.event.issue.body }}
+    issue-form-template: add-child-teams.yml
+  outputs:
+    json: Parsed request payload as JSON string.
+    parsed_organization: Normalized organization field.
+    parsed_parent_team: Parsed parent-team field.
+    parsed_designated_approver: Parsed designated approver field.
+    parsed_requested_child_teams: Parsed child-team list before downstream normalization.
+    parsed_dry_run: Parsed dry-run selection.
+
+workflow_inputs:
+  validation:
+    - name: organization
+      required: true
+    - name: parent_team
+      required: true
+    - name: designated_approver
+      required: true
+    - name: requested_child_teams
+      required: true
+    - name: requester_login
+      required: true
+    - name: dry_run
+      required: true
+  approval_gate:
+    - name: approver_login
+      required: true
+    - name: designated_approver
+      required: true
+  reconciliation:
+    - name: execution_token_source
+      required: true
+      description: PAT-backed workflow token source.
+    - name: audit_artifact_path
+      required: true
+      description: Persisted validation and approval artifact used by the execution runner.
+    - name: approval_status
+      required: true
+      description: Approval gate outcome that must be `approved` before hierarchy mutation.
+  workflow_env:
+    - name: ISSUEOPS_GITHUB_TOKEN
+      required: true
+      description: PAT-backed organization secret used for validation, approval verification, and hierarchy mutation.
+    - name: GITHUB_TOKEN
+      required: true
+      description: Default GitHub Actions repository token used for standard workflow context operations.
+
+authorization:
+  requester_identity: github.event.issue.user.login
+  allowed_approvers:
+    - single designated hierarchy approver for the full request batch
+  execution_identity:
+    model: personal access token supplied to the workflow from ISSUEOPS_GITHUB_TOKEN
+    bootstrap: repository or organization Actions secret injection
+    required_permissions:
+      members: write
+      metadata: read
+      issues: write
+
+validation_rules:
+  - The target organization must exist and be visible to the executing identity.
+  - The requested parent team must exist in the target organization.
+  - At least one requested child team must be supplied after normalization.
+  - Duplicate or conflicting child-team identifiers must be rejected before reconciliation.
+  - The designated hierarchy approver must be currently authorized on the requested parent team and every requested child team.
+  - Requests that would create hierarchy cycles or require re-parenting must be rejected before mutation.
+  - Team creation, deletion, member-management, and repository-permission inputs must not be accepted by this workflow.
+
+reconciliation:
+  current_state_reads:
+    - target organization visibility lookup
+    - requested parent team lookup
+    - requested child team lookups
+    - current parent linkage for each requested child team
+    - current child-team listing for the requested parent team
+    - latest full organization team listing before approved execution
+  mutation_rule: Attach only missing child teams to the requested parent team.
+  no_op_rule: Report already-linked child teams without rewriting them.
+  partial_success_rule: Persist per-link success or failure and surface required follow-up.
+  idempotency_rule: Re-running an already-satisfied approved request must not create duplicate hierarchy mutations.
+
+rate_limit_handling:
+  inspect_headers:
+    - x-ratelimit-remaining
+    - x-ratelimit-reset
+    - retry-after
+  retry_policy:
+    strategy: bounded exponential backoff
+    retryable_conditions:
+      - transient secondary rate limit
+      - explicit retry-after guidance
+    non_retryable_conditions:
+      - invalid approval
+      - missing parent or child team
+      - re-parenting conflict
+      - cycle-creating hierarchy request
+
+observability:
+  outputs:
+    - GitHub step summary
+    - JSON audit artifact
+    - requester-facing workflow summary in the Actions run
+  required_fields:
+    - issue_number
+    - run_id
+    - requester_login
+    - approver_login
+    - approval_status
+    - assignment_status
+    - organization
+    - parent_team
+    - designated_approver
+    - requested_child_teams
+    - linked_child_teams
+    - noop_child_teams
+    - failed_child_teams
+    - rollback_status
+    - failed_subset
+    - remediation_instructions
+    - reconciliation.child_links_to_apply
+    - reconciliation.child_links_already_present
+  operator_notes:
+    - Central assignment is queue ownership only and does not authorize team hierarchy mutation.
+    - Requests that would create hierarchy cycles or require re-parenting are rejected rather than auto-healed in this feature version.
+    - Approved reruns against already-satisfied hierarchy state must report no-op outcomes instead of repeating mutations.

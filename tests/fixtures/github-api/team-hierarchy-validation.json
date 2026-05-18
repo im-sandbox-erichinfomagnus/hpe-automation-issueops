@@ -1,0 +1,144 @@
+{
+  "visible_org": {
+    "organization": {
+      "exists": true
+    },
+    "teams": [
+      {
+        "id": 1,
+        "name": "Platform Engineering",
+        "slug": "platform-engineering",
+        "privacy": "closed",
+        "parent": null
+      },
+      {
+        "id": 2,
+        "name": "Application Platform",
+        "slug": "application-platform",
+        "privacy": "closed",
+        "parent": null
+      },
+      {
+        "id": 3,
+        "name": "Release Engineering",
+        "slug": "release-engineering",
+        "privacy": "closed",
+        "parent": {
+          "id": 1,
+          "name": "Platform Engineering",
+          "slug": "platform-engineering"
+        }
+      },
+      {
+        "id": 4,
+        "name": "Security Engineering",
+        "slug": "security-engineering",
+        "privacy": "closed",
+        "parent": {
+          "id": 9,
+          "name": "Risk Management",
+          "slug": "risk-management"
+        }
+      },
+      {
+        "id": 5,
+        "name": "Application Infrastructure",
+        "slug": "application-infrastructure",
+        "privacy": "closed",
+        "parent": {
+          "id": 2,
+          "name": "Application Platform",
+          "slug": "application-platform"
+        }
+      }
+    ],
+    "memberships": {
+      "platform-engineering": {
+        "octocat": {
+          "membership": {
+            "role": "maintainer",
+            "state": "active"
+          }
+        }
+      },
+      "application-platform": {
+        "octocat": {
+          "membership": {
+            "role": "maintainer",
+            "state": "active"
+          }
+        }
+      },
+      "release-engineering": {
+        "octocat": {
+          "membership": {
+            "role": "maintainer",
+            "state": "active"
+          }
+        }
+      },
+      "security-engineering": {
+        "octocat": {
+          "membership": {
+            "role": "maintainer",
+            "state": "active"
+          }
+        }
+      },
+      "application-infrastructure": {
+        "octocat": {
+          "membership": {
+            "role": "maintainer",
+            "state": "active"
+          }
+        }
+      }
+    }
+  },
+  "missing_org": {
+    "organization": {
+      "exists": false
+    },
+    "teams": [],
+    "memberships": {}
+  },
+  "unauthorized_approver": {
+    "organization": {
+      "exists": true
+    },
+    "teams": [
+      {
+        "id": 1,
+        "name": "Platform Engineering",
+        "slug": "platform-engineering",
+        "privacy": "closed",
+        "parent": null
+      },
+      {
+        "id": 2,
+        "name": "Application Platform",
+        "slug": "application-platform",
+        "privacy": "closed",
+        "parent": null
+      }
+    ],
+    "memberships": {
+      "platform-engineering": {
+        "octocat": {
+          "membership": {
+            "role": "member",
+            "state": "active"
+          }
+        }
+      },
+      "application-platform": {
+        "octocat": {
+          "membership": {
+            "role": "member",
+            "state": "active"
+          }
+        }
+      }
+    }
+  }
+}

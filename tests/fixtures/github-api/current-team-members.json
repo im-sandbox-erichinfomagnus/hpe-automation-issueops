@@ -1,0 +1,31 @@
+{
+  "all_new": {
+    "current_members": [
+      { "login": "existing-user", "state": "active" }
+    ],
+    "requested_people": [
+      { "username": "octocat", "resolution_status": "resolved" },
+      { "username": "hubot", "resolution_status": "resolved" }
+    ]
+  },
+  "partially_satisfied": {
+    "current_members": [
+      { "login": "octocat", "state": "active" },
+      { "login": "existing-user", "state": "active" }
+    ],
+    "requested_people": [
+      { "username": "octocat", "resolution_status": "resolved" },
+      { "username": "hubot", "resolution_status": "resolved" }
+    ]
+  },
+  "fully_satisfied": {
+    "current_members": [
+      { "login": "octocat", "state": "active" },
+      { "login": "hubot", "state": "pending" }
+    ],
+    "requested_people": [
+      { "username": "octocat", "resolution_status": "resolved" },
+      { "username": "hubot", "resolution_status": "resolved" }
+    ]
+  }
+}
