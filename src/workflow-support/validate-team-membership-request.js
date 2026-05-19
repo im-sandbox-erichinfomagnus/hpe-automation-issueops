@@ -1,6 +1,24 @@
 'use strict';
 
 const { parseTeamMembershipRequest } = require('./parse-team-membership-request');
+const { unwrapCodeFence } = require('./normalize-requested-people');
+
+function hasPopulatedInput(value) {
+  return unwrapCodeFence(value).trim() !== '';
+}
+
+function describeCsvRowIssue(finding) {
+  switch (finding.failure_reason) {
+    case 'missing_username':
+      return `CSV row ${finding.row_number} is missing the required username value.`;
+    case 'invalid_username':
+      return `CSV row ${finding.row_number} contains an invalid GitHub username${finding.username ? `: ${finding.username}` : ''}.`;
+    case 'inconsistent_shape':
+      return `CSV row ${finding.row_number} does not match the header column count.`;
+    default:
+      return `CSV row ${finding.row_number} is invalid.`;
+  }
+}
 
 async function validateTeamMembershipRequest(input = {}, options = {}) {
   const request = input.request_id ? input : parseTeamMembershipRequest(input);
@@ -8,6 +26,11 @@ async function validateTeamMembershipRequest(input = {}, options = {}) {
   const warnings = [];
   const resolver = options.resolveUser;
   const teamLookup = options.getTeam;
+  const requestedPeopleDetailMap = new Map(
+    (request.requested_people_detail || [])
+      .filter((detail) => detail && detail.username)
+      .map((detail) => [detail.username, detail])
+  );
 
   if (!request.organization) {
     errors.push('Target organization is required.');
@@ -17,11 +40,42 @@ async function validateTeamMembershipRequest(input = {}, options = {}) {
     errors.push('Target team slug is required.');
   }
 
+  const manualPopulated = hasPopulatedInput(request.requested_people_input);
+  const bulkCsvPopulated = hasPopulatedInput(request.bulk_csv_input);
+
+  if (manualPopulated === bulkCsvPopulated) {
+    errors.push('Exactly one intake source must be populated: requested_people or bulk_csv_requested_people.');
+  }
+
+  if (request.intake_mode === 'bulk_csv') {
+    const bulkCsvSubmission = request.bulk_csv_submission || {};
+    for (const schemaError of bulkCsvSubmission.schema_errors || []) {
+      errors.push(schemaError);
+    }
+
+    for (const finding of request.csv_row_findings || []) {
+      if (finding.validation_status === 'blank') {
+        continue;
+      }
+
+      if (finding.validation_status === 'duplicate') {
+        warnings.push(
+          `CSV row ${finding.row_number} duplicates username ${finding.username || 'unknown'} and was deduplicated.`
+        );
+        continue;
+      }
+
+      if (finding.validation_status === 'invalid' || finding.validation_status === 'blank') {
+        errors.push(describeCsvRowIssue(finding));
+      }
+    }
+  }
+
   if (request.requested_people.length === 0) {
     errors.push('At least one valid requested person is required.');
   }
 
-  if (request.invalid_people.length > 0) {
+  if (request.intake_mode !== 'bulk_csv' && request.invalid_people.length > 0) {
     errors.push(`Invalid GitHub usernames: ${request.invalid_people.join(', ')}`);
   }
 
@@ -67,6 +121,9 @@ async function validateTeamMembershipRequest(input = {}, options = {}) {
 
     requestedPeople.push({
       username,
+      source_row_number: requestedPeopleDetailMap.get(username)
+        ? requestedPeopleDetailMap.get(username).source_row_number || null
+        : null,
       resolution_status: resolutionStatus,
       current_membership_state: 'unknown',
       desired_action: resolutionStatus === 'resolved' ? 'add_member' : 'reject',
@@ -82,6 +139,9 @@ async function validateTeamMembershipRequest(input = {}, options = {}) {
     warnings,
     team_exists: teamExists,
     team_sync_blocked: teamSyncBlocked,
+    bulk_csv_submission: request.bulk_csv_submission,
+    csv_row_findings: request.csv_row_findings || [],
+    csv_row_numbering_convention: request.csv_row_numbering_convention,
     requested_people: requestedPeople,
     request: {
       ...request,

@@ -1,0 +1,160 @@
+name: add-team-members-bulk-csv-workflow-contract
+version: 1
+purpose: >-
+  Contract for the IssueOps workflow enhancement that preserves the existing
+  add-team-members manual request path and adds an optional bulk CSV textarea
+  for high-volume membership requests.
+
+issue_form:
+  path: .github/ISSUE_TEMPLATE/add-team-members.yml
+  required_fields:
+    - id: organization
+      type: input
+      description: Target GitHub organization slug.
+    - id: team_slug
+      type: input
+      description: Target team slug or canonical team identifier.
+    - id: business_justification
+      type: textarea
+      description: Reason for the requested team membership changes.
+    - id: dry_run
+      type: dropdown
+      description: Whether to execute validation only or allow mutation after approval.
+  conditional_fields:
+    - id: requested_people
+      type: textarea
+      description: Existing manual input path for one or more GitHub usernames.
+      rules:
+        - May be populated only when bulk_csv_requested_people is empty.
+        - Accepts one username per line or comma-separated values for backward compatibility.
+    - id: bulk_csv_requested_people
+      type: textarea
+      description: Optional bulk CSV textarea containing a UTF-8 CSV payload with a header row.
+      rules:
+        - May be populated only when requested_people is empty.
+        - Must contain a header row with the required column `username`.
+        - Must not include row-level organization or team override columns.
+
+parser:
+  action: issue-ops/parser@v5
+  inputs:
+    body: ${{ github.event.issue.body }}
+    issue-form-template: add-team-members.yml
+  outputs:
+    json: Parsed request payload as JSON string.
+    parsed_organization: Normalized organization field.
+    parsed_team_slug: Normalized target team field.
+    parsed_requested_people: Parsed manual people field before downstream normalization.
+    parsed_bulk_csv_requested_people: Parsed bulk CSV textarea before downstream normalization.
+    parsed_dry_run: Parsed dry-run selection.
+
+workflow_inputs:
+  validation:
+    - name: organization
+      required: true
+    - name: team_slug
+      required: true
+    - name: intake_mode
+      required: true
+      allowed:
+        - manual
+        - bulk_csv
+    - name: requested_people
+      required: false
+    - name: bulk_csv_requested_people
+      required: false
+    - name: requester_login
+      required: true
+    - name: dry_run
+      required: true
+  approval_gate:
+    - name: approver_login
+      required: true
+    - name: approver_role
+      required: true
+      allowed:
+        - org_owner
+  reconciliation:
+    - name: execution_token_source
+      required: true
+      description: PAT-backed workflow token source.
+    - name: audit_artifact_path
+      required: true
+      description: Persisted validation and approval artifact used by the execution runner.
+
+authorization:
+  requester_identity: github.event.issue.user.login
+  allowed_approvers:
+    - organization owner
+  execution_identity:
+    model: personal access token supplied to the workflow
+    bootstrap: repository or organization secret injection
+    required_permissions:
+      members: write
+      metadata: read
+
+validation_rules:
+  - Exactly one intake source must be populated: `requested_people` or `bulk_csv_requested_people`.
+  - Manual-mode behavior must remain equivalent to the baseline add-team-members workflow.
+  - Bulk CSV submissions must provide a header row containing `username`.
+  - CSV row findings must use 1-based data-row numbers that exclude the header row.
+  - Quoted usernames are normalized the same way as unquoted usernames, including case folding and leading `@` removal.
+  - Fully blank CSV rows are ignored for approval-readiness purposes but remain visible in row findings.
+  - Unsupported CSV columns are rejected because the enhancement remains single-team-per-request.
+  - Duplicate usernames are deduplicated before reconciliation and surfaced in validation findings.
+  - Invalid usernames, malformed CSV rows, inconsistent row shapes, and missing required values block approval readiness.
+  - The target team must exist and be visible to the executing identity.
+  - Requested people that cannot be resolved to valid GitHub accounts must not be mutated.
+  - Approval must be present as an issue comment containing exactly `approved` and must be granted by an organization owner.
+
+reconciliation:
+  current_state_reads:
+    - team existence lookup
+    - current team memberships lookup
+    - per-user membership state lookup when needed
+  mutation_rule: Add only missing users to the target team after intake normalization produces one deduplicated requested_people list.
+  no_op_rule: Report already active or pending memberships without rewriting them.
+  partial_success_rule: Persist per-user success or failure and surface required follow-up.
+
+rate_limit_handling:
+  inspect_headers:
+    - x-ratelimit-remaining
+    - x-ratelimit-reset
+    - retry-after
+  retry_policy:
+    strategy: bounded exponential backoff
+    retryable_conditions:
+      - transient secondary rate limit
+      - explicit retry-after guidance
+    non_retryable_conditions:
+      - team synchronization forbidden
+      - invalid approval
+      - missing target team
+      - malformed or ambiguous CSV intake
+
+observability:
+  outputs:
+    - GitHub step summary
+    - JSON audit artifact
+    - requester-facing workflow summary in the Actions run
+  required_fields:
+    - issue_number
+    - run_id
+    - requester_login
+    - approver_login
+    - organization
+    - team_slug
+    - intake_mode
+    - requested_people
+    - duplicate_people
+    - duplicate_row_count
+    - invalid_row_count
+    - csv_row_findings
+    - csv_row_numbering_convention
+    - added_people
+    - noop_people
+    - failed_people
+    - rollback_status
+    - reconciliation.intake_mode
+    - reconciliation.people_to_add
+    - reconciliation.people_already_present

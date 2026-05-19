@@ -33,13 +33,26 @@ body:
     id: requested_people
     attributes:
       label: Requested people
-      description: One GitHub username per line.
+      description: Existing manual input path. Enter one GitHub username per line, or use comma-separated values for backward compatibility. Leave this blank when using the bulk CSV field below. Validation requires exactly one populated intake mode.
       placeholder: |
         octocat
         hubot
       render: text
     validations:
-      required: true
+      required: false
+
+  - type: textarea
+    id: bulk_csv_requested_people
+    attributes:
+      label: Bulk CSV requested people
+      description: Optional bulk CSV input for high-volume requests. Paste UTF-8 CSV with a header row containing the required `username` column. Leave this blank when using the manual requested-people field above. Validation requires exactly one populated intake mode.
+      placeholder: |
+        username
+        octocat
+        hubot
+      render: text
+    validations:
+      required: false
 
   - type: textarea
     id: business_justification

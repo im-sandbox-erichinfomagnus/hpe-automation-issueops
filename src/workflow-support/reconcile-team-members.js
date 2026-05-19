@@ -55,6 +55,7 @@ function reconcileTeamMembers(input = {}) {
   }
 
   return {
+    intake_mode: request.intake_mode || null,
     team_exists: input.team_exists !== false,
     team_sync_blocked: Boolean(input.team_sync_blocked),
     current_members: currentMembers,

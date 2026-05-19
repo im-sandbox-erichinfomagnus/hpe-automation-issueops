@@ -43,6 +43,18 @@ function isPlausibleGitHubLogin(login) {
   return GITHUB_LOGIN_PATTERN.test(login);
 }
 
+function buildRequestedPersonDetail(rawValue, extra = {}) {
+  const username = normalizeLogin(rawValue);
+  const isValid = isPlausibleGitHubLogin(username);
+
+  return {
+    original: rawValue,
+    username,
+    is_valid: isValid,
+    ...extra,
+  };
+}
+
 function normalizeRequestedPeople(input) {
   const candidates = toCandidateList(input);
   const seen = new Set();
@@ -52,14 +64,11 @@ function normalizeRequestedPeople(input) {
   const requestedPeopleDetail = [];
 
   for (const rawValue of candidates) {
-    const username = normalizeLogin(rawValue);
-    const isValid = isPlausibleGitHubLogin(username);
+    const detail = buildRequestedPersonDetail(rawValue);
+    const username = detail.username;
+    const isValid = detail.is_valid;
 
-    requestedPeopleDetail.push({
-      original: rawValue,
-      username,
-      is_valid: isValid,
-    });
+    requestedPeopleDetail.push(detail);
 
     if (!isValid) {
       invalidPeople.push(username || rawValue);
@@ -91,6 +100,7 @@ function normalizeRequestedPeople(input) {
 }
 
 module.exports = {
+  buildRequestedPersonDetail,
   GITHUB_LOGIN_PATTERN,
   isPlausibleGitHubLogin,
   normalizeLogin,
