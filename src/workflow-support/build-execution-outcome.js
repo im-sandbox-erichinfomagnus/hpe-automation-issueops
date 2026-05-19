@@ -72,10 +72,17 @@ function buildExecutionOutcome(input = {}) {
   });
   const remediationInstructions = buildRemediationInstructions(summary);
   const rollbackStatus = deriveRollbackStatus(summary);
+  const processedLabel = summary.operation_label === 'membership'
+    ? 'member(s)'
+    : `${summary.operation_label}(ies)`;
+  const groupedLabel = summary.operation_label === 'membership'
+    ? 'membership(s)'
+    : `${summary.operation_label}(ies)`;
 
   return {
     run_id: runContext.run_id || process.env.GITHUB_RUN_ID || null,
     run_attempt: runContext.run_attempt || process.env.GITHUB_RUN_ATTEMPT || null,
+    intake_mode: input.intake_mode || null,
     mutation_count: summary.mutated.length,
     created_count: summary.mutated.length,
     linked_count: summary.mutated.length,
@@ -84,16 +91,18 @@ function buildExecutionOutcome(input = {}) {
     pending_count: summary.pending.length,
     failure_count: summary.failed.length,
     granted_count: summary.mutated.length,
+    duplicate_row_count: input.duplicate_row_count || 0,
+    invalid_row_count: input.invalid_row_count || 0,
     rollback_status: rollbackStatus,
     failed_subset: summary.failed,
     rejected_subset: summary.rejected,
     remediation_instructions: remediationInstructions,
     summary: [
-      `Processed ${summary.mutated.length} ${summary.operation_label}(ies),`,
-      `${summary.noop.length} no-op ${summary.operation_label}(ies),`,
-      `${summary.rejected.length} rejected ${summary.operation_label}(ies),`,
-      `${summary.pending.length} pending ${summary.operation_label}(ies),`,
-      `and ${summary.failed.length} failed ${summary.operation_label}(ies).`,
+      `Processed ${summary.mutated.length} ${processedLabel},`,
+      `${summary.noop.length} no-op ${groupedLabel},`,
+      `${summary.rejected.length} rejected ${groupedLabel},`,
+      `${summary.pending.length} pending ${groupedLabel},`,
+      `and ${summary.failed.length} failed ${groupedLabel}.`,
       remediationInstructions[0] || '',
     ]
       .filter(Boolean)

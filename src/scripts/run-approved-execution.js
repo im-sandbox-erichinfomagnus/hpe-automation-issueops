@@ -38,8 +38,18 @@ function buildValidatedPeople(auditArtifact = {}) {
     return validationPeople;
   }
 
-  return (auditArtifact.request && auditArtifact.request.requested_people || []).map((username) => ({
+  const request = auditArtifact.request || {};
+  const requestedPeopleDetailMap = new Map(
+    (request.requested_people_detail || [])
+      .filter((detail) => detail && detail.username)
+      .map((detail) => [detail.username, detail])
+  );
+
+  return (request.requested_people || []).map((username) => ({
     username,
+    source_row_number: requestedPeopleDetailMap.get(username)
+      ? requestedPeopleDetailMap.get(username).source_row_number || null
+      : null,
     resolution_status: 'resolved',
     current_membership_state: 'unknown',
     desired_action: 'add_member',
@@ -198,6 +208,13 @@ async function runApprovedExecution(options = {}) {
         run_id: env.GITHUB_RUN_ID,
         run_attempt: env.GITHUB_RUN_ATTEMPT,
       },
+      intake_mode: auditArtifact.request && auditArtifact.request.intake_mode,
+      duplicate_row_count: auditArtifact.request && auditArtifact.request.bulk_csv_submission
+        ? auditArtifact.request.bulk_csv_submission.duplicate_row_count
+        : 0,
+      invalid_row_count: auditArtifact.request && auditArtifact.request.bulk_csv_submission
+        ? auditArtifact.request.bulk_csv_submission.invalid_row_count
+        : 0,
       artifact_path: artifactPath,
     });
     auditArtifact.execution.failure_count = 1;
@@ -513,6 +530,13 @@ async function runApprovedExecution(options = {}) {
       run_id: env.GITHUB_RUN_ID,
       run_attempt: env.GITHUB_RUN_ATTEMPT,
     },
+    intake_mode: auditArtifact.request && auditArtifact.request.intake_mode,
+    duplicate_row_count: auditArtifact.request && auditArtifact.request.bulk_csv_submission
+      ? auditArtifact.request.bulk_csv_submission.duplicate_row_count
+      : 0,
+    invalid_row_count: auditArtifact.request && auditArtifact.request.bulk_csv_submission
+      ? auditArtifact.request.bulk_csv_submission.invalid_row_count
+      : 0,
     artifact_path: artifactPath,
     rate_limit_snapshot: latestRateLimitSnapshot,
   });

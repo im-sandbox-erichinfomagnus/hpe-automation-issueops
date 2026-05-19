@@ -3,7 +3,13 @@
 const {
   normalizeLogin,
   normalizeRequestedPeople,
+  unwrapCodeFence,
 } = require('./normalize-requested-people');
+const {
+  CSV_ROW_NUMBERING_CONVENTION,
+  createEmptyBulkCsvNormalization,
+  normalizeBulkCsvRequestedPeople,
+} = require('./normalize-bulk-csv-requested-people');
 
 function readField(source, keys) {
   for (const key of keys) {
@@ -13,6 +19,29 @@ function readField(source, keys) {
   }
 
   return undefined;
+}
+
+function readFieldIncludingEmpty(source, keys) {
+  for (const key of keys) {
+    if (source && Object.prototype.hasOwnProperty.call(source, key) && source[key] != null) {
+      return source[key];
+    }
+  }
+
+  return undefined;
+}
+
+function hasPopulatedInput(value) {
+  return unwrapCodeFence(value).trim() !== '';
+}
+
+function createEmptyManualNormalization() {
+  return {
+    normalizedPeople: [],
+    duplicatePeople: [],
+    invalidPeople: [],
+    requestedPeopleDetail: [],
+  };
 }
 
 function normalizeBoolean(value, defaultValue) {
@@ -62,13 +91,35 @@ function parseTeamMembershipRequest(input = {}) {
     readField(parsed, ['team_slug', 'parsed_team_slug', 'team']) || input.teamSlug
   );
   const requestedPeopleInput =
-    readField(parsed, [
+    readFieldIncludingEmpty(parsed, [
       'requested_people',
       'parsed_requested_people',
       'people',
       'usernames',
-    ]) || input.requestedPeople;
-  const normalization = normalizeRequestedPeople(requestedPeopleInput);
+    ]) ?? input.requestedPeople ?? '';
+  const bulkCsvInput =
+    readFieldIncludingEmpty(parsed, [
+      'bulk_csv_requested_people',
+      'parsed_bulk_csv_requested_people',
+    ]) ?? input.bulkCsvRequestedPeople ?? input.bulkCsvInput ?? '';
+  const manualPopulated = hasPopulatedInput(requestedPeopleInput);
+  const bulkCsvPopulated = hasPopulatedInput(bulkCsvInput);
+  const intakeMode = manualPopulated === bulkCsvPopulated
+    ? null
+    : manualPopulated
+      ? 'manual'
+      : 'bulk_csv';
+  const manualNormalization = manualPopulated
+    ? normalizeRequestedPeople(requestedPeopleInput)
+    : createEmptyManualNormalization();
+  const bulkCsvNormalization = bulkCsvPopulated
+    ? normalizeBulkCsvRequestedPeople(bulkCsvInput)
+    : createEmptyBulkCsvNormalization(bulkCsvInput);
+  const selectedNormalization = intakeMode === 'bulk_csv'
+    ? bulkCsvNormalization
+    : intakeMode === 'manual'
+      ? manualNormalization
+      : createEmptyManualNormalization();
   const dryRun = normalizeBoolean(
     readField(parsed, ['dry_run', 'parsed_dry_run']) ?? input.dryRun,
     true
@@ -93,17 +144,36 @@ function parseTeamMembershipRequest(input = {}) {
     requester_login: requesterLogin,
     organization,
     team_slug: teamSlug,
-    requested_people: normalization.normalizedPeople,
-    requested_people_detail: normalization.requestedPeopleDetail,
-    duplicate_people: normalization.duplicatePeople,
-    invalid_people: normalization.invalidPeople,
+    intake_mode: intakeMode,
+    requested_people_input: requestedPeopleInput,
+    bulk_csv_input: bulkCsvInput,
+    bulk_csv_submission: {
+      encoding: bulkCsvNormalization.encoding,
+      header_columns: bulkCsvNormalization.header_columns,
+      required_columns: bulkCsvNormalization.required_columns,
+      unsupported_columns: bulkCsvNormalization.unsupported_columns,
+      row_count: bulkCsvNormalization.row_count,
+      valid_row_count: bulkCsvNormalization.valid_row_count,
+      invalid_row_count: bulkCsvNormalization.invalid_row_count,
+      duplicate_row_count: bulkCsvNormalization.duplicate_row_count,
+      schema_status: bulkCsvNormalization.schema_status,
+      schema_errors: bulkCsvNormalization.schema_errors,
+    },
+    requested_people: selectedNormalization.normalizedPeople,
+    requested_people_detail: selectedNormalization.requestedPeopleDetail,
+    duplicate_people: selectedNormalization.duplicatePeople,
+    invalid_people: selectedNormalization.invalidPeople,
+    csv_row_findings: bulkCsvNormalization.csv_row_findings,
+    csv_row_numbering_convention: CSV_ROW_NUMBERING_CONVENTION,
     request_status: 'submitted',
     business_justification: justification || '',
     dry_run: dryRun,
     submitted_at: submittedAt,
     validation_findings: {
-      duplicate_people: normalization.duplicatePeople,
-      invalid_people: normalization.invalidPeople,
+      duplicate_people: selectedNormalization.duplicatePeople,
+      invalid_people: selectedNormalization.invalidPeople,
+      csv_row_findings: bulkCsvNormalization.csv_row_findings,
+      csv_row_numbering_convention: CSV_ROW_NUMBERING_CONVENTION,
     },
   };
 }

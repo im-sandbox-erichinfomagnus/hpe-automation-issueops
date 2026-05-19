@@ -52,6 +52,7 @@ function readParsedRequestFromEnv(env = process.env) {
     requested_team_names: env.PARSED_REQUESTED_TEAM_NAMES || '',
     team_slug: env.PARSED_TEAM_SLUG || '',
     requested_people: env.PARSED_REQUESTED_PEOPLE || '',
+    bulk_csv_requested_people: env.PARSED_BULK_CSV_REQUESTED_PEOPLE || '',
     business_justification: env.PARSED_BUSINESS_JUSTIFICATION || '',
     dry_run: env.PARSED_DRY_RUN || 'true',
   };
@@ -209,6 +210,9 @@ async function runRequestValidation(options = {}) {
           warnings: [],
           team_exists: false,
           team_sync_blocked: false,
+          bulk_csv_submission: request.bulk_csv_submission,
+          csv_row_findings: request.csv_row_findings || [],
+          csv_row_numbering_convention: request.csv_row_numbering_convention,
           requested_people: request.requested_people.map((username) => ({
             username,
             resolution_status: 'unresolved',
@@ -295,6 +299,9 @@ async function runRequestValidation(options = {}) {
       warnings: [],
       team_exists: false,
       team_sync_blocked: false,
+      bulk_csv_submission: request.bulk_csv_submission,
+      csv_row_findings: request.csv_row_findings || [],
+      csv_row_numbering_convention: request.csv_row_numbering_convention,
       requested_people: [],
       request: {
         ...request,
@@ -306,16 +313,23 @@ async function runRequestValidation(options = {}) {
   const executionOutcome = buildExecutionOutcome({
     executionResults: [],
     operationLabel: isTeamRepoAccess ? 'repository' : isTeamHierarchy ? 'child_link' : isTeamCreation ? 'team' : 'membership',
+    intake_mode: validation.request && validation.request.intake_mode,
+    duplicate_row_count: validation.request && validation.request.bulk_csv_submission
+      ? validation.request.bulk_csv_submission.duplicate_row_count
+      : 0,
+    invalid_row_count: validation.request && validation.request.bulk_csv_submission
+      ? validation.request.bulk_csv_submission.invalid_row_count
+      : 0,
   });
 
   executionOutcome.summary = validation.is_valid
     ? isTeamRepoAccess
-      ? 'Request is validated and stored as approval-ready. No repository-access mutation was attempted.'
+      ? 'Request is validated and ready for approval. No repository-access mutation was attempted.'
       : isTeamHierarchy
-      ? 'Request is validated and stored as approval-ready. No child-team mutation was attempted.'
+      ? 'Request is validated and ready for approval. No child-team mutation was attempted.'
       : isTeamCreation
-      ? 'Request is validated and stored as approval-ready. No team creation was attempted.'
-      : 'Request is validated and stored as approval-ready. No membership mutation was attempted.'
+      ? 'Request is validated and ready for approval. No team creation was attempted.'
+      : 'Request is validated and ready for approval. No membership mutation was attempted.'
     : isTeamRepoAccess
       ? 'Request validation failed. No repository-access mutation was attempted.'
       : isTeamHierarchy

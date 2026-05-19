@@ -100,6 +100,7 @@ jobs:
           PARSED_ORGANIZATION: ${{ steps.parse_request.outputs.parsed_organization }}
           PARSED_TEAM_SLUG: ${{ steps.parse_request.outputs.parsed_team_slug }}
           PARSED_REQUESTED_PEOPLE: ${{ steps.parse_request.outputs.parsed_requested_people }}
+          PARSED_BULK_CSV_REQUESTED_PEOPLE: ${{ steps.parse_request.outputs.parsed_bulk_csv_requested_people }}
           PARSED_BUSINESS_JUSTIFICATION: ${{ steps.parse_request.outputs.parsed_business_justification }}
           PARSED_DRY_RUN: ${{ steps.parse_request.outputs.parsed_dry_run }}
           AUDIT_ARTIFACT_PATH: artifacts/add-team-members-validation-${{ env.ISSUE_NUMBER || 'manual' }}.json

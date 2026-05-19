@@ -10,6 +10,7 @@ function formatAuditSummary(auditArtifact = {}) {
   const approval = auditArtifact.approval || {};
   const reconciliation = auditArtifact.reconciliation || {};
   const execution = auditArtifact.execution || {};
+  const isBulkCsv = request.intake_mode === 'bulk_csv';
   const isTeamRepoAccess = Array.isArray(request.requested_repository_grants) && (
     request.requested_repository_grants.length > 0 ||
     Boolean(request.requested_permission_api_value) ||
@@ -155,11 +156,27 @@ function formatAuditSummary(auditArtifact = {}) {
     `- Repository: ${request.repository || 'n/a'}`,
     `- Target: ${request.organization || 'n/a'}/${request.team_slug || 'n/a'}`,
     `- Requester: ${request.requester_login || 'n/a'}`,
+    `- Intake mode: ${request.intake_mode || 'n/a'}`,
     `- Request status: ${request.request_status || 'submitted'}`,
     `- Central assignment: ${assignment.assignment_status || 'not_attempted'}${assignment.assigned_login ? ` (${assignment.assigned_login})` : ''}`,
     `- Approval: ${approval.approval_status || 'pending'} (${approval.approver_role || 'n/a'})`,
     approval.approver_login ? `- Approver: ${approval.approver_login}` : null,
     `- Validation: ${validation.is_valid ? 'passed' : 'failed'}`,
+    isBulkCsv
+      ? `- CSV row findings: ${(validation.csv_row_findings || request.csv_row_findings || []).length}`
+      : null,
+    isBulkCsv
+      ? `- CSV valid rows: ${request.bulk_csv_submission && request.bulk_csv_submission.valid_row_count || 0}`
+      : null,
+    isBulkCsv
+      ? `- CSV duplicate rows: ${execution.duplicate_row_count || request.bulk_csv_submission && request.bulk_csv_submission.duplicate_row_count || 0}`
+      : null,
+    isBulkCsv
+      ? `- CSV invalid rows: ${execution.invalid_row_count || request.bulk_csv_submission && request.bulk_csv_submission.invalid_row_count || 0}`
+      : null,
+    isBulkCsv && request.csv_row_numbering_convention
+      ? `- CSV row numbering: ${request.csv_row_numbering_convention}`
+      : null,
     `- Added: ${execution.mutation_count || 0}`,
     `- No-op: ${execution.noop_count || 0}`,
     `- Pending: ${execution.pending_count || 0}`,

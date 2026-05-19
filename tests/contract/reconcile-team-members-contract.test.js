@@ -50,3 +50,25 @@ test('reconciliation emits no-op plan when all requested members are already pre
   assert.deepEqual(plan.people_already_present.map((entry) => entry.username), ['octocat', 'hubot']);
   assert.equal(plan.people_already_present[1].current_membership_state, 'pending');
 });
+
+test('reconciliation preserves CSV source row provenance for add and no-op outcomes', () => {
+  const plan = reconcileTeamMembers({
+    request: { dry_run: false, intake_mode: 'bulk_csv' },
+    validatedPeople: [
+      { username: 'octocat', source_row_number: 1, resolution_status: 'resolved' },
+      { username: 'hubot', source_row_number: 2, resolution_status: 'resolved' },
+    ],
+    currentMembers: [
+      { login: 'octocat', state: 'active' },
+    ],
+  });
+
+  assert.deepEqual(
+    plan.people_already_present.map((entry) => ({ username: entry.username, source_row_number: entry.source_row_number })),
+    [{ username: 'octocat', source_row_number: 1 }]
+  );
+  assert.deepEqual(
+    plan.people_to_add.map((entry) => ({ username: entry.username, source_row_number: entry.source_row_number })),
+    [{ username: 'hubot', source_row_number: 2 }]
+  );
+});

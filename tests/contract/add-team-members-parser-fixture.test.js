@@ -23,6 +23,8 @@ function parseFixtureMarkdown(markdown) {
       fields.team_slug = value;
     } else if (heading === 'requested people') {
       fields.requested_people = value;
+    } else if (heading === 'bulk csv requested people') {
+      fields.bulk_csv_requested_people = value;
     } else if (heading === 'business justification') {
       fields.business_justification = value;
     } else if (heading === 'dry-run mode') {
@@ -49,7 +51,15 @@ test('parses a valid submission fixture into a normalized request', () => {
 
   assert.equal(request.organization, 'octo-org');
   assert.equal(request.team_slug, 'platform-engineering');
+  assert.equal(request.intake_mode, 'manual');
+  assert.equal(request.requested_people_input, parsedRequest.requested_people);
+  assert.equal(request.bulk_csv_input, '');
   assert.deepEqual(request.requested_people, ['octocat', 'hubot']);
+  assert.deepEqual(request.csv_row_findings, []);
+  assert.equal(
+    request.csv_row_numbering_convention,
+    '1-based data-row numbers that exclude the header row'
+  );
   assert.equal(request.dry_run, true);
   assert.equal(request.business_justification, 'Access is required to support the release pipeline.');
 });
@@ -102,6 +112,26 @@ test('tracks invalid usernames without dropping the valid subset', () => {
   assert.deepEqual(request.invalid_people, ['not a login']);
 });
 
+test('manual requests remain valid when the CSV field is omitted entirely', () => {
+  const request = parseTeamMembershipRequest({
+    parsedRequest: {
+      organization: 'octo-org',
+      team_slug: 'platform-engineering',
+      requested_people: 'octocat\nhubot',
+      business_justification: 'Need support access',
+      dry_run: 'true',
+    },
+    issue: { number: 106, user: { login: 'requester' } },
+    repository: 'octo-org/issueops-speckit',
+  });
+
+  assert.equal(request.intake_mode, 'manual');
+  assert.equal(request.requested_people_input, 'octocat\nhubot');
+  assert.equal(request.bulk_csv_input, '');
+  assert.equal(request.bulk_csv_submission.schema_status, 'not_provided');
+  assert.deepEqual(request.requested_people, ['octocat', 'hubot']);
+});
+
 test('rejects an empty requested-people fixture submission', async () => {
   const parsedRequest = loadBaseFixture();
   parsedRequest.requested_people = '';
@@ -113,5 +143,7 @@ test('rejects an empty requested-people fixture submission', async () => {
   });
 
   assert.equal(validation.is_valid, false);
+  assert.equal(validation.request.intake_mode, null);
+  assert.deepEqual(validation.request.csv_row_findings, []);
   assert.match(validation.errors.join('\n'), /At least one valid requested person is required/);
 });

@@ -8,11 +8,15 @@ platform-engineering
 
 ### Requested people
 
-octocat
-hubot
+
 
 ### Bulk CSV requested people
 
+```csv
+username
+octocat
+hubot
+```
 
 ### Business justification
 
