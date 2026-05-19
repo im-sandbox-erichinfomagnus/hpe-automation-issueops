@@ -91,8 +91,31 @@ jobs:
           body: ${{ steps.issue_context.outputs.issue_body }}
           issue-form-template: add-team-repo-access.yml
 
+      - name: Check request applicability
+        id: request_scope
+        env:
+          PARSED_TARGET_TEAM: ${{ steps.parse_request.outputs.parsed_target_team }}
+          PARSED_DESIGNATED_APPROVER: ${{ steps.parse_request.outputs.parsed_designated_approver }}
+          PARSED_REQUESTED_REPOSITORIES: ${{ steps.parse_request.outputs.parsed_requested_repositories }}
+          PARSED_PERMISSION_LEVEL: ${{ steps.parse_request.outputs.parsed_permission_level }}
+        run: |
+          set -euo pipefail
+
+          matches_request=false
+          if [ -n "${PARSED_TARGET_TEAM:-}" ] && [ -n "${PARSED_DESIGNATED_APPROVER:-}" ] && [ -n "${PARSED_REQUESTED_REPOSITORIES:-}" ] && [ -n "${PARSED_PERMISSION_LEVEL:-}" ]; then
+            matches_request=true
+          fi
+
+          echo "matches-request=$matches_request" >> "$GITHUB_OUTPUT"
+
+      - name: Skip unrelated issue form
+        if: ${{ steps.request_scope.outputs.matches-request != 'true' }}
+        run: |
+          echo 'This issue does not match the add-team-repo-access form. Exiting without validation or assignment.' >> "$GITHUB_STEP_SUMMARY"
+
       - name: Validate request and record approval-ready state
         id: validate_request
+        if: ${{ steps.request_scope.outputs.matches-request == 'true' }}
         env:
           ISSUEOPS_GITHUB_TOKEN: ${{ secrets.ISSUEOPS_GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ github.token }}
@@ -111,7 +134,7 @@ jobs:
 
       - name: Evaluate approval gate and assign central owner
         id: approval_gate
-        if: ${{ always() && steps.validate_request.outcome != 'skipped' }}
+        if: ${{ always() && steps.request_scope.outputs.matches-request == 'true' && steps.validate_request.outcome != 'skipped' }}
         env:
           ISSUEOPS_GITHUB_TOKEN: ${{ secrets.ISSUEOPS_GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ github.token }}
@@ -121,7 +144,7 @@ jobs:
 
       - name: Execute approved repository-access reconciliation
         id: execute_request
-        if: ${{ always() && steps.approval_gate.outputs.approval-status == 'approved' }}
+        if: ${{ always() && steps.request_scope.outputs.matches-request == 'true' && steps.approval_gate.outputs.approval-status == 'approved' }}
         env:
           ISSUEOPS_GITHUB_TOKEN: ${{ secrets.ISSUEOPS_GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ github.token }}
@@ -130,7 +153,7 @@ jobs:
         run: node src/scripts/run-approved-execution.js
 
       - name: Upload validation artifact
-        if: ${{ always() && steps.validate_request.outcome != 'skipped' }}
+        if: ${{ always() && steps.request_scope.outputs.matches-request == 'true' && steps.validate_request.outcome != 'skipped' }}
         uses: actions/upload-artifact@v7
         with:
           name: add-team-repo-access-validation-${{ env.ISSUE_NUMBER || github.run_id }}

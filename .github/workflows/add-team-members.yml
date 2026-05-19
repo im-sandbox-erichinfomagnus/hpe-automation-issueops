@@ -90,8 +90,30 @@ jobs:
           body: ${{ steps.issue_context.outputs.issue_body }}
           issue-form-template: add-team-members.yml
 
+      - name: Check request applicability
+        id: request_scope
+        env:
+          PARSED_TEAM_SLUG: ${{ steps.parse_request.outputs.parsed_team_slug }}
+          PARSED_REQUESTED_PEOPLE: ${{ steps.parse_request.outputs.parsed_requested_people }}
+          PARSED_BULK_CSV_REQUESTED_PEOPLE: ${{ steps.parse_request.outputs.parsed_bulk_csv_requested_people }}
+        run: |
+          set -euo pipefail
+
+          matches_request=false
+          if [ -n "${PARSED_TEAM_SLUG:-}" ] && { [ -n "${PARSED_REQUESTED_PEOPLE:-}" ] || [ -n "${PARSED_BULK_CSV_REQUESTED_PEOPLE:-}" ]; }; then
+            matches_request=true
+          fi
+
+          echo "matches-request=$matches_request" >> "$GITHUB_OUTPUT"
+
+      - name: Skip unrelated issue form
+        if: ${{ steps.request_scope.outputs.matches-request != 'true' }}
+        run: |
+          echo 'This issue does not match the add-team-members form. Exiting without validation or assignment.' >> "$GITHUB_STEP_SUMMARY"
+
       - name: Validate request and record approval-ready state
         id: validate_request
+        if: ${{ steps.request_scope.outputs.matches-request == 'true' }}
         env:
           GITHUB_TOKEN: ${{ secrets.ISSUEOPS_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           ISSUE_NUMBER: ${{ env.ISSUE_NUMBER }}
@@ -108,7 +130,7 @@ jobs:
 
       - name: Evaluate approval gate
         id: approval_gate
-        if: ${{ always() && steps.validate_request.outcome != 'skipped' }}
+        if: ${{ always() && steps.request_scope.outputs.matches-request == 'true' && steps.validate_request.outcome != 'skipped' }}
         env:
           GITHUB_TOKEN: ${{ secrets.ISSUEOPS_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           ISSUE_NUMBER: ${{ env.ISSUE_NUMBER }}
@@ -117,7 +139,7 @@ jobs:
 
       - name: Execute approved reconciliation
         id: execute_request
-        if: ${{ always() && steps.approval_gate.outputs.approval-status == 'approved' }}
+        if: ${{ always() && steps.request_scope.outputs.matches-request == 'true' && steps.approval_gate.outputs.approval-status == 'approved' }}
         env:
           GITHUB_TOKEN: ${{ secrets.ISSUEOPS_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           ISSUE_NUMBER: ${{ env.ISSUE_NUMBER }}
@@ -125,7 +147,7 @@ jobs:
         run: node src/scripts/run-approved-execution.js
 
       - name: Upload request audit artifact
-        if: ${{ always() && steps.validate_request.outcome != 'skipped' }}
+        if: ${{ always() && steps.request_scope.outputs.matches-request == 'true' && steps.validate_request.outcome != 'skipped' }}
         uses: actions/upload-artifact@v7
         with:
           name: add-team-members-validation-${{ env.ISSUE_NUMBER || github.run_id }}
