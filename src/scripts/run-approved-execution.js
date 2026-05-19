@@ -325,6 +325,8 @@ async function runApprovedExecution(options = {}) {
       executionResults.push({
         normalized_slug: team.normalized_slug,
         requested_name: team.requested_name,
+        source_row_number: team.source_row_number || null,
+        current_team_id: team.current_team_id || null,
         execution_result: 'noop',
         failure_reason: null,
       });
@@ -334,6 +336,7 @@ async function runApprovedExecution(options = {}) {
       executionResults.push({
         normalized_slug: team.normalized_slug,
         requested_name: team.requested_name,
+        source_row_number: team.source_row_number || null,
         execution_result: 'failed',
         failure_reason: team.failure_reason || 'rejected',
       });
@@ -410,6 +413,8 @@ async function runApprovedExecution(options = {}) {
           executionResults.push({
             normalized_slug: team.normalized_slug,
             requested_name: team.requested_name,
+            source_row_number: team.source_row_number || null,
+            created_team_id: attemptResult.value && attemptResult.value.id || null,
             execution_result: 'created',
             failure_reason: null,
           });
@@ -419,6 +424,7 @@ async function runApprovedExecution(options = {}) {
         executionResults.push({
           normalized_slug: team.normalized_slug,
           requested_name: team.requested_name,
+          source_row_number: team.source_row_number || null,
           execution_result: 'failed',
           failure_reason: classifyFailureReason(attemptResult.error),
         });

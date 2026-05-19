@@ -120,11 +120,24 @@ function formatAuditSummary(auditArtifact = {}) {
       `- Target organization: ${request.organization || 'n/a'}`,
       `- Intended owner: ${request.intended_owner_login || 'n/a'}`,
       `- Requester: ${request.requester_login || 'n/a'}`,
+      `- Intake mode: ${request.intake_mode || 'n/a'}`,
       `- Request status: ${request.request_status || 'submitted'}`,
       `- Central assignment: ${assignment.assignment_status || 'not_attempted'}${assignment.assigned_login ? ` (${assignment.assigned_login})` : ''}`,
       `- Approval: ${approval.approval_status || 'pending'} (${approval.approver_role || 'n/a'})`,
       approval.approver_login ? `- Approver: ${approval.approver_login}` : null,
       `- Validation: ${validation.is_valid ? 'passed' : 'failed'}`,
+      isBulkCsv
+        ? `- CSV row findings: ${(validation.csv_row_findings || request.csv_row_findings || []).length}`
+        : null,
+      isBulkCsv
+        ? `- CSV duplicate rows: ${execution.duplicate_row_count || request.bulk_csv_submission && request.bulk_csv_submission.duplicate_row_count || 0}`
+        : null,
+      isBulkCsv
+        ? `- CSV invalid rows: ${execution.invalid_row_count || request.bulk_csv_submission && request.bulk_csv_submission.invalid_row_count || 0}`
+        : null,
+      isBulkCsv && request.csv_row_numbering_convention
+        ? `- CSV row numbering: ${request.csv_row_numbering_convention}`
+        : null,
       `- Teams requested: ${(request.requested_teams || []).length}`,
       `- Teams created: ${execution.created_count || execution.mutation_count || 0}`,
       `- No-op: ${execution.noop_count || 0}`,

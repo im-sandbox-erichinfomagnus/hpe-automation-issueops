@@ -96,11 +96,12 @@ jobs:
         env:
           PARSED_INTENDED_OWNER: ${{ steps.parse_request.outputs.parsed_intended_owner }}
           PARSED_REQUESTED_TEAM_NAMES: ${{ steps.parse_request.outputs.parsed_requested_team_names }}
+          PARSED_BULK_CSV_REQUESTED_TEAM_NAMES: ${{ steps.parse_request.outputs.parsed_bulk_csv_requested_team_names }}
         run: |
           set -euo pipefail
 
           matches_request=false
-          if [ -n "${PARSED_INTENDED_OWNER:-}" ] && [ -n "${PARSED_REQUESTED_TEAM_NAMES:-}" ]; then
+          if [ -n "${PARSED_INTENDED_OWNER:-}" ] && { [ -n "${PARSED_REQUESTED_TEAM_NAMES:-}" ] || [ -n "${PARSED_BULK_CSV_REQUESTED_TEAM_NAMES:-}" ]; }; then
             matches_request=true
           fi
 
@@ -123,6 +124,7 @@ jobs:
           PARSED_ORGANIZATION: ${{ steps.parse_request.outputs.parsed_organization }}
           PARSED_INTENDED_OWNER: ${{ steps.parse_request.outputs.parsed_intended_owner }}
           PARSED_REQUESTED_TEAM_NAMES: ${{ steps.parse_request.outputs.parsed_requested_team_names }}
+          PARSED_BULK_CSV_REQUESTED_TEAM_NAMES: ${{ steps.parse_request.outputs.parsed_bulk_csv_requested_team_names }}
           PARSED_BUSINESS_JUSTIFICATION: ${{ steps.parse_request.outputs.parsed_business_justification }}
           PARSED_DRY_RUN: ${{ steps.parse_request.outputs.parsed_dry_run }}
           AUDIT_ARTIFACT_PATH: ${{ env.AUDIT_ARTIFACT_PATH }}

@@ -5,6 +5,13 @@ function normalizeExecutionResult(result) {
   return {
     entity_id: entityId,
     requested_name: result.requested_name || null,
+    normalized_slug: result.normalized_slug || null,
+    team_slug: result.team_slug || null,
+    username: result.username || null,
+    repository_full_name: result.repository_full_name || null,
+    source_row_number: result.source_row_number || null,
+    created_team_id: result.created_team_id || null,
+    current_team_id: result.current_team_id || null,
     result: result.result || result.execution_result || 'not_started',
     failure_reason: result.failure_reason || null,
   };
@@ -23,17 +30,17 @@ function summarizeResults(results, options = {}) {
 
   for (const result of results.map(normalizeExecutionResult)) {
     if (['added', 'created', 'mutated', 'linked'].includes(result.result)) {
-      summary.mutated.push(result.entity_id);
+      summary.mutated.push(result);
     } else if (result.result === 'granted') {
-      summary.mutated.push(result.entity_id);
+      summary.mutated.push(result);
     } else if (result.result === 'noop') {
-      summary.noop.push(result.entity_id);
+      summary.noop.push(result);
     } else if (result.result === 'rejected') {
-      summary.rejected.push({ entity_id: result.entity_id, failure_reason: result.failure_reason });
+      summary.rejected.push(result);
     } else if (result.result === 'pending') {
-      summary.pending.push(result.entity_id);
+      summary.pending.push(result);
     } else if (result.result === 'failed') {
-      summary.failed.push({ entity_id: result.entity_id, failure_reason: result.failure_reason });
+      summary.failed.push(result);
     }
   }
 
@@ -93,6 +100,9 @@ function buildExecutionOutcome(input = {}) {
     granted_count: summary.mutated.length,
     duplicate_row_count: input.duplicate_row_count || 0,
     invalid_row_count: input.invalid_row_count || 0,
+    created_teams: summary.mutated,
+    noop_teams: summary.noop,
+    failed_teams: summary.failed,
     rollback_status: rollbackStatus,
     failed_subset: summary.failed,
     rejected_subset: summary.rejected,

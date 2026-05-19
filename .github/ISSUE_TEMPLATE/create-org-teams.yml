@@ -5,12 +5,6 @@ labels:
   - issueops
   - create-org-teams
 body:
-  - type: markdown
-    attributes:
-      value: |
-        Use this request to validate and, after approval in a later phase,
-        create one or more empty teams in a target GitHub organization.
-
   - type: input
     id: organization
     attributes:
@@ -33,13 +27,26 @@ body:
     id: requested_team_names
     attributes:
       label: Requested team names
-      description: One empty team name per line. Do not include member usernames.
+      description: Manual request path for one or more empty team names. Enter one empty team name per line and do not include member usernames.
       placeholder: |
         Platform Engineering
         Release Managers
       render: text
     validations:
-      required: true
+      required: false
+
+  - type: textarea
+    id: bulk_csv_requested_team_names
+    attributes:
+      label: Bulk CSV requested team names
+      description: Optional bulk CSV intake path. Paste UTF-8 CSV text with a required `team_name` header. Validation enforces exactly one populated intake mode.
+      placeholder: |
+        team_name
+        Platform Engineering
+        Release Managers
+      render: text
+    validations:
+      required: false
 
   - type: textarea
     id: business_justification

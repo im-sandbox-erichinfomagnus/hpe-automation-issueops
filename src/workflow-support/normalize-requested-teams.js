@@ -21,6 +21,16 @@ function slugifyTeamName(value) {
     .replace(/^-+|-+$/g, '');
 }
 
+function buildRequestedTeamDetail(teamName, options = {}) {
+  return {
+    requested_name: teamName,
+    normalized_slug: options.normalized_slug || '',
+    validation_status: options.validation_status || 'valid',
+    source_row_number: options.source_row_number || null,
+    failure_reason: options.failure_reason || null,
+  };
+}
+
 function toLines(value) {
   if (Array.isArray(value)) {
     return value.flatMap((entry) => toLines(entry));
@@ -78,11 +88,10 @@ function normalizeRequestedTeams(input) {
       status = 'conflicting';
     }
 
-    requestedTeamDetail.push({
-      requested_name: teamName,
+    requestedTeamDetail.push(buildRequestedTeamDetail(teamName, {
       normalized_slug: slug,
       validation_status: status,
-    });
+    }));
 
     if (status === 'valid') {
       seenNames.add(normalizedKey);
@@ -104,6 +113,7 @@ function normalizeRequestedTeams(input) {
 }
 
 module.exports = {
+  buildRequestedTeamDetail,
   normalizeLogin,
   normalizeRequestedTeams,
   normalizeTeamName,

@@ -50,6 +50,7 @@ function readParsedRequestFromEnv(env = process.env) {
     requested_child_teams: env.PARSED_REQUESTED_CHILD_TEAMS || '',
     intended_owner: env.PARSED_INTENDED_OWNER || '',
     requested_team_names: env.PARSED_REQUESTED_TEAM_NAMES || '',
+    bulk_csv_requested_team_names: env.PARSED_BULK_CSV_REQUESTED_TEAM_NAMES || '',
     team_slug: env.PARSED_TEAM_SLUG || '',
     requested_people: env.PARSED_REQUESTED_PEOPLE || '',
     bulk_csv_requested_people: env.PARSED_BULK_CSV_REQUESTED_PEOPLE || '',
@@ -74,7 +75,9 @@ function isTeamCreationParsedRequest(parsedRequest = {}) {
     parsedRequest.intended_owner ||
     parsedRequest.parsed_intended_owner ||
     parsedRequest.requested_team_names ||
-    parsedRequest.parsed_requested_team_names
+    parsedRequest.parsed_requested_team_names ||
+    parsedRequest.bulk_csv_requested_team_names ||
+    parsedRequest.parsed_bulk_csv_requested_team_names
   );
 }
 
@@ -150,14 +153,14 @@ async function runRequestValidation(options = {}) {
   const shouldSetProcessExitCode = options.setProcessExitCode !== false && env === process.env;
   const parsedRequest = readParsedRequestFromEnv(env);
   const isTeamRepoAccess = isTeamRepoAccessParsedRequest(parsedRequest);
-  const isTeamHierarchy = isTeamHierarchyParsedRequest(parsedRequest);
   const isTeamCreation = isTeamCreationParsedRequest(parsedRequest);
+  const isTeamHierarchy = isTeamHierarchyParsedRequest(parsedRequest);
   const request = (isTeamRepoAccess
     ? parseTeamRepoAccessRequest
-    : isTeamHierarchy
-    ? parseTeamHierarchyRequest
     : isTeamCreation
       ? parseTeamCreationRequest
+      : isTeamHierarchy
+      ? parseTeamHierarchyRequest
       : parseTeamMembershipRequest)({
     parsedRequest,
     issue: {
@@ -189,6 +192,9 @@ async function runRequestValidation(options = {}) {
           warnings: [],
           organization_visible: false,
           intended_owner_membership: null,
+          bulk_csv_submission: request.bulk_csv_submission,
+          csv_row_findings: request.csv_row_findings || [],
+          csv_row_numbering_convention: request.csv_row_numbering_convention,
           requested_teams: request.requested_teams.map((team) => ({
             ...team,
             validation_status: 'rejected',
@@ -249,20 +255,6 @@ async function runRequestValidation(options = {}) {
           team_exists: validation.team_exists,
           dry_run: validation.request.dry_run,
         });
-      } else if (isTeamHierarchy) {
-        validation = await validateTeamHierarchyRequest(request, {
-          getOrganization: ({ organization }) => api.getOrganization({ organization }),
-          listTeams: ({ organization }) => api.listOrgTeams({ organization }),
-          resolveTeamMembership: ({ organization, teamSlug, username }) =>
-            api.getMembershipForUser({ organization, teamSlug, username }),
-        });
-        reconciliationPlan = reconcileTeamHierarchy({
-          request: validation.request,
-          requested_child_links: validation.requested_child_links,
-          organization_exists: validation.organization_visible,
-          parent_team_exists: validation.parent_team_exists,
-          dry_run: validation.request.dry_run,
-        });
       } else if (isTeamCreation) {
         validation = await validateTeamCreationRequest(request, {
           getOrganization: ({ organization }) => api.getOrganization({ organization }),
@@ -281,6 +273,20 @@ async function runRequestValidation(options = {}) {
               name: team.requested_name,
             })),
           organization_exists: validation.organization_visible,
+          dry_run: validation.request.dry_run,
+        });
+      } else if (isTeamHierarchy) {
+        validation = await validateTeamHierarchyRequest(request, {
+          getOrganization: ({ organization }) => api.getOrganization({ organization }),
+          listTeams: ({ organization }) => api.listOrgTeams({ organization }),
+          resolveTeamMembership: ({ organization, teamSlug, username }) =>
+            api.getMembershipForUser({ organization, teamSlug, username }),
+        });
+        reconciliationPlan = reconcileTeamHierarchy({
+          request: validation.request,
+          requested_child_links: validation.requested_child_links,
+          organization_exists: validation.organization_visible,
+          parent_team_exists: validation.parent_team_exists,
           dry_run: validation.request.dry_run,
         });
       } else {
@@ -312,7 +318,7 @@ async function runRequestValidation(options = {}) {
 
   const executionOutcome = buildExecutionOutcome({
     executionResults: [],
-    operationLabel: isTeamRepoAccess ? 'repository' : isTeamHierarchy ? 'child_link' : isTeamCreation ? 'team' : 'membership',
+    operationLabel: isTeamRepoAccess ? 'repository' : isTeamCreation ? 'team' : isTeamHierarchy ? 'child_link' : 'membership',
     intake_mode: validation.request && validation.request.intake_mode,
     duplicate_row_count: validation.request && validation.request.bulk_csv_submission
       ? validation.request.bulk_csv_submission.duplicate_row_count
@@ -325,17 +331,17 @@ async function runRequestValidation(options = {}) {
   executionOutcome.summary = validation.is_valid
     ? isTeamRepoAccess
       ? 'Request is validated and ready for approval. No repository-access mutation was attempted.'
-      : isTeamHierarchy
-      ? 'Request is validated and ready for approval. No child-team mutation was attempted.'
       : isTeamCreation
       ? 'Request is validated and ready for approval. No team creation was attempted.'
+      : isTeamHierarchy
+      ? 'Request is validated and ready for approval. No child-team mutation was attempted.'
       : 'Request is validated and ready for approval. No membership mutation was attempted.'
     : isTeamRepoAccess
       ? 'Request validation failed. No repository-access mutation was attempted.'
-      : isTeamHierarchy
-      ? 'Request validation failed. No child-team mutation was attempted.'
       : isTeamCreation
       ? 'Request validation failed. No team creation was attempted.'
+      : isTeamHierarchy
+      ? 'Request validation failed. No child-team mutation was attempted.'
       : 'Request validation failed. No membership mutation was attempted.';
 
   const auditArtifact = buildAuditArtifact({
@@ -357,7 +363,7 @@ async function runRequestValidation(options = {}) {
     env.AUDIT_ARTIFACT_PATH ||
       path.join(
         'artifacts',
-        `${isTeamRepoAccess ? 'add-team-repo-access' : isTeamHierarchy ? 'add-child-teams' : isTeamCreation ? 'create-org-teams' : 'add-team-members'}-validation-${env.ISSUE_NUMBER || 'manual'}.json`
+        `${isTeamRepoAccess ? 'add-team-repo-access' : isTeamCreation ? 'create-org-teams' : isTeamHierarchy ? 'add-child-teams' : 'add-team-members'}-validation-${env.ISSUE_NUMBER || 'manual'}.json`
       )
   );
 

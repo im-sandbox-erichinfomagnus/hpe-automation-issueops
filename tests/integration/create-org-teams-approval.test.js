@@ -116,7 +116,10 @@ test('runApprovalGate approves a validated team-creation request when the intend
   assert.equal(result.approval.approval_status, 'approved');
   assert.equal(result.approval.approver_login, 'himanshu-im');
   assert.equal(result.request.request_status, 'approved');
+  assert.equal(result.request.intake_mode, 'manual');
+  assert.match(fs.readFileSync(summaryPath, 'utf8'), /Intake mode: manual/i);
   assert.match(fs.readFileSync(summaryPath, 'utf8'), /Approval: approved/);
+  assert.doesNotMatch(fs.readFileSync(summaryPath, 'utf8'), /CSV row/i);
   assert.match(fs.readFileSync(outputPath, 'utf8'), /approval-status=approved/);
 });
 

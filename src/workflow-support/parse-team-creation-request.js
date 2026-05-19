@@ -3,7 +3,13 @@
 const {
   normalizeLogin,
   normalizeRequestedTeams,
+  unwrapCodeFence,
 } = require('./normalize-requested-teams');
+const {
+  CSV_ROW_NUMBERING_CONVENTION,
+  createEmptyBulkCsvNormalization,
+  normalizeBulkCsvRequestedTeams,
+} = require('./normalize-bulk-csv-requested-teams');
 
 function readField(source, keys) {
   for (const key of keys) {
@@ -13,6 +19,30 @@ function readField(source, keys) {
   }
 
   return undefined;
+}
+
+function readFieldIncludingEmpty(source, keys) {
+  for (const key of keys) {
+    if (source && Object.prototype.hasOwnProperty.call(source, key) && source[key] != null) {
+      return source[key];
+    }
+  }
+
+  return undefined;
+}
+
+function hasPopulatedInput(value) {
+  return unwrapCodeFence(value).trim() !== '';
+}
+
+function createEmptyManualNormalization() {
+  return {
+    normalizedTeams: [],
+    requestedTeamDetail: [],
+    duplicateTeamNames: [],
+    conflictingSlugs: [],
+    invalidTeamNames: [],
+  };
 }
 
 function normalizeBoolean(value, defaultValue) {
@@ -62,12 +92,34 @@ function parseTeamCreationRequest(input = {}) {
     readField(parsed, ['intended_owner', 'parsed_intended_owner']) || input.intendedOwner
   );
   const requestedTeamNamesInput =
-    readField(parsed, [
+    readFieldIncludingEmpty(parsed, [
       'requested_team_names',
       'parsed_requested_team_names',
       'team_names',
-    ]) || input.requestedTeamNames;
-  const normalization = normalizeRequestedTeams(requestedTeamNamesInput);
+    ]) ?? input.requestedTeamNames ?? '';
+  const bulkCsvInput =
+    readFieldIncludingEmpty(parsed, [
+      'bulk_csv_requested_team_names',
+      'parsed_bulk_csv_requested_team_names',
+    ]) ?? input.bulkCsvRequestedTeamNames ?? input.bulkCsvInput ?? '';
+  const manualPopulated = hasPopulatedInput(requestedTeamNamesInput);
+  const bulkCsvPopulated = hasPopulatedInput(bulkCsvInput);
+  const intakeMode = manualPopulated === bulkCsvPopulated
+    ? null
+    : manualPopulated
+      ? 'manual'
+      : 'bulk_csv';
+  const manualNormalization = manualPopulated
+    ? normalizeRequestedTeams(requestedTeamNamesInput)
+    : createEmptyManualNormalization();
+  const bulkCsvNormalization = bulkCsvPopulated
+    ? normalizeBulkCsvRequestedTeams(bulkCsvInput)
+    : createEmptyBulkCsvNormalization(bulkCsvInput);
+  const selectedNormalization = intakeMode === 'bulk_csv'
+    ? bulkCsvNormalization
+    : intakeMode === 'manual'
+      ? manualNormalization
+      : createEmptyManualNormalization();
   const dryRun = normalizeBoolean(
     readField(parsed, ['dry_run', 'parsed_dry_run']) ?? input.dryRun,
     true
@@ -92,7 +144,24 @@ function parseTeamCreationRequest(input = {}) {
     requester_login: requesterLogin,
     organization,
     intended_owner_login: intendedOwnerLogin,
-    requested_teams: normalization.normalizedTeams.map((team) => ({
+    intake_mode: intakeMode,
+    requested_team_names_input: requestedTeamNamesInput,
+    bulk_csv_input: bulkCsvInput,
+    bulk_csv_submission: intakeMode === 'bulk_csv'
+      ? {
+        encoding: bulkCsvNormalization.encoding,
+        header_columns: bulkCsvNormalization.header_columns,
+        required_columns: bulkCsvNormalization.required_columns,
+        unsupported_columns: bulkCsvNormalization.unsupported_columns,
+        row_count: bulkCsvNormalization.row_count,
+        valid_row_count: bulkCsvNormalization.valid_row_count,
+        invalid_row_count: bulkCsvNormalization.invalid_row_count,
+        duplicate_row_count: bulkCsvNormalization.duplicate_row_count,
+        schema_status: bulkCsvNormalization.schema_status,
+        schema_errors: bulkCsvNormalization.schema_errors,
+      }
+      : null,
+    requested_teams: selectedNormalization.normalizedTeams.map((team) => ({
       ...team,
       intended_owner_login: intendedOwnerLogin,
       validation_status: 'valid',
@@ -100,21 +169,29 @@ function parseTeamCreationRequest(input = {}) {
       execution_result: 'not_started',
       failure_reason: null,
     })),
-    requested_team_detail: normalization.requestedTeamDetail.map((team) => ({
+    requested_team_detail: selectedNormalization.requestedTeamDetail.map((team) => ({
       ...team,
       intended_owner_login: intendedOwnerLogin,
     })),
-    duplicate_team_names: normalization.duplicateTeamNames,
-    conflicting_slugs: normalization.conflictingSlugs,
-    invalid_team_names: normalization.invalidTeamNames,
+    duplicate_team_names: selectedNormalization.duplicateTeamNames,
+    conflicting_slugs: selectedNormalization.conflictingSlugs,
+    invalid_team_names: selectedNormalization.invalidTeamNames,
+    csv_row_findings: bulkCsvNormalization.csv_row_findings,
+    csv_row_numbering_convention: intakeMode === 'bulk_csv'
+      ? CSV_ROW_NUMBERING_CONVENTION
+      : null,
     request_status: 'submitted',
     business_justification: justification || '',
     dry_run: dryRun,
     submitted_at: submittedAt,
     validation_findings: {
-      duplicate_team_names: normalization.duplicateTeamNames,
-      conflicting_slugs: normalization.conflictingSlugs,
-      invalid_team_names: normalization.invalidTeamNames,
+      duplicate_team_names: selectedNormalization.duplicateTeamNames,
+      conflicting_slugs: selectedNormalization.conflictingSlugs,
+      invalid_team_names: selectedNormalization.invalidTeamNames,
+      csv_row_findings: bulkCsvNormalization.csv_row_findings,
+      csv_row_numbering_convention: intakeMode === 'bulk_csv'
+        ? CSV_ROW_NUMBERING_CONVENTION
+        : null,
     },
     unsupported_inputs: {
       parent_team: readField(parsed, ['parent_team', 'parent_team_slug', 'parsed_parent_team']) || '',
