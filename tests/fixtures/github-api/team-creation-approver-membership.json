@@ -1,0 +1,69 @@
+{
+  "approved": {
+    "comments": [
+      {
+        "body": "approved",
+        "user": { "login": "himanshu-im" },
+        "created_at": "2026-05-15T10:00:00Z"
+      }
+    ],
+    "memberships": {
+      "himanshu-im": {
+        "exists": true,
+        "membership": {
+          "state": "active",
+          "role": "admin"
+        }
+      }
+    },
+    "assignees": ["central-owner"]
+  },
+  "denied_wrong_user": {
+    "comments": [
+      {
+        "body": "approved",
+        "user": { "login": "other-user" },
+        "created_at": "2026-05-15T10:00:00Z"
+      }
+    ],
+    "memberships": {
+      "other-user": {
+        "exists": true,
+        "membership": {
+          "state": "active",
+          "role": "admin"
+        }
+      }
+    },
+    "assignees": ["central-owner"]
+  },
+  "denied_inactive_owner": {
+    "comments": [
+      {
+        "body": "approved",
+        "user": { "login": "himanshu-im" },
+        "created_at": "2026-05-15T10:00:00Z"
+      }
+    ],
+    "memberships": {
+      "himanshu-im": {
+        "exists": true,
+        "membership": {
+          "state": "pending",
+          "role": "admin"
+        }
+      }
+    },
+    "assignees": ["central-owner"]
+  },
+  "pending": {
+    "comments": [],
+    "memberships": {},
+    "assignees": ["central-owner"]
+  },
+  "invalidated": {
+    "comments": [],
+    "memberships": {},
+    "assignees": ["central-owner"]
+  }
+}

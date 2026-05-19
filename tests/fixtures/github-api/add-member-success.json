@@ -1,0 +1,72 @@
+{
+  "approved_artifact": {
+    "request": {
+      "request_id": "octo-org/issueops-speckit#301/1",
+      "issue_number": 301,
+      "repository": "octo-org/issueops-speckit",
+      "requester_login": "requester",
+      "organization": "octo-org",
+      "team_slug": "platform-engineering",
+      "requested_people": ["octocat", "hubot"],
+      "request_status": "approved",
+      "duplicate_people": [],
+      "invalid_people": [],
+      "dry_run": false,
+      "submitted_at": "2026-05-14T08:00:00Z"
+    },
+    "validation": {
+      "is_valid": true,
+      "errors": [],
+      "warnings": [],
+      "team_exists": true,
+      "team_sync_blocked": false,
+      "requested_people": [
+        {
+          "username": "octocat",
+          "resolution_status": "resolved",
+          "current_membership_state": "unknown",
+          "desired_action": "add_member",
+          "execution_result": "not_started",
+          "failure_reason": null
+        },
+        {
+          "username": "hubot",
+          "resolution_status": "resolved",
+          "current_membership_state": "unknown",
+          "desired_action": "add_member",
+          "execution_result": "not_started",
+          "failure_reason": null
+        }
+      ]
+    },
+    "approval": {
+      "approval_status": "approved",
+      "approver_login": "org-owner-user",
+      "approver_role": "org_owner",
+      "approved_at": "2026-05-14T08:30:00Z",
+      "decision_source": "comment",
+      "decision_note": "The approval comment 'approved' was added by an organization owner."
+    },
+    "reconciliation": {
+      "current_members": [],
+      "people_to_add": [],
+      "people_already_present": [],
+      "people_rejected": [],
+      "dry_run": false,
+      "rate_limit_snapshot": null
+    },
+    "execution": {
+      "mutation_count": 0,
+      "noop_count": 0,
+      "pending_count": 0,
+      "failure_count": 0,
+      "rollback_status": "not_needed",
+      "summary": "Request approval was granted by an organization owner. No membership mutation was attempted in this phase."
+    },
+    "metadata": {
+      "run_id": "555",
+      "run_attempt": "1",
+      "generated_at": "2026-05-14T08:30:00Z"
+    }
+  }
+}

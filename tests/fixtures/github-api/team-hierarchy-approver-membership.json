@@ -1,0 +1,91 @@
+{
+  "approved": {
+    "comments": [
+      {
+        "body": "approved",
+        "user": { "login": "himanshu-im" },
+        "created_at": "2026-05-15T10:00:00Z"
+      }
+    ],
+    "assignees": ["central-owner", "himanshu-im"],
+    "memberships": {
+      "platform-engineering": {
+        "himanshu-im": {
+          "membership": {
+            "role": "maintainer",
+            "state": "active"
+          }
+        }
+      },
+      "application-platform": {
+        "himanshu-im": {
+          "membership": {
+            "role": "maintainer",
+            "state": "active"
+          }
+        }
+      }
+    }
+  },
+  "denied_wrong_user": {
+    "comments": [
+      {
+        "body": "approved",
+        "user": { "login": "other-user" },
+        "created_at": "2026-05-15T10:00:00Z"
+      }
+    ],
+    "assignees": ["central-owner", "himanshu-im"],
+    "memberships": {
+      "platform-engineering": {
+        "other-user": {
+          "membership": {
+            "role": "maintainer",
+            "state": "active"
+          }
+        }
+      },
+      "application-platform": {
+        "other-user": {
+          "membership": {
+            "role": "maintainer",
+            "state": "active"
+          }
+        }
+      }
+    }
+  },
+  "denied_stale_authorization": {
+    "comments": [
+      {
+        "body": "approved",
+        "user": { "login": "himanshu-im" },
+        "created_at": "2026-05-15T10:00:00Z"
+      }
+    ],
+    "assignees": ["central-owner", "himanshu-im"],
+    "memberships": {
+      "platform-engineering": {
+        "himanshu-im": {
+          "membership": {
+            "role": "maintainer",
+            "state": "active"
+          }
+        }
+      },
+      "application-platform": {
+        "himanshu-im": {
+          "membership": {
+            "role": "member",
+            "state": "active"
+          }
+        }
+      }
+    }
+  },
+  "pending": {
+    "comments": [],
+    "assignees": ["central-owner", "himanshu-im"],
+    "memberships": {}
+  }
+}

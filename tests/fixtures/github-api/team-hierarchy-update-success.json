@@ -1,0 +1,143 @@
+{
+  "approved_artifact": {
+    "request": {
+      "request_id": "repo#801/run.1",
+      "issue_number": 801,
+      "repository": "im-sandbox-himanshu/issueops-speckit",
+      "requester_login": "himanshu-im",
+      "organization": "im-sandbox-himanshu",
+      "parent_team_slug": "platform-engineering",
+      "parent_team_name": "Platform Engineering",
+      "designated_approver_login": "himanshu-im",
+      "requested_child_links": [
+        {
+          "requested_child_name": "Application Platform",
+          "requested_name": "Application Platform",
+          "child_team_slug": "application-platform",
+          "desired_action": "link_child",
+          "validation_status": "valid"
+        },
+        {
+          "requested_child_name": "Release Engineering",
+          "requested_name": "Release Engineering",
+          "child_team_slug": "release-engineering",
+          "desired_action": "noop",
+          "validation_status": "already_linked"
+        }
+      ],
+      "request_status": "approved",
+      "dry_run": false
+    },
+    "validation": {
+      "is_valid": true,
+      "errors": [],
+      "warnings": [],
+      "organization_visible": true,
+      "parent_team_exists": true,
+      "designated_approver_authorization": {
+        "login": "himanshu-im",
+        "state": "authorized"
+      },
+      "requested_child_links": [
+        {
+          "requested_child_name": "Application Platform",
+          "requested_name": "Application Platform",
+          "child_team_slug": "application-platform",
+          "desired_action": "link_child",
+          "validation_status": "valid"
+        },
+        {
+          "requested_child_name": "Release Engineering",
+          "requested_name": "Release Engineering",
+          "child_team_slug": "release-engineering",
+          "desired_action": "noop",
+          "validation_status": "already_linked"
+        }
+      ],
+      "existing_child_links": [
+        {
+          "requested_child_name": "Release Engineering",
+          "requested_name": "Release Engineering",
+          "child_team_slug": "release-engineering",
+          "desired_action": "noop",
+          "validation_status": "already_linked"
+        }
+      ]
+    },
+    "assignment": {
+      "assignment_status": "assigned",
+      "assigned_login": "central-owner",
+      "assignment_note": "Central issue assignment is for queue ownership only and does not authorize team hierarchy mutation.",
+      "assigned_at": "2026-05-15T10:00:00Z"
+    },
+    "approval": {
+      "approval_status": "approved",
+      "approver_login": "himanshu-im",
+      "approver_role": "designated_hierarchy_approver",
+      "approver_authorization_state": "authorized",
+      "approved_at": "2026-05-15T10:01:00Z",
+      "decision_source": "comment",
+      "decision_note": "The approval comment 'approved' was added by the authorized designated hierarchy approver for this request batch."
+    },
+    "reconciliation": {
+      "organization_exists": true,
+      "parent_team_exists": true,
+      "child_links_to_apply": [
+        {
+          "requested_child_name": "Application Platform",
+          "requested_name": "Application Platform",
+          "child_team_slug": "application-platform",
+          "desired_action": "link_child",
+          "validation_status": "valid"
+        }
+      ],
+      "child_links_already_present": [
+        {
+          "requested_child_name": "Release Engineering",
+          "requested_name": "Release Engineering",
+          "child_team_slug": "release-engineering",
+          "desired_action": "noop",
+          "validation_status": "already_linked"
+        }
+      ],
+      "child_links_rejected": [],
+      "dry_run": false,
+      "state": "approved_for_execution"
+    },
+    "execution": {
+      "summary": "Request approval was granted by the authorized designated hierarchy approver. No child-team mutation was attempted in this phase."
+    },
+    "metadata": {
+      "operation": "team_hierarchy",
+      "run_id": "801",
+      "run_attempt": "1"
+    }
+  },
+  "current_teams": [
+    {
+      "id": 1,
+      "name": "Platform Engineering",
+      "slug": "platform-engineering",
+      "privacy": "closed",
+      "parent": null
+    },
+    {
+      "id": 2,
+      "name": "Application Platform",
+      "slug": "application-platform",
+      "privacy": "closed",
+      "parent": null
+    },
+    {
+      "id": 3,
+      "name": "Release Engineering",
+      "slug": "release-engineering",
+      "privacy": "closed",
+      "parent": {
+        "id": 1,
+        "name": "Platform Engineering",
+        "slug": "platform-engineering"
+      }
+    }
+  ]
+}

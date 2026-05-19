@@ -1,0 +1,36 @@
+{
+  "visible_org": {
+    "organization": {
+      "exists": true
+    },
+    "memberships": {
+      "octocat": {
+        "exists": true,
+        "membership": {
+          "state": "active",
+          "role": "member"
+        }
+      }
+    }
+  },
+  "missing_org": {
+    "organization": {
+      "exists": false
+    },
+    "memberships": {}
+  },
+  "inactive_owner": {
+    "organization": {
+      "exists": true
+    },
+    "memberships": {
+      "octocat": {
+        "exists": true,
+        "membership": {
+          "state": "pending",
+          "role": "member"
+        }
+      }
+    }
+  }
+}

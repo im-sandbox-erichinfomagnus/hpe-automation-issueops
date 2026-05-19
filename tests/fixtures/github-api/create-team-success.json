@@ -1,0 +1,106 @@
+{
+  "approved_artifact": {
+    "request": {
+      "request_id": "im-sandbox-himanshu/issueops-speckit#601/1",
+      "issue_number": 601,
+      "repository": "im-sandbox-himanshu/issueops-speckit",
+      "requester_login": "himanshu-im",
+      "organization": "im-sandbox-himanshu",
+      "intended_owner_login": "himanshu-im",
+      "requested_teams": [
+        {
+          "requested_name": "Platform Engineering",
+          "normalized_slug": "platform-engineering",
+          "intended_owner_login": "himanshu-im",
+          "validation_status": "valid",
+          "desired_action": "create_team",
+          "execution_result": "not_started",
+          "failure_reason": null
+        },
+        {
+          "requested_name": "AI Model Routing Specialists",
+          "normalized_slug": "ai-model-routing-specialists",
+          "intended_owner_login": "himanshu-im",
+          "validation_status": "valid",
+          "desired_action": "create_team",
+          "execution_result": "not_started",
+          "failure_reason": null
+        }
+      ],
+      "request_status": "approved",
+      "dry_run": false,
+      "submitted_at": "2026-05-15T08:00:00Z"
+    },
+    "validation": {
+      "is_valid": true,
+      "errors": [],
+      "warnings": [],
+      "organization_visible": true,
+      "intended_owner_membership": {
+        "exists": true,
+        "state": "active",
+        "role": "admin"
+      },
+      "requested_teams": [
+        {
+          "requested_name": "Platform Engineering",
+          "normalized_slug": "platform-engineering",
+          "intended_owner_login": "himanshu-im",
+          "validation_status": "valid",
+          "desired_action": "create_team",
+          "execution_result": "not_started",
+          "failure_reason": null
+        },
+        {
+          "requested_name": "AI Model Routing Specialists",
+          "normalized_slug": "ai-model-routing-specialists",
+          "intended_owner_login": "himanshu-im",
+          "validation_status": "valid",
+          "desired_action": "create_team",
+          "execution_result": "not_started",
+          "failure_reason": null
+        }
+      ],
+      "existing_teams": []
+    },
+    "assignment": {
+      "assignment_status": "assigned",
+      "assigned_login": "aeruvakalpanaa",
+      "assignment_note": "Central issue assignment is for queue ownership only and does not authorize team creation.",
+      "assigned_at": "2026-05-15T08:10:00Z"
+    },
+    "approval": {
+      "approval_status": "approved",
+      "approver_login": "himanshu-im",
+      "approver_role": "intended_owner",
+      "approver_membership_state": "active",
+      "approved_at": "2026-05-15T08:12:00Z",
+      "decision_source": "comment",
+      "decision_note": "The approval comment 'approved' was added by the active intended owner for this request batch."
+    },
+    "reconciliation": {
+      "organization_exists": true,
+      "teams_to_create": [],
+      "teams_already_present": [],
+      "teams_rejected": [],
+      "dry_run": false,
+      "rate_limit_snapshot": null,
+      "state": "approved_for_execution"
+    },
+    "execution": {
+      "mutation_count": 0,
+      "created_count": 0,
+      "noop_count": 0,
+      "pending_count": 0,
+      "failure_count": 0,
+      "rollback_status": "not_needed",
+      "summary": "Request approval was granted by the active intended owner. No team creation was attempted in this phase."
+    },
+    "metadata": {
+      "operation": "team_creation",
+      "run_id": "601",
+      "run_attempt": "1",
+      "generated_at": "2026-05-15T08:12:00Z"
+    }
+  }
+}

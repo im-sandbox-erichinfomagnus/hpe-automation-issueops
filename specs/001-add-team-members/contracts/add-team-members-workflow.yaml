@@ -1,0 +1,125 @@
+name: add-team-members-workflow-contract
+version: 1
+purpose: >-
+  Contract for the IssueOps workflow that requests approval for, validates, and
+  reconciles adding one or more people to a GitHub organization team.
+
+issue_form:
+  path: .github/ISSUE_TEMPLATE/add-team-members.yml
+  required_fields:
+    - id: organization
+      type: input
+      description: Target GitHub organization slug.
+    - id: team_slug
+      type: input
+      description: Target team slug or canonical team identifier.
+    - id: requested_people
+      type: textarea
+      description: One or more GitHub usernames, one per line or comma-separated.
+    - id: business_justification
+      type: textarea
+      description: Reason for the requested team access.
+    - id: dry_run
+      type: dropdown
+      description: Whether to execute validation only or allow mutation after approval.
+
+parser:
+  action: issue-ops/parser@v5
+  inputs:
+    body: ${{ github.event.issue.body }}
+    issue-form-template: add-team-members.yml
+  outputs:
+    json: Parsed request payload as JSON string.
+    parsed_organization: Normalized organization field.
+    parsed_team_slug: Normalized target team field.
+    parsed_requested_people: Parsed people field before downstream normalization.
+    parsed_dry_run: Parsed dry-run selection.
+
+workflow_inputs:
+  validation:
+    - name: organization
+      required: true
+    - name: team_slug
+      required: true
+    - name: requested_people
+      required: true
+    - name: requester_login
+      required: true
+    - name: dry_run
+      required: true
+  approval_gate:
+    - name: approver_login
+      required: true
+    - name: approver_role
+      required: true
+      allowed:
+        - org_owner
+  reconciliation:
+    - name: execution_token_source
+      required: true
+      description: PAT-backed workflow token source.
+    - name: audit_artifact_path
+      required: true
+      description: Persisted validation and approval artifact used by the execution runner.
+
+authorization:
+  requester_identity: github.event.issue.user.login
+  allowed_approvers:
+    - organization owner
+  execution_identity:
+    model: personal access token supplied to the workflow
+    bootstrap: repository or organization secret injection
+    required_permissions:
+      members: write
+      metadata: read
+
+validation_rules:
+  - The target team must exist and be visible to the executing identity.
+  - At least one requested person must be supplied after normalization.
+  - Duplicate requested usernames must be deduplicated before reconciliation.
+  - Requested people that cannot be resolved to valid GitHub accounts must not be mutated.
+  - Approval must be present as an issue comment containing exactly `approved` and must be granted by an organization owner.
+
+reconciliation:
+  current_state_reads:
+    - team existence lookup
+    - current team memberships lookup
+    - per-user membership state lookup when needed
+  mutation_rule: Add only missing users to the target team.
+  no_op_rule: Report already active or pending memberships without rewriting them.
+  partial_success_rule: Persist per-user success or failure and surface required follow-up.
+
+rate_limit_handling:
+  inspect_headers:
+    - x-ratelimit-remaining
+    - x-ratelimit-reset
+    - retry-after
+  retry_policy:
+    strategy: bounded exponential backoff
+    retryable_conditions:
+      - transient secondary rate limit
+      - explicit retry-after guidance
+    non_retryable_conditions:
+      - team synchronization forbidden
+      - invalid approval
+      - missing target team
+
+observability:
+  outputs:
+    - GitHub step summary
+    - JSON audit artifact
+    - requester-facing workflow summary in the Actions run
+  required_fields:
+    - issue_number
+    - run_id
+    - requester_login
+    - approver_login
+    - organization
+    - team_slug
+    - requested_people
+    - added_people
+    - noop_people
+    - failed_people
+    - rollback_status
+    - reconciliation.people_to_add
+    - reconciliation.people_already_present
