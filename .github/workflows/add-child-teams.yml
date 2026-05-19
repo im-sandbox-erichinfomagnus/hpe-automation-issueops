@@ -91,8 +91,30 @@ jobs:
           body: ${{ steps.issue_context.outputs.issue_body }}
           issue-form-template: add-child-teams.yml
 
+      - name: Check request applicability
+        id: request_scope
+        env:
+          PARSED_PARENT_TEAM: ${{ steps.parse_request.outputs.parsed_parent_team }}
+          PARSED_DESIGNATED_APPROVER: ${{ steps.parse_request.outputs.parsed_designated_approver }}
+          PARSED_REQUESTED_CHILD_TEAMS: ${{ steps.parse_request.outputs.parsed_requested_child_teams }}
+        run: |
+          set -euo pipefail
+
+          matches_request=false
+          if [ -n "${PARSED_PARENT_TEAM:-}" ] && [ -n "${PARSED_DESIGNATED_APPROVER:-}" ] && [ -n "${PARSED_REQUESTED_CHILD_TEAMS:-}" ]; then
+            matches_request=true
+          fi
+
+          echo "matches-request=$matches_request" >> "$GITHUB_OUTPUT"
+
+      - name: Skip unrelated issue form
+        if: ${{ steps.request_scope.outputs.matches-request != 'true' }}
+        run: |
+          echo 'This issue does not match the add-child-teams form. Exiting without validation or assignment.' >> "$GITHUB_STEP_SUMMARY"
+
       - name: Validate request and record approval-ready state
         id: validate_request
+        if: ${{ steps.request_scope.outputs.matches-request == 'true' }}
         env:
           ISSUEOPS_GITHUB_TOKEN: ${{ secrets.ISSUEOPS_GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ github.token }}
@@ -110,7 +132,7 @@ jobs:
 
       - name: Evaluate approval gate and assign central owner
         id: approval_gate
-        if: ${{ always() && steps.validate_request.outcome != 'skipped' }}
+        if: ${{ always() && steps.request_scope.outputs.matches-request == 'true' && steps.validate_request.outcome != 'skipped' }}
         env:
           ISSUEOPS_GITHUB_TOKEN: ${{ secrets.ISSUEOPS_GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ github.token }}
@@ -120,7 +142,7 @@ jobs:
 
       - name: Execute approved hierarchy reconciliation
         id: execute_request
-        if: ${{ always() && steps.approval_gate.outputs.approval-status == 'approved' }}
+        if: ${{ always() && steps.request_scope.outputs.matches-request == 'true' && steps.approval_gate.outputs.approval-status == 'approved' }}
         env:
           ISSUEOPS_GITHUB_TOKEN: ${{ secrets.ISSUEOPS_GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ github.token }}
@@ -129,7 +151,7 @@ jobs:
         run: node src/scripts/run-approved-execution.js
 
       - name: Upload validation artifact
-        if: ${{ always() && steps.validate_request.outcome != 'skipped' }}
+        if: ${{ always() && steps.request_scope.outputs.matches-request == 'true' && steps.validate_request.outcome != 'skipped' }}
         uses: actions/upload-artifact@v7
         with:
           name: add-child-teams-validation-${{ env.ISSUE_NUMBER || github.run_id }}
