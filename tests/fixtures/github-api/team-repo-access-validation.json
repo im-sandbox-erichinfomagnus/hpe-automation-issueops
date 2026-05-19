@@ -1,0 +1,138 @@
+{
+  "visible_org": {
+    "organization": {
+      "exists": true
+    },
+    "team": {
+      "exists": true,
+      "team": {
+        "id": 1,
+        "name": "Platform Engineering",
+        "slug": "platform-engineering",
+        "privacy": "closed"
+      }
+    },
+    "approver_membership": {
+      "exists": true,
+      "membership": {
+        "role": "admin",
+        "state": "active"
+      }
+    },
+    "repositories": {
+      "octo-org/service-catalog": {
+        "exists": true,
+        "repository": {
+          "id": 101,
+          "name": "service-catalog",
+          "full_name": "octo-org/service-catalog",
+          "owner": "octo-org",
+          "archived": false,
+          "private": true
+        },
+        "permission": {
+          "exists": false,
+          "current_permission_api_value": "none"
+        }
+      },
+      "octo-org/developer-portal": {
+        "exists": true,
+        "repository": {
+          "id": 102,
+          "name": "developer-portal",
+          "full_name": "octo-org/developer-portal",
+          "owner": "octo-org",
+          "archived": false,
+          "private": true
+        },
+        "permission": {
+          "exists": true,
+          "current_permission_api_value": "push"
+        }
+      },
+      "octo-org/legacy-portal": {
+        "exists": true,
+        "repository": {
+          "id": 103,
+          "name": "legacy-portal",
+          "full_name": "octo-org/legacy-portal",
+          "owner": "octo-org",
+          "archived": false,
+          "private": true
+        },
+        "permission": {
+          "exists": true,
+          "current_permission_api_value": "pull"
+        }
+      },
+      "octo-org/archived-portal": {
+        "exists": true,
+        "repository": {
+          "id": 104,
+          "name": "archived-portal",
+          "full_name": "octo-org/archived-portal",
+          "owner": "octo-org",
+          "archived": true,
+          "private": true
+        },
+        "permission": {
+          "exists": false,
+          "current_permission_api_value": "none"
+        }
+      }
+    }
+  },
+  "missing_org": {
+    "organization": {
+      "exists": false
+    },
+    "team": {
+      "exists": false,
+      "team": null
+    },
+    "approver_membership": {
+      "exists": false,
+      "membership": null
+    },
+    "repositories": {}
+  },
+  "missing_team": {
+    "organization": {
+      "exists": true
+    },
+    "team": {
+      "exists": false,
+      "team": null
+    },
+    "approver_membership": {
+      "exists": true,
+      "membership": {
+        "role": "admin",
+        "state": "active"
+      }
+    },
+    "repositories": {}
+  },
+  "unauthorized_approver": {
+    "organization": {
+      "exists": true
+    },
+    "team": {
+      "exists": true,
+      "team": {
+        "id": 1,
+        "name": "Platform Engineering",
+        "slug": "platform-engineering",
+        "privacy": "closed"
+      }
+    },
+    "approver_membership": {
+      "exists": true,
+      "membership": {
+        "role": "member",
+        "state": "active"
+      }
+    },
+    "repositories": {}
+  }
+}

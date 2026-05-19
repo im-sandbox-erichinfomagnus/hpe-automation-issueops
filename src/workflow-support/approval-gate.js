@@ -3,6 +3,7 @@
 const { resolveApproverRole } = require('./resolve-approver-role');
 const { resolveTeamCreationApprover } = require('./resolve-team-creation-approver');
 const { resolveTeamHierarchyApprover } = require('./resolve-team-hierarchy-approver');
+const { resolveTeamRepoAccessApprover } = require('./resolve-team-repo-access-approver');
 
 const APPROVAL_COMMAND = 'approved';
 
@@ -31,6 +32,10 @@ function buildPendingApprovalNote(approvalMode, approvalCommand) {
     return `Add an issue comment containing exactly '${approvalCommand}' from the active intended owner to authorize execution.`;
   }
 
+  if (approvalMode === 'team_repo_access') {
+    return `Add an issue comment containing exactly '${approvalCommand}' from the designated target organization owner to authorize execution.`;
+  }
+
   return `Add an issue comment containing exactly '${approvalCommand}' as an organization owner to authorize execution.`;
 }
 
@@ -46,6 +51,10 @@ async function evaluateApprovalGate(input = {}, options = {}) {
 
     if (approvalMode === 'team_hierarchy') {
       return resolveTeamHierarchyApprover(args, options);
+    }
+
+    if (approvalMode === 'team_repo_access') {
+      return resolveTeamRepoAccessApprover(args, options);
     }
 
     return resolveApproverRole(args, options);
@@ -119,6 +128,32 @@ async function evaluateApprovalGate(input = {}, options = {}) {
       approved_at: approvalComment.created_at || null,
       decision_source: 'comment',
       decision_note: `The approval comment '${approvalCommand}' was added by the authorized designated hierarchy approver for this request batch.`,
+    };
+  }
+
+  if (approvalMode === 'team_repo_access') {
+    if (approver.approver_role !== 'target_org_owner') {
+      return {
+        approval_status: 'denied',
+        approver_login: approverLogin,
+        approver_role: approver.approver_role,
+        approver_authorization_state: approver.approver_authorization_state || 'unknown',
+        approver_membership_state: approver.approver_membership_state || 'unknown',
+        approved_at: approvalComment.created_at || null,
+        decision_source: 'comment',
+        decision_note: `The approval comment '${approvalCommand}' was not added by the authorized designated target organization owner and does not authorize repository-access mutation.`,
+      };
+    }
+
+    return {
+      approval_status: 'approved',
+      approver_login: approverLogin,
+      approver_role: approver.approver_role,
+      approver_authorization_state: approver.approver_authorization_state || 'authorized',
+      approver_membership_state: approver.approver_membership_state || 'active',
+      approved_at: approvalComment.created_at || null,
+      decision_source: 'comment',
+      decision_note: `The approval comment '${approvalCommand}' was added by the authorized designated target organization owner for this request batch.`,
     };
   }
 

@@ -31,6 +31,7 @@ function loadWorkflowToken(options = {}) {
         token_kind: isPatBacked ? 'pat' : envName === 'GITHUB_TOKEN' ? 'github_token' : 'unknown',
         supports_org_mutation: isPatBacked,
         supports_team_hierarchy_mutation: isPatBacked,
+        supports_team_repo_access_mutation: isPatBacked,
         masked_token: maskToken(value),
       };
     }
@@ -44,6 +45,7 @@ function loadWorkflowToken(options = {}) {
       token_kind: 'missing',
       supports_org_mutation: false,
       supports_team_hierarchy_mutation: false,
+      supports_team_repo_access_mutation: false,
       masked_token: '',
     };
   }

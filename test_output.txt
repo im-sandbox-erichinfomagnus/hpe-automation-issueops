@@ -1,0 +1,208 @@
+﻿TAP version 13
+# Subtest: approval policy accepts the designated target org owner adding the approval comment
+not ok 1 - approval policy accepts the designated target org owner adding the approval comment
+  ---
+  duration_ms: 2.3974
+  location: 'C:\\Users\\Himanshu Kumar\\source\\repos\\hpe-automation-issueops\\tests\\contract\\add-team-repo-access-approval-policy.test.js:21:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + 'denied'
+    - 'approved'
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 'approved'
+  actual: 'denied'
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (C:\Users\Himanshu Kumar\source\repos\hpe-automation-issueops\tests\contract\add-team-repo-access-approval-policy.test.js:42:10)
+    async Test.run (node:internal/test_runner/test:980:9)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)
+  ...
+# Subtest: approval policy rejects approval by a user other than the designated owner
+ok 2 - approval policy rejects approval by a user other than the designated owner
+  ---
+  duration_ms: 0.4044
+  ...
+# Subtest: resolveTeamRepoAccessApprover requires the designated approver to remain an active org owner
+ok 3 - resolveTeamRepoAccessApprover requires the designated approver to remain an active org owner
+  ---
+  duration_ms: 0.3202
+  ...
+# Subtest: approval policy remains pending when no approval signal exists
+ok 4 - approval policy remains pending when no approval signal exists
+  ---
+  duration_ms: 0.2042
+  ...
+# Subtest: team repo access policy requires approver, designated approver, and authorized owner state to match
+not ok 5 - team repo access policy requires approver, designated approver, and authorized owner state to match
+  ---
+  duration_ms: 0.1005
+  location: 'C:\\Users\\Himanshu Kumar\\source\\repos\\hpe-automation-issueops\\tests\\contract\\add-team-repo-access-approval-policy.test.js:106:1'
+  failureType: 'testCodeFailure'
+  error: 'isEligibleTeamRepoAccessApprover is not a function'
+  code: 'ERR_TEST_FAILURE'
+  name: 'TypeError'
+  stack: |-
+    TestContext.<anonymous> (C:\Users\Himanshu Kumar\source\repos\hpe-automation-issueops\tests\contract\add-team-repo-access-approval-policy.test.js:108:5)
+    Test.runInAsyncScope (node:async_hooks:211:14)
+    Test.run (node:internal/test_runner/test:979:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:677:18)
+    Test.postRun (node:internal/test_runner/test:1090:19)
+    Test.run (node:internal/test_runner/test:1018:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:677:7)
+  ...
+# Subtest: team repo access policy reports PAT-backed token details for eligible execution
+not ok 6 - team repo access policy reports PAT-backed token details for eligible execution
+  ---
+  duration_ms: 0.1409
+  location: 'C:\\Users\\Himanshu Kumar\\source\\repos\\hpe-automation-issueops\\tests\\contract\\add-team-repo-access-approval-policy.test.js:127:1'
+  failureType: 'testCodeFailure'
+  error: 'Repository access mutation blocked because approver role target_org_owner is not eligible'
+  code: 'ERR_TEST_FAILURE'
+  stack: |-
+    assertRepositoryAccessAllowed (C:\Users\Himanshu Kumar\source\repos\hpe-automation-issueops\src\actions\team-repo-access-policy\index.js:38:11)
+    buildRepositoryAccessPermissionGuard (C:\Users\Himanshu Kumar\source\repos\hpe-automation-issueops\src\actions\team-repo-access-policy\index.js:53:20)
+    TestContext.<anonymous> (C:\Users\Himanshu Kumar\source\repos\hpe-automation-issueops\tests\contract\add-team-repo-access-approval-policy.test.js:128:17)
+    Test.runInAsyncScope (node:async_hooks:211:14)
+    Test.run (node:internal/test_runner/test:979:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:677:18)
+    Test.postRun (node:internal/test_runner/test:1090:19)
+    Test.run (node:internal/test_runner/test:1018:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:677:7)
+  ...
+# Subtest: team repo access policy blocks non-PAT tokens for repository-access mutation
+not ok 7 - team repo access policy blocks non-PAT tokens for repository-access mutation
+  ---
+  duration_ms: 0.4909
+  location: 'C:\\Users\\Himanshu Kumar\\source\\repos\\hpe-automation-issueops\\tests\\contract\\add-team-repo-access-approval-policy.test.js:149:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    The input did not match the regular expression /not PAT-backed for repository-access mutation/i. Input:
+    
+    'Error: Repository access mutation blocked because approver role target_org_owner is not eligible'
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+  actual:
+  error: 'Repository access mutation blocked because approver role target_org_owner is not eligible'
+  stack: |-
+    assertRepositoryAccessAllowed (C:\Users\Himanshu Kumar\source\repos\hpe-automation-issueops\src\actions\team-repo-access-policy\index.js:38:11)
+    C:\Users\Himanshu Kumar\source\repos\hpe-automation-issueops\tests\contract\add-team-repo-access-approval-policy.test.js:151:11
+    getActual (node:assert:840:5)
+    Function.throws (node:assert:986:24)
+    TestContext.<anonymous> (C:\Users\Himanshu Kumar\source\repos\hpe-automation-issueops\tests\contract\add-team-repo-access-approval-policy.test.js:150:10)
+    Test.runInAsyncScope (node:async_hooks:211:14)
+    Test.run (node:internal/test_runner/test:979:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:677:18)
+    Test.postRun (node:internal/test_runner/test:1090:19)
+    Test.run (node:internal/test_runner/test:1018:12)
+  operator: 'throws'
+  stack: |-
+    TestContext.<anonymous> (C:\Users\Himanshu Kumar\source\repos\hpe-automation-issueops\tests\contract\add-team-repo-access-approval-policy.test.js:150:10)
+    Test.runInAsyncScope (node:async_hooks:211:14)
+    Test.run (node:internal/test_runner/test:979:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:677:18)
+    Test.postRun (node:internal/test_runner/test:1090:19)
+    Test.run (node:internal/test_runner/test:1018:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:677:7)
+  ...
+# Subtest: runApprovalGate approves a validated repo-access request when the designated owner comments approved
+not ok 8 - runApprovalGate approves a validated repo-access request when the designated owner comments approved
+  ---
+  duration_ms: 8.1682
+  location: 'C:\\Users\\Himanshu Kumar\\source\\repos\\hpe-automation-issueops\\tests\\integration\\add-team-repo-access-approval.test.js:108:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    The input did not match the regular expression /repository access mutation/i. Input:
+    
+    'Central issue assignment is for queue ownership only and does not authorize membership mutation.'
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+  actual: 'Central issue assignment is for queue ownership only and does not authorize membership mutation.'
+  operator: 'match'
+  stack: |-
+    TestContext.<anonymous> (C:\Users\Himanshu Kumar\source\repos\hpe-automation-issueops\tests\integration\add-team-repo-access-approval.test.js:135:10)
+    async Test.run (node:internal/test_runner/test:980:9)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)
+  ...
+# Subtest: runApprovalGate denies approval by a commenter who is not the designated owner
+not ok 9 - runApprovalGate denies approval by a commenter who is not the designated owner
+  ---
+  duration_ms: 3.2584
+  location: 'C:\\Users\\Himanshu Kumar\\source\\repos\\hpe-automation-issueops\\tests\\integration\\add-team-repo-access-approval.test.js:141:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + 'approved'
+    - 'denied'
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 'denied'
+  actual: 'approved'
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (C:\Users\Himanshu Kumar\source\repos\hpe-automation-issueops\tests\integration\add-team-repo-access-approval.test.js:161:10)
+    async Test.run (node:internal/test_runner/test:980:9)
+    async Test.processPendingSubtests (node:internal/test_runner/test:677:7)
+  ...
+# Subtest: runApprovalGate remains pending when no approval comment exists
+not ok 10 - runApprovalGate remains pending when no approval comment exists
+  ---
+  duration_ms: 2.1467
+  location: 'C:\\Users\\Himanshu Kumar\\source\\repos\\hpe-automation-issueops\\tests\\integration\\add-team-repo-access-approval.test.js:166:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    The input did not match the regular expression /designated target organization owner/i. Input:
+    
+    "Add an issue comment containing exactly 'approved' as an organization owner to authorize execution."
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+  actual: "Add an issue comment containing exactly 'approved' as an organization owner to authorize execution."
+  operator: 'match'
+  stack: |-
+    TestContext.<anonymous> (C:\Users\Himanshu Kumar\source\repos\hpe-automation-issueops\tests\integration\add-team-repo-access-approval.test.js:188:10)
+    async Test.run (node:internal/test_runner/test:980:9)
+    async Test.processPendingSubtests (node:internal/test_runner/test:677:7)
+  ...
+# Subtest: runApprovalGate denies approval when the designated approver loses owner authorization before evaluation
+not ok 11 - runApprovalGate denies approval when the designated approver loses owner authorization before evaluation
+  ---
+  duration_ms: 3.0124
+  location: 'C:\\Users\\Himanshu Kumar\\source\\repos\\hpe-automation-issueops\\tests\\integration\\add-team-repo-access-approval.test.js:192:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    The input did not match the regular expression /does not authorize repository-access mutation/i. Input:
+    
+    "The approval comment 'approved' was added by a non-organization-owner and does not authorize mutation."
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+  actual: "The approval comment 'approved' was added by a non-organization-owner and does not authorize mutation."
+  operator: 'match'
+  stack: |-
+    TestContext.<anonymous> (C:\Users\Himanshu Kumar\source\repos\hpe-automation-issueops\tests\integration\add-team-repo-access-approval.test.js:219:10)
+    async Test.run (node:internal/test_runner/test:980:9)
+    async Test.processPendingSubtests (node:internal/test_runner/test:677:7)
+  ...
+1..11
+# tests 11
+# suites 0
+# pass 3
+# fail 8
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 82.0752

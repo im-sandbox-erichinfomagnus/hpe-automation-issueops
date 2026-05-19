@@ -1,0 +1,70 @@
+{
+  "approved": {
+    "comments": [
+      {
+        "body": "approved",
+        "user": { "login": "octocat" },
+        "created_at": "2026-05-18T10:00:00Z"
+      }
+    ],
+    "membership": {
+      "octocat": {
+        "exists": true,
+        "membership": {
+          "role": "admin",
+          "state": "active"
+        }
+      }
+    },
+    "assignees": ["central-owner", "requester"]
+  },
+  "pending": {
+    "comments": [
+      {
+        "body": "looks good",
+        "user": { "login": "octocat" },
+        "created_at": "2026-05-18T10:00:00Z"
+      }
+    ],
+    "membership": {},
+    "assignees": ["central-owner", "requester"]
+  },
+  "denied_wrong_user": {
+    "comments": [
+      {
+        "body": "approved",
+        "user": { "login": "hubot" },
+        "created_at": "2026-05-18T10:00:00Z"
+      }
+    ],
+    "membership": {
+      "hubot": {
+        "exists": true,
+        "membership": {
+          "role": "admin",
+          "state": "active"
+        }
+      }
+    },
+    "assignees": ["central-owner", "requester"]
+  },
+  "denied_stale_authorization": {
+    "comments": [
+      {
+        "body": "approved",
+        "user": { "login": "octocat" },
+        "created_at": "2026-05-18T10:00:00Z"
+      }
+    ],
+    "membership": {
+      "octocat": {
+        "exists": true,
+        "membership": {
+          "role": "member",
+          "state": "active"
+        }
+      }
+    },
+    "assignees": ["central-owner", "requester"]
+  }
+}
