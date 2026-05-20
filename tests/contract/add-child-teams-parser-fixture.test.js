@@ -52,11 +52,27 @@ test('parses a valid add-child-teams fixture into a normalized request', () => {
   assert.equal(request.organization, 'octo-org');
   assert.equal(request.parent_team_slug, 'platform-engineering');
   assert.equal(request.designated_approver_login, 'octocat');
+  assert.equal(request.intake_mode, 'manual');
+  assert.equal(request.requested_child_teams_input, parsedRequest.requested_child_teams);
+  assert.equal(request.bulk_csv_input, '');
+  assert.equal(request.bulk_csv_submission, null);
+  assert.deepEqual(request.csv_row_findings, []);
+  assert.equal(request.csv_row_numbering_convention, null);
   assert.deepEqual(
     request.requested_child_links.map((childLink) => childLink.child_team_slug),
     ['application-platform', 'release-engineering']
   );
   assert.equal(request.dry_run, true);
+});
+
+test('manual add-child-teams guidance remains visible in the issue form', () => {
+  const templatePath = path.join(__dirname, '..', '..', '.github', 'ISSUE_TEMPLATE', 'add-child-teams.yml');
+  const template = fs.readFileSync(templatePath, 'utf8');
+
+  assert.match(template, /id:\s+requested_child_teams/);
+  assert.match(template, /manual request path/i);
+  assert.match(template, /one existing child team per line/i);
+  assert.match(template, /required:\s+true/i);
 });
 
 test('rejects duplicate child teams from a fixture-derived submission', async () => {
@@ -99,6 +115,8 @@ test('normalizes requested child teams from a code-fenced textarea payload', () 
     request.requested_child_links.map((childLink) => childLink.child_team_slug),
     ['application-platform', 'ai-governance']
   );
+  assert.equal(request.intake_mode, 'manual');
+  assert.equal(request.bulk_csv_submission, null);
   assert.deepEqual(request.invalid_child_teams, []);
 });
 

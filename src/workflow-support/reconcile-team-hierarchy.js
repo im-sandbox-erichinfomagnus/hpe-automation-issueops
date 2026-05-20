@@ -111,6 +111,7 @@ function reconcileTeamHierarchy(input = {}) {
   return {
     organization_exists: input.organization_exists !== false,
     parent_team_exists: input.parent_team_exists !== false,
+    intake_mode: request.intake_mode || input.intake_mode || null,
     child_links_to_apply: childLinksToApply,
     child_links_already_present: childLinksAlreadyPresent,
     child_links_rejected: childLinksRejected,

@@ -346,6 +346,7 @@ async function runApprovedExecution(options = {}) {
       executionResults.push({
         team_slug: childLink.child_team_slug,
         requested_name: childLink.requested_name || childLink.requested_child_name,
+        source_row_number: childLink.source_row_number || null,
         execution_result: 'noop',
         failure_reason: null,
       });
@@ -355,6 +356,7 @@ async function runApprovedExecution(options = {}) {
       executionResults.push({
         team_slug: childLink.child_team_slug,
         requested_name: childLink.requested_name || childLink.requested_child_name,
+        source_row_number: childLink.source_row_number || null,
         execution_result: 'failed',
         failure_reason: childLink.failure_reason || 'rejected',
       });
@@ -449,6 +451,7 @@ async function runApprovedExecution(options = {}) {
           executionResults.push({
             team_slug: childLink.child_team_slug,
             requested_name: childLink.requested_name || childLink.requested_child_name,
+            source_row_number: childLink.source_row_number || null,
             execution_result: 'linked',
             failure_reason: null,
           });
@@ -458,6 +461,7 @@ async function runApprovedExecution(options = {}) {
         executionResults.push({
           team_slug: childLink.child_team_slug,
           requested_name: childLink.requested_name || childLink.requested_child_name,
+          source_row_number: childLink.source_row_number || null,
           execution_result: 'failed',
           failure_reason: classifyFailureReason(attemptResult.error),
         });

@@ -74,6 +74,7 @@ function buildRemediationInstructions(summary) {
 function buildExecutionOutcome(input = {}) {
   const executionResults = input.executionResults || input.execution_results || [];
   const runContext = input.runContext || input.run_context || {};
+  const bulkCsvSubmission = input.bulk_csv_submission || input.bulkCsvSubmission || null;
   const summary = summarizeResults(executionResults, {
     operationLabel: input.operationLabel || input.operation_label || 'entity',
   });
@@ -98,8 +99,8 @@ function buildExecutionOutcome(input = {}) {
     pending_count: summary.pending.length,
     failure_count: summary.failed.length,
     granted_count: summary.mutated.length,
-    duplicate_row_count: input.duplicate_row_count || 0,
-    invalid_row_count: input.invalid_row_count || 0,
+    duplicate_row_count: input.duplicate_row_count || bulkCsvSubmission && bulkCsvSubmission.duplicate_row_count || 0,
+    invalid_row_count: input.invalid_row_count || bulkCsvSubmission && bulkCsvSubmission.invalid_row_count || 0,
     created_teams: summary.mutated,
     noop_teams: summary.noop,
     failed_teams: summary.failed,

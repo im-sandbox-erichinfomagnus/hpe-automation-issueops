@@ -85,6 +85,14 @@ function inferRequestIntakeMode(request = {}, operation = determineOperation(req
     return 'manual';
   }
 
+  if (operation === 'team_hierarchy' && (
+    hasPopulatedString(request.requested_child_teams_input) ||
+    hasNonEmptyArray(request.requested_child_links) ||
+    hasNonEmptyArray(request.requested_child_link_detail)
+  )) {
+    return 'manual';
+  }
+
   return null;
 }
 
@@ -115,6 +123,7 @@ function buildAuditArtifact(input = {}) {
       team_name: request.team_name,
       parent_team_slug: request.parent_team_slug,
       parent_team_name: request.parent_team_name,
+      requested_child_teams_input: request.requested_child_teams_input || '',
       requested_people: request.requested_people,
       csv_row_findings: request.csv_row_findings || [],
       csv_row_numbering_convention: request.csv_row_numbering_convention || null,

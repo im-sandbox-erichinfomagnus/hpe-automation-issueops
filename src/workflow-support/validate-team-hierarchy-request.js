@@ -1,6 +1,26 @@
 'use strict';
 
 const { parseTeamHierarchyRequest } = require('./parse-team-hierarchy-request');
+const { unwrapCodeFence } = require('./normalize-requested-child-teams');
+
+function hasPopulatedInput(value) {
+  return unwrapCodeFence(value).trim() !== '';
+}
+
+function describeCsvRowIssue(finding) {
+  switch (finding.failure_reason) {
+    case 'missing_child_team':
+      return `CSV row ${finding.row_number} is missing the required child_team value.`;
+    case 'invalid_child_team':
+      return `CSV row ${finding.row_number} contains an invalid child_team${finding.child_team_name ? `: ${finding.child_team_name}` : ''}.`;
+    case 'conflicting_slug':
+      return `CSV row ${finding.row_number} conflicts with another row after slug normalization${finding.normalized_slug ? `: ${finding.normalized_slug}` : ''}.`;
+    case 'inconsistent_shape':
+      return `CSV row ${finding.row_number} does not match the header column count.`;
+    default:
+      return `CSV row ${finding.row_number} is invalid.`;
+  }
+}
 
 function findAncestorSlugs(teamSlug, currentTeamMap) {
   const ancestors = [];
@@ -39,6 +59,37 @@ async function validateTeamHierarchyRequest(input = {}, options = {}) {
 
   if (!request.designated_approver_login) {
     errors.push('A single designated hierarchy approver is required.');
+  }
+
+  const manualPopulated = hasPopulatedInput(request.requested_child_teams_input);
+  const bulkCsvPopulated = hasPopulatedInput(request.bulk_csv_input);
+
+  if (manualPopulated === bulkCsvPopulated) {
+    errors.push('Exactly one intake source must be populated: requested_child_teams or bulk_csv_requested_child_teams.');
+  }
+
+  if (request.intake_mode === 'bulk_csv') {
+    const bulkCsvSubmission = request.bulk_csv_submission || {};
+    for (const schemaError of bulkCsvSubmission.schema_errors || []) {
+      errors.push(schemaError);
+    }
+
+    for (const finding of request.csv_row_findings || []) {
+      if (finding.validation_status === 'blank') {
+        continue;
+      }
+
+      if (finding.validation_status === 'duplicate') {
+        errors.push(
+          `CSV row ${finding.row_number} duplicates child team ${finding.child_team_name || 'unknown'}.`
+        );
+        continue;
+      }
+
+      if (finding.validation_status === 'invalid') {
+        errors.push(describeCsvRowIssue(finding));
+      }
+    }
   }
 
   if (request.requested_child_links.length === 0) {
@@ -248,6 +299,10 @@ async function validateTeamHierarchyRequest(input = {}, options = {}) {
     warnings,
     organization_visible: organizationVisible,
     parent_team_exists: parentTeamExists,
+    current_teams: currentTeams,
+    bulk_csv_submission: request.bulk_csv_submission,
+    csv_row_findings: request.csv_row_findings || [],
+    csv_row_numbering_convention: request.csv_row_numbering_convention,
     designated_approver_authorization: designatedApproverAuthorization,
     requested_child_links: requestedChildLinks,
     existing_child_links: requestedChildLinks.filter((childLink) => childLink.desired_action === 'noop'),

@@ -5,13 +5,6 @@ labels:
   - issueops
   - add-child-teams
 body:
-  - type: markdown
-    attributes:
-      value: |
-        Use this request to validate and, after approval in a later phase,
-        attach one or more existing child teams under one existing parent team
-        in a target GitHub organization.
-
   - type: input
     id: organization
     attributes:
@@ -43,13 +36,26 @@ body:
     id: requested_child_teams
     attributes:
       label: Requested child teams
-      description: One existing child team per line. Duplicate child teams, re-parenting requests, cycle-creating requests, and team-creation or member-management instructions are rejected.
+      description: Use this field for the manual request path and provide one existing child team per line. Leave this field empty when using the bulk CSV textarea. Validation enforces exactly one populated intake mode. Duplicate child teams, re-parenting requests, cycle-creating requests, and team-creation or member-management instructions are rejected.
       placeholder: |
         application-platform
         release-engineering
       render: text
     validations:
-      required: true
+      required: false
+
+  - type: textarea
+    id: bulk_csv_requested_child_teams
+    attributes:
+      label: Bulk CSV requested child teams
+      description: Paste UTF-8 CSV here when submitting higher-volume requests. Leave the manual requested child teams field empty when using this textarea. Validation enforces exactly one populated intake mode.
+      placeholder: |
+        child_team
+        application-platform
+        release-engineering
+      render: text
+    validations:
+      required: false
 
   - type: textarea
     id: business_justification

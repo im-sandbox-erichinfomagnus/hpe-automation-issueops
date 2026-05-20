@@ -48,6 +48,7 @@ function readParsedRequestFromEnv(env = process.env) {
     requested_repositories: env.PARSED_REQUESTED_REPOSITORIES || '',
     permission_level: env.PARSED_PERMISSION_LEVEL || '',
     requested_child_teams: env.PARSED_REQUESTED_CHILD_TEAMS || '',
+    bulk_csv_requested_child_teams: env.PARSED_BULK_CSV_REQUESTED_CHILD_TEAMS || '',
     intended_owner: env.PARSED_INTENDED_OWNER || '',
     requested_team_names: env.PARSED_REQUESTED_TEAM_NAMES || '',
     bulk_csv_requested_team_names: env.PARSED_BULK_CSV_REQUESTED_TEAM_NAMES || '',
@@ -285,6 +286,7 @@ async function runRequestValidation(options = {}) {
         reconciliationPlan = reconcileTeamHierarchy({
           request: validation.request,
           requested_child_links: validation.requested_child_links,
+          current_teams: validation.current_teams,
           organization_exists: validation.organization_visible,
           parent_team_exists: validation.parent_team_exists,
           dry_run: validation.request.dry_run,
