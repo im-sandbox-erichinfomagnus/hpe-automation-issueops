@@ -41,11 +41,24 @@ function formatAuditSummary(auditArtifact = {}) {
       `- Requested permission: ${request.requested_permission_label || request.requested_permission_api_value || 'n/a'}`,
       `- Designated approver: ${request.designated_approver_login || 'n/a'}`,
       `- Requester: ${request.requester_login || 'n/a'}`,
+      `- Intake mode: ${request.intake_mode || 'n/a'}`,
       `- Request status: ${request.request_status || 'submitted'}`,
       `- Central assignment: ${assignment.assignment_status || 'not_attempted'}${assignment.assigned_login ? ` (${assignment.assigned_login})` : ''}`,
       `- Approval: ${approval.approval_status || 'pending'} (${repoAccessApprovalState})`,
       approval.approver_login ? `- Approver: ${approval.approver_login}` : null,
       `- Validation: ${validation.is_valid ? 'passed' : 'failed'}`,
+      isBulkCsv
+        ? `- CSV row findings: ${(validation.csv_row_findings || request.csv_row_findings || []).length}`
+        : null,
+      isBulkCsv
+        ? `- CSV duplicate rows: ${execution.duplicate_row_count || request.bulk_csv_submission && request.bulk_csv_submission.duplicate_row_count || 0}`
+        : null,
+      isBulkCsv
+        ? `- CSV invalid rows: ${execution.invalid_row_count || request.bulk_csv_submission && request.bulk_csv_submission.invalid_row_count || 0}`
+        : null,
+      isBulkCsv && request.csv_row_numbering_convention
+        ? `- CSV row numbering: ${request.csv_row_numbering_convention}`
+        : null,
       `- Repositories requested: ${(request.requested_repository_grants || []).length}`,
       `- Granted repositories: ${execution.granted_count || execution.mutation_count || 0}`,
       `- No-op repositories: ${execution.noop_count || (reconciliation.repositories_already_satisfied || []).length || 0}`,

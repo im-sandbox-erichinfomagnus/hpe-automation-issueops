@@ -46,6 +46,7 @@ function readParsedRequestFromEnv(env = process.env) {
     parent_team: env.PARSED_PARENT_TEAM || '',
     designated_approver: env.PARSED_DESIGNATED_APPROVER || '',
     requested_repositories: env.PARSED_REQUESTED_REPOSITORIES || '',
+    bulk_csv_requested_repositories: env.PARSED_BULK_CSV_REQUESTED_REPOSITORIES || '',
     permission_level: env.PARSED_PERMISSION_LEVEL || '',
     requested_child_teams: env.PARSED_REQUESTED_CHILD_TEAMS || '',
     bulk_csv_requested_child_teams: env.PARSED_BULK_CSV_REQUESTED_CHILD_TEAMS || '',
@@ -66,6 +67,8 @@ function isTeamRepoAccessParsedRequest(parsedRequest = {}) {
     parsedRequest.parsed_target_team ||
     parsedRequest.requested_repositories ||
     parsedRequest.parsed_requested_repositories ||
+    parsedRequest.bulk_csv_requested_repositories ||
+    parsedRequest.parsed_bulk_csv_requested_repositories ||
     parsedRequest.permission_level ||
     parsedRequest.parsed_permission_level
   );
@@ -133,6 +136,9 @@ function buildMissingTokenRepoAccessValidation(request) {
     warnings: [],
     organization_visible: false,
     team_exists: false,
+    bulk_csv_submission: request.bulk_csv_submission,
+    csv_row_findings: request.csv_row_findings || [],
+    csv_row_numbering_convention: request.csv_row_numbering_convention || null,
     designated_approver_authorization: null,
     requested_repository_grants: request.requested_repository_grants.map((grant) => ({
       ...grant,
@@ -254,6 +260,7 @@ async function runRequestValidation(options = {}) {
           requested_repository_grants: validation.requested_repository_grants,
           organization_exists: validation.organization_visible,
           team_exists: validation.team_exists,
+          intake_mode: validation.request.intake_mode,
           dry_run: validation.request.dry_run,
         });
       } else if (isTeamCreation) {

@@ -1,11 +1,13 @@
 'use strict';
 
+const { unwrapCodeFence } = require('./normalize-requested-repositories');
+
 function hasNonEmptyArray(value) {
   return Array.isArray(value) && value.length > 0;
 }
 
 function hasPopulatedString(value) {
-  return typeof value === 'string' && value.trim() !== '';
+  return typeof value === 'string' && unwrapCodeFence(value).trim() !== '';
 }
 
 function determineOperation(request = {}, runContext = {}) {
@@ -62,38 +64,67 @@ function inferRequestIntakeMode(request = {}, operation = determineOperation(req
     return request.intake_mode;
   }
 
-  if (
+  const hasBulkCsvSignals = (
     hasPopulatedString(request.bulk_csv_input) ||
     hasNonEmptyArray(request.csv_row_findings) ||
     (request.bulk_csv_submission && request.bulk_csv_submission.schema_status && request.bulk_csv_submission.schema_status !== 'not_provided')
-  ) {
+  );
+  const hasManualSignals = (
+    operation === 'team_creation' && (
+      hasPopulatedString(request.requested_team_names_input) ||
+      hasNonEmptyArray(request.requested_teams) ||
+      hasNonEmptyArray(request.requested_team_detail)
+    )
+  ) || (
+    operation === 'team_membership' && (
+      hasPopulatedString(request.requested_people_input) ||
+      hasNonEmptyArray(request.requested_people)
+    )
+  ) || (
+    operation === 'team_hierarchy' && (
+      hasPopulatedString(request.requested_child_teams_input) ||
+      hasNonEmptyArray(request.requested_child_links) ||
+      hasNonEmptyArray(request.requested_child_link_detail)
+    )
+  ) || (
+    operation === 'team_repo_access' && (
+      hasPopulatedString(request.requested_repositories_input) ||
+      hasNonEmptyArray(request.requested_repository_grants) ||
+      Boolean(request.requested_permission_api_value)
+    )
+  );
+
+  if (hasBulkCsvSignals && hasManualSignals) {
+    return null;
+  }
+
+  if (hasBulkCsvSignals) {
     return 'bulk_csv';
   }
 
-  if (operation === 'team_creation' && (
-    hasPopulatedString(request.requested_team_names_input) ||
-    hasNonEmptyArray(request.requested_teams) ||
-    hasNonEmptyArray(request.requested_team_detail)
-  )) {
-    return 'manual';
-  }
-
-  if (operation === 'team_membership' && (
-    hasPopulatedString(request.requested_people_input) ||
-    hasNonEmptyArray(request.requested_people)
-  )) {
-    return 'manual';
-  }
-
-  if (operation === 'team_hierarchy' && (
-    hasPopulatedString(request.requested_child_teams_input) ||
-    hasNonEmptyArray(request.requested_child_links) ||
-    hasNonEmptyArray(request.requested_child_link_detail)
-  )) {
+  if (hasManualSignals) {
     return 'manual';
   }
 
   return null;
+}
+
+function buildDefaultRepoAccessBulkCsvSubmission(rawInput = '') {
+  return {
+    encoding: 'utf-8',
+    header_columns: [],
+    required_columns: ['repository'],
+    unsupported_columns: [],
+    row_count: 0,
+    valid_row_count: 0,
+    invalid_row_count: 0,
+    duplicate_row_count: 0,
+    schema_status: 'not_provided',
+    schema_errors: [],
+    raw_input: rawInput,
+    csv_row_findings: [],
+    csv_row_numbering_convention: '1-based data-row numbers that exclude the header row',
+  };
 }
 
 function buildAuditArtifact(input = {}) {
@@ -116,17 +147,20 @@ function buildAuditArtifact(input = {}) {
       organization: request.organization,
       team_slug: request.team_slug,
       intake_mode: intakeMode,
+      requested_repositories_input: request.requested_repositories_input || '',
       requested_people_input: request.requested_people_input || '',
       requested_team_names_input: request.requested_team_names_input || '',
       bulk_csv_input: request.bulk_csv_input || '',
-      bulk_csv_submission: request.bulk_csv_submission || null,
+      bulk_csv_submission: request.bulk_csv_submission || validation.bulk_csv_submission || (
+        operation === 'team_repo_access' ? buildDefaultRepoAccessBulkCsvSubmission(request.bulk_csv_input || '') : null
+      ),
       team_name: request.team_name,
       parent_team_slug: request.parent_team_slug,
       parent_team_name: request.parent_team_name,
       requested_child_teams_input: request.requested_child_teams_input || '',
       requested_people: request.requested_people,
-      csv_row_findings: request.csv_row_findings || [],
-      csv_row_numbering_convention: request.csv_row_numbering_convention || null,
+      csv_row_findings: request.csv_row_findings || validation.csv_row_findings || [],
+      csv_row_numbering_convention: request.csv_row_numbering_convention || validation.csv_row_numbering_convention || null,
       intended_owner_login: request.intended_owner_login,
       designated_approver_login: request.designated_approver_login,
       requested_permission_label: request.requested_permission_label,

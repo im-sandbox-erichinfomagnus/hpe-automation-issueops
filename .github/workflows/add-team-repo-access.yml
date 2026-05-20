@@ -97,12 +97,13 @@ jobs:
           PARSED_TARGET_TEAM: ${{ steps.parse_request.outputs.parsed_target_team }}
           PARSED_DESIGNATED_APPROVER: ${{ steps.parse_request.outputs.parsed_designated_approver }}
           PARSED_REQUESTED_REPOSITORIES: ${{ steps.parse_request.outputs.parsed_requested_repositories }}
+          PARSED_BULK_CSV_REQUESTED_REPOSITORIES: ${{ steps.parse_request.outputs.parsed_bulk_csv_requested_repositories }}
           PARSED_PERMISSION_LEVEL: ${{ steps.parse_request.outputs.parsed_permission_level }}
         run: |
           set -euo pipefail
 
           matches_request=false
-          if [ -n "${PARSED_TARGET_TEAM:-}" ] && [ -n "${PARSED_DESIGNATED_APPROVER:-}" ] && [ -n "${PARSED_REQUESTED_REPOSITORIES:-}" ] && [ -n "${PARSED_PERMISSION_LEVEL:-}" ]; then
+          if [ -n "${PARSED_TARGET_TEAM:-}" ] && [ -n "${PARSED_DESIGNATED_APPROVER:-}" ] && [ -n "${PARSED_PERMISSION_LEVEL:-}" ] && { [ -n "${PARSED_REQUESTED_REPOSITORIES:-}" ] || [ -n "${PARSED_BULK_CSV_REQUESTED_REPOSITORIES:-}" ]; }; then
             matches_request=true
           fi
 
@@ -126,6 +127,7 @@ jobs:
           PARSED_TARGET_TEAM: ${{ steps.parse_request.outputs.parsed_target_team }}
           PARSED_DESIGNATED_APPROVER: ${{ steps.parse_request.outputs.parsed_designated_approver }}
           PARSED_REQUESTED_REPOSITORIES: ${{ steps.parse_request.outputs.parsed_requested_repositories }}
+          PARSED_BULK_CSV_REQUESTED_REPOSITORIES: ${{ steps.parse_request.outputs.parsed_bulk_csv_requested_repositories }}
           PARSED_PERMISSION_LEVEL: ${{ steps.parse_request.outputs.parsed_permission_level }}
           PARSED_BUSINESS_JUSTIFICATION: ${{ steps.parse_request.outputs.parsed_business_justification }}
           PARSED_DRY_RUN: ${{ steps.parse_request.outputs.parsed_dry_run }}

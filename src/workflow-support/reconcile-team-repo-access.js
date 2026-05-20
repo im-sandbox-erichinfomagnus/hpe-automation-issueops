@@ -46,6 +46,7 @@ function reconcileTeamRepoAccess(input = {}) {
   return {
     organization_exists: input.organization_exists !== false,
     team_exists: input.team_exists !== false,
+    intake_mode: input.intake_mode || request.intake_mode || null,
     repositories_to_grant: repositoriesToGrant,
     repositories_already_satisfied: repositoriesAlreadySatisfied,
     repositories_rejected: repositoriesRejected,

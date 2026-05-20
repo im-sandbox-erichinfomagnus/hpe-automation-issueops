@@ -3,6 +3,28 @@
 const { parseTeamRepoAccessRequest } = require('./parse-team-repo-access-request');
 const { getPermissionRank } = require('./normalize-requested-permission');
 const { normalizeRequestedPermission } = require('./normalize-requested-permission');
+const { unwrapCodeFence } = require('./normalize-requested-repositories');
+
+function hasPopulatedInput(value) {
+  return unwrapCodeFence(value).trim() !== '';
+}
+
+function describeCsvRowIssue(finding) {
+  switch (finding.failure_reason) {
+    case 'missing_repository':
+      return `CSV row ${finding.row_number} is missing the required repository value.`;
+    case 'invalid_repository':
+      return `CSV row ${finding.row_number} contains an invalid repository${finding.repository_value ? `: ${finding.repository_value}` : ''}.`;
+    case 'repository_outside_target_organization':
+      return `CSV row ${finding.row_number} references a repository outside the target organization${finding.normalized_repository_full_name ? `: ${finding.normalized_repository_full_name}` : ''}.`;
+    case 'conflicting_repository':
+      return `CSV row ${finding.row_number} conflicts with another row after repository normalization${finding.normalized_repository_full_name ? `: ${finding.normalized_repository_full_name}` : ''}.`;
+    case 'inconsistent_shape':
+      return `CSV row ${finding.row_number} does not match the header column count.`;
+    default:
+      return `CSV row ${finding.row_number} is invalid.`;
+  }
+}
 
 function classifyRepositoryGrant(grant, request, repositoryState, currentPermissionApiValue) {
   const currentPermissionRank = getPermissionRank(currentPermissionApiValue || 'none');
@@ -132,6 +154,37 @@ async function validateTeamRepoAccessRequest(input = {}, options = {}) {
     errors.push('A supported built-in repository role is required.');
   }
 
+  const manualPopulated = hasPopulatedInput(request.requested_repositories_input);
+  const bulkCsvPopulated = hasPopulatedInput(request.bulk_csv_input);
+
+  if (manualPopulated === bulkCsvPopulated) {
+    errors.push('Exactly one intake source must be populated: requested_repositories or bulk_csv_requested_repositories.');
+  }
+
+  if (request.intake_mode === 'bulk_csv') {
+    const bulkCsvSubmission = request.bulk_csv_submission || {};
+    for (const schemaError of bulkCsvSubmission.schema_errors || []) {
+      errors.push(schemaError);
+    }
+
+    for (const finding of request.csv_row_findings || []) {
+      if (finding.validation_status === 'blank') {
+        continue;
+      }
+
+      if (finding.validation_status === 'duplicate') {
+        errors.push(
+          `CSV row ${finding.row_number} duplicates repository ${finding.repository_value || 'unknown'}.`
+        );
+        continue;
+      }
+
+      if (finding.validation_status === 'invalid') {
+        errors.push(describeCsvRowIssue(finding));
+      }
+    }
+  }
+
   if (request.requested_repository_grants.length === 0) {
     errors.push('At least one valid requested repository is required.');
   }
@@ -145,10 +198,21 @@ async function validateTeamRepoAccessRequest(input = {}, options = {}) {
   }
 
   if (request.conflicting_repositories.length > 0) {
-    const conflicting = request.conflicting_repositories
+    const outsideOrganization = request.conflicting_repositories
+      .filter((entry) => !entry.conflict_reason || entry.conflict_reason === 'repository_outside_target_organization')
       .map((entry) => entry.repository_full_name)
       .join(', ');
-    errors.push(`Repositories outside the target organization were detected: ${conflicting}`);
+    if (outsideOrganization) {
+      errors.push(`Repositories outside the target organization were detected: ${outsideOrganization}`);
+    }
+
+    const normalizedConflicts = request.conflicting_repositories
+      .filter((entry) => entry.conflict_reason === 'conflicting_repository_identifier')
+      .map((entry) => entry.repository_full_name)
+      .join(', ');
+    if (normalizedConflicts) {
+      errors.push(`Conflicting normalized repository identifiers were detected: ${normalizedConflicts}`);
+    }
   }
 
   if (request.unsupported_inputs.requested_team_names) {
@@ -290,6 +354,9 @@ async function validateTeamRepoAccessRequest(input = {}, options = {}) {
     warnings,
     organization_visible: organizationVisible,
     team_exists: teamExists,
+    bulk_csv_submission: request.bulk_csv_submission,
+    csv_row_findings: request.csv_row_findings || [],
+    csv_row_numbering_convention: request.csv_row_numbering_convention || null,
     designated_approver_authorization: designatedApproverAuthorization,
     requested_repository_grants: requestedRepositoryGrants,
     already_satisfied_repository_grants: requestedRepositoryGrants.filter(
