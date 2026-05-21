@@ -1,6 +1,26 @@
 'use strict';
 
 const { parseTeamCreationRequest } = require('./parse-team-creation-request');
+const { unwrapCodeFence } = require('./normalize-requested-teams');
+
+function hasPopulatedInput(value) {
+  return unwrapCodeFence(value).trim() !== '';
+}
+
+function describeCsvRowIssue(finding) {
+  switch (finding.failure_reason) {
+    case 'missing_team_name':
+      return `CSV row ${finding.row_number} is missing the required team_name value.`;
+    case 'invalid_team_name':
+      return `CSV row ${finding.row_number} contains an invalid team_name${finding.team_name ? `: ${finding.team_name}` : ''}.`;
+    case 'conflicting_slug':
+      return `CSV row ${finding.row_number} conflicts with another row after slug normalization${finding.normalized_slug ? `: ${finding.normalized_slug}` : ''}.`;
+    case 'inconsistent_shape':
+      return `CSV row ${finding.row_number} does not match the header column count.`;
+    default:
+      return `CSV row ${finding.row_number} is invalid.`;
+  }
+}
 
 async function validateTeamCreationRequest(input = {}, options = {}) {
   const request = input.request_id ? input : parseTeamCreationRequest(input);
@@ -18,11 +38,42 @@ async function validateTeamCreationRequest(input = {}, options = {}) {
     errors.push('A single intended owner is required.');
   }
 
+  const manualPopulated = hasPopulatedInput(request.requested_team_names_input);
+  const bulkCsvPopulated = hasPopulatedInput(request.bulk_csv_input);
+
+  if (manualPopulated === bulkCsvPopulated) {
+    errors.push('Exactly one intake source must be populated: requested_team_names or bulk_csv_requested_team_names.');
+  }
+
+  if (request.intake_mode === 'bulk_csv') {
+    const bulkCsvSubmission = request.bulk_csv_submission || {};
+    for (const schemaError of bulkCsvSubmission.schema_errors || []) {
+      errors.push(schemaError);
+    }
+
+    for (const finding of request.csv_row_findings || []) {
+      if (finding.validation_status === 'blank') {
+        continue;
+      }
+
+      if (finding.validation_status === 'duplicate') {
+        warnings.push(
+          `CSV row ${finding.row_number} duplicates team ${finding.team_name || 'unknown'} and was deduplicated.`
+        );
+        continue;
+      }
+
+      if (finding.validation_status === 'invalid') {
+        errors.push(describeCsvRowIssue(finding));
+      }
+    }
+  }
+
   if (request.requested_teams.length === 0) {
     errors.push('At least one valid requested team name is required.');
   }
 
-  if (request.invalid_team_names.length > 0) {
+  if (request.intake_mode !== 'bulk_csv' && request.invalid_team_names.length > 0) {
     errors.push(`Invalid team names: ${request.invalid_team_names.join(', ')}`);
   }
 
@@ -132,6 +183,9 @@ async function validateTeamCreationRequest(input = {}, options = {}) {
     warnings,
     organization_visible: organizationVisible,
     intended_owner_membership: intendedOwnerMembership,
+    bulk_csv_submission: request.bulk_csv_submission,
+    csv_row_findings: request.csv_row_findings || [],
+    csv_row_numbering_convention: request.csv_row_numbering_convention,
     requested_teams: requestedTeams,
     existing_teams: requestedTeams.filter((team) => team.desired_action === 'noop'),
     request: {

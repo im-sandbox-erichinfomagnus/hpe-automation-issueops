@@ -48,6 +48,7 @@ function reconcileTeamCreation(input = {}) {
 
   return {
     organization_exists: input.organization_exists !== false,
+    intake_mode: request.intake_mode || null,
     teams_to_create: teamsToCreate,
     teams_already_present: teamsAlreadyPresent,
     teams_rejected: teamsRejected,

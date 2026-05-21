@@ -67,6 +67,32 @@ test('approval policy rejects approval by a user other than the intended owner',
   assert.equal(decision.approver_role, 'other');
 });
 
+test('approval policy keeps the same intended-owner requirement for CSV-compatible team-creation requests', async () => {
+  const fixture = loadFixture().approved;
+  const decision = await evaluateApprovalGate(
+    {
+      organization: 'im-sandbox-himanshu',
+      intendedOwnerLogin: 'himanshu-im',
+      approvalMode: 'team_creation',
+      intakeMode: 'bulk_csv',
+      issueComments: fixture.comments,
+    },
+    {
+      resolveRole: ({ organization, approverLogin }) =>
+        resolveTeamCreationApprover(
+          { organization, approverLogin, intendedOwnerLogin: 'himanshu-im' },
+          {
+            getOrganizationMembership: async ({ username }) => fixture.memberships[username] || { exists: false },
+          }
+        ),
+    }
+  );
+
+  assert.equal(decision.approval_status, 'approved');
+  assert.equal(decision.approver_login, 'himanshu-im');
+  assert.equal(decision.approver_role, 'intended_owner');
+});
+
 test('resolveTeamCreationApprover requires the intended owner to be an active member', async () => {
   const fixture = loadFixture().denied_inactive_owner;
   const decision = await resolveTeamCreationApprover(

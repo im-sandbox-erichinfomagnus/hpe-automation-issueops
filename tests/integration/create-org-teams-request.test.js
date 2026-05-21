@@ -50,8 +50,19 @@ test('runRequestValidation records an approval-ready create-org-teams request wi
 
   assert.equal(result.validation.is_valid, true);
   assert.equal(result.validation.request_status, 'awaiting_approval');
+  assert.equal(result.validation.request.intake_mode, 'manual');
+  assert.equal(result.validation.request.bulk_csv_submission, null);
+  assert.deepEqual(result.validation.request.csv_row_findings, []);
+  assert.equal(result.validation.request.csv_row_numbering_convention, null);
+  assert.deepEqual(result.validation.request.requested_team_names_input, ['Platform Engineering', 'Release Managers']);
   assert.equal(result.validation.existing_teams.length, 1);
+  assert.equal(result.auditArtifact.request.intake_mode, 'manual');
+  assert.equal(result.auditArtifact.request.bulk_csv_submission, null);
+  assert.deepEqual(result.auditArtifact.request.csv_row_findings, []);
+  assert.equal(result.auditArtifact.request.csv_row_numbering_convention, null);
   assert.equal(result.auditArtifact.request.intended_owner_login, 'octocat');
+  assert.match(fs.readFileSync(summaryPath, 'utf8'), /Intake mode: manual/i);
+  assert.doesNotMatch(fs.readFileSync(summaryPath, 'utf8'), /CSV row/i);
   assert.match(fs.readFileSync(summaryPath, 'utf8'), /Create Organization Teams Workflow Summary/);
   assert.match(fs.readFileSync(outputPath, 'utf8'), /validation-status=awaiting_approval/);
 
@@ -94,5 +105,47 @@ test('runRequestValidation fails when the intended owner is not active in the ta
 
   assert.equal(result.validation.is_valid, false);
   assert.equal(result.validation.request_status, 'validation_failed');
+  assert.equal(result.validation.request.intake_mode, 'manual');
+  assert.equal(result.validation.request.bulk_csv_input, '');
   assert.match(result.validation.errors.join('\n'), /intended owner is not an active member/i);
+});
+
+test('runRequestValidation rejects ambiguous create-org-teams requests when neither manual nor CSV intake is populated', async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'create-org-teams-ambiguous-'));
+  const auditPath = path.join(workspace, 'audit.json');
+  const summaryPath = path.join(workspace, 'summary.md');
+  const validationFixture = loadJsonFixture('team-creation-validation.json').visible_org;
+
+  const result = await runRequestValidation({
+    env: {
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      GITHUB_REPOSITORY: 'octo-org/issueops-speckit',
+      ISSUE_NUMBER: '403',
+      REQUESTER_LOGIN: 'requester',
+      PARSED_REQUEST_JSON: JSON.stringify({
+        organization: 'octo-org',
+        intended_owner: 'octocat',
+        requested_team_names: '',
+        bulk_csv_requested_team_names: '',
+        business_justification: 'Need empty teams',
+        dry_run: true,
+      }),
+      AUDIT_ARTIFACT_PATH: auditPath,
+      GITHUB_STEP_SUMMARY: summaryPath,
+      GITHUB_RUN_ID: 'run-403',
+      GITHUB_RUN_ATTEMPT: '1',
+    },
+    api: {
+      getOrganization: async () => validationFixture.organization,
+      getOrganizationMembership: async ({ username }) => validationFixture.memberships[username] || { exists: false },
+      listOrgTeams: async () => [],
+    },
+  });
+
+  assert.equal(result.validation.is_valid, false);
+  assert.equal(result.validation.request_status, 'validation_failed');
+  assert.equal(result.validation.request.intake_mode, null);
+  assert.match(result.validation.errors.join('\n'), /Exactly one intake source must be populated/i);
+  assert.match(result.validation.errors.join('\n'), /At least one valid requested team name is required/i);
+  assert.match(fs.readFileSync(summaryPath, 'utf8'), /Validation errors: .*Exactly one intake source must be populated/i);
 });

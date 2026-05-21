@@ -53,7 +53,22 @@ test('parses a valid create-org-teams fixture into a normalized request', () => 
     request.requested_teams.map((team) => team.normalized_slug),
     ['platform-engineering', 'release-managers']
   );
+  assert.equal(request.intake_mode, 'manual');
+  assert.equal(request.requested_team_names_input, parsedRequest.requested_team_names);
+  assert.equal(request.bulk_csv_input, '');
+  assert.equal(request.bulk_csv_submission, null);
+  assert.deepEqual(request.csv_row_findings, []);
+  assert.equal(request.csv_row_numbering_convention, null);
   assert.equal(request.dry_run, true);
+});
+
+test('manual create-org-teams guidance remains visible in the issue form', () => {
+  const templatePath = path.join(__dirname, '..', '..', '.github', 'ISSUE_TEMPLATE', 'create-org-teams.yml');
+  const template = fs.readFileSync(templatePath, 'utf8');
+
+  assert.match(template, /id:\s+requested_team_names/);
+  assert.match(template, /manual request path/i);
+  assert.match(template, /one empty team name per line/i);
 });
 
 test('tracks duplicate team names from a fixture-derived submission', () => {
@@ -124,6 +139,22 @@ test('rejects conflicting normalized team slugs', async () => {
 
   assert.equal(validation.is_valid, false);
   assert.match(validation.errors.join('\n'), /Conflicting normalized team slugs/i);
+});
+
+test('preserves manual-mode validation defaults while exposing empty CSV metadata', async () => {
+  const parsedRequest = loadBaseFixture();
+
+  const validation = await validateTeamCreationRequest({
+    parsedRequest,
+    issue: { number: 308, user: { login: 'requester' } },
+    repository: 'octo-org/issueops-speckit',
+  });
+
+  assert.equal(validation.request.intake_mode, 'manual');
+  assert.equal(validation.request.bulk_csv_submission, null);
+  assert.deepEqual(validation.request.csv_row_findings, []);
+  assert.equal(validation.request.csv_row_numbering_convention, null);
+  assert.equal(validation.request.requested_team_names_input, parsedRequest.requested_team_names);
 });
 
 test('rejects out-of-scope parent-team input with a clear message', async () => {

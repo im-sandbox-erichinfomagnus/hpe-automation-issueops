@@ -61,3 +61,36 @@ test('reconciliation emits a no-op plan when all requested teams are already pre
   assert.deepEqual(plan.teams_already_present.map((entry) => entry.normalized_slug), ['platform-engineering']);
   assert.equal(plan.state, 'validated');
 });
+
+test('bulk CSV reconciliation preserves intake mode and source row provenance across create and no-op buckets', () => {
+  const scenario = loadFixture().existing_team;
+  const plan = reconcileTeamCreation({
+    request: { dry_run: false, intake_mode: 'bulk_csv' },
+    validatedTeams: [
+      {
+        requested_name: 'Platform Engineering',
+        normalized_slug: 'platform-engineering',
+        source_row_number: 1,
+        validation_status: 'existing',
+        desired_action: 'noop',
+      },
+      {
+        requested_name: 'AI Model Routing Specialists',
+        normalized_slug: 'ai-model-routing-specialists',
+        source_row_number: 2,
+        validation_status: 'valid',
+      },
+    ],
+    currentTeams: scenario,
+  });
+
+  assert.equal(plan.intake_mode, 'bulk_csv');
+  assert.deepEqual(
+    plan.teams_already_present.map((entry) => ({ normalized_slug: entry.normalized_slug, source_row_number: entry.source_row_number })),
+    [{ normalized_slug: 'platform-engineering', source_row_number: 1 }]
+  );
+  assert.deepEqual(
+    plan.teams_to_create.map((entry) => ({ normalized_slug: entry.normalized_slug, source_row_number: entry.source_row_number })),
+    [{ normalized_slug: 'ai-model-routing-specialists', source_row_number: 2 }]
+  );
+});

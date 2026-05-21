@@ -1,0 +1,178 @@
+name: create-org-teams-bulk-csv-workflow-contract
+version: 1
+purpose: >-
+  Contract for the IssueOps workflow enhancement that preserves the existing
+  create-org-teams manual request path and adds an optional bulk CSV textarea
+  for higher-volume empty-team creation requests.
+
+issue_form:
+  path: .github/ISSUE_TEMPLATE/create-org-teams.yml
+  required_fields:
+    - id: organization
+      type: input
+      description: Target GitHub organization slug.
+    - id: intended_owner
+      type: input
+      description: GitHub login of the single intended owner who must approve the full request batch.
+    - id: business_justification
+      type: textarea
+      description: Reason for creating the requested teams.
+    - id: dry_run
+      type: dropdown
+      description: Whether to execute validation only or allow creation after approval.
+  conditional_fields:
+    - id: requested_team_names
+      type: textarea
+      description: Existing manual input path for one or more requested team names.
+      rules:
+        - May be populated only when bulk_csv_requested_team_names is empty.
+        - Accepts one team name per line for backward compatibility.
+    - id: bulk_csv_requested_team_names
+      type: textarea
+      description: Optional bulk CSV textarea containing a UTF-8 CSV payload with a header row.
+      rules:
+        - May be populated only when requested_team_names is empty.
+        - Must contain a header row with the required column `team_name`.
+        - Must not include row-level intended-owner, organization, parent-team, or membership columns.
+
+parser:
+  action: issue-ops/parser@v5
+  inputs:
+    body: ${{ github.event.issue.body }}
+    issue-form-template: create-org-teams.yml
+  outputs:
+    json: Parsed request payload as JSON string.
+    parsed_organization: Normalized organization field.
+    parsed_intended_owner: Normalized intended-owner field.
+    parsed_requested_team_names: Parsed manual team-name field before downstream normalization.
+    parsed_bulk_csv_requested_team_names: Parsed bulk CSV textarea before downstream normalization.
+    parsed_dry_run: Parsed dry-run selection.
+
+workflow_inputs:
+  validation:
+    - name: organization
+      required: true
+    - name: intended_owner
+      required: true
+    - name: intake_mode
+      required: true
+      allowed:
+        - manual
+        - bulk_csv
+    - name: requested_team_names
+      required: false
+    - name: bulk_csv_requested_team_names
+      required: false
+    - name: requester_login
+      required: true
+    - name: dry_run
+      required: true
+  approval_gate:
+    - name: approver_login
+      required: true
+    - name: intended_owner
+      required: true
+  reconciliation:
+    - name: execution_token_source
+      required: true
+      description: PAT-backed workflow token source.
+    - name: audit_artifact_path
+      required: true
+      description: Persisted validation and approval artifact used by the execution runner.
+  workflow_env:
+    - name: ISSUEOPS_GITHUB_TOKEN
+      required: true
+      description: PAT-backed organization secret used for validation, approval verification, and team creation.
+    - name: GITHUB_TOKEN
+      required: true
+      description: Default GitHub Actions repository token used for standard workflow context operations.
+
+authorization:
+  requester_identity: github.event.issue.user.login
+  allowed_approvers:
+    - single intended owner designated for the full request batch
+  execution_identity:
+    model: personal access token supplied to the workflow from ISSUEOPS_GITHUB_TOKEN
+    bootstrap: repository or organization Actions secret injection
+    required_permissions:
+      members: write
+      metadata: read
+      issues: write
+
+validation_rules:
+  - Exactly one intake source must be populated: `requested_team_names` or `bulk_csv_requested_team_names`.
+  - A request that populates neither intake source must fail validation before approval or mutation.
+  - Manual-mode behavior must remain equivalent to the baseline create-org-teams workflow.
+  - Bulk CSV submissions must provide a header row containing `team_name`.
+  - Properly quoted `team_name` values are valid CSV input and must normalize the same as equivalent unquoted team names.
+  - CSV row findings must use 1-based data-row numbers that exclude the header row.
+  - Team names from CSV are normalized into the same slug derivation and conflict rules used by the manual path.
+  - Fully blank CSV rows are ignored for approval-readiness purposes but remain visible in row findings.
+  - Unsupported CSV columns are rejected because the enhancement remains within one organization, one shared intended owner, and empty-team-only scope.
+  - Row-level intended-owner, parent-team, team-membership, or multi-organization data must be rejected.
+  - Out-of-scope parent-team or team-membership input on an otherwise valid create request must still be reported by the create-org-teams validator rather than rerouting to another workflow contract.
+  - The target organization must exist and be visible to the executing identity.
+  - The intended owner must be an active member of the target organization.
+  - Approval must be present as an issue comment containing exactly `approved` and must be granted by the intended owner.
+
+reconciliation:
+  current_state_reads:
+    - target organization visibility lookup
+    - existing team-by-slug lookup for each requested team
+    - intended-owner organization membership lookup
+  mutation_rule: Create only missing teams in the target organization after intake normalization produces one deduplicated requested-team list.
+  no_op_rule: Report already existing teams without rewriting them.
+  partial_success_rule: Persist per-team success or failure and surface required follow-up.
+
+rate_limit_handling:
+  inspect_headers:
+    - x-ratelimit-remaining
+    - x-ratelimit-reset
+    - retry-after
+  retry_policy:
+    strategy: bounded exponential backoff
+    retryable_conditions:
+      - transient secondary rate limit
+      - explicit retry-after guidance
+    non_retryable_conditions:
+      - invalid approval
+      - malformed team definition
+      - missing target organization
+      - conflicting normalized team slug
+      - malformed or ambiguous CSV intake
+
+observability:
+  outputs:
+    - GitHub step summary
+    - JSON audit artifact
+    - requester-facing workflow summary in the Actions run
+  required_fields:
+    - issue_number
+    - run_id
+    - requester_login
+    - approver_login
+    - organization
+    - intended_owner
+    - intake_mode
+    - requested_team_names
+    - requested_teams.source_row_number
+    - duplicate_row_count
+    - invalid_row_count
+    - csv_row_findings
+    - csv_row_numbering_convention
+    - created_teams.source_row_number
+    - noop_teams.source_row_number
+    - failed_teams.source_row_number
+    - created_teams
+    - noop_teams
+    - failed_teams
+    - rollback_status
+    - reconciliation.intake_mode
+    - reconciliation.teams_to_create.source_row_number
+    - reconciliation.teams_already_present.source_row_number
+    - reconciliation.teams_to_create
+    - reconciliation.teams_already_present
+  operator_notes:
+    - Central assignment is queue ownership only and does not authorize team creation.
+    - Successful team creation summaries must note that GitHub automatically makes the authenticated creator a team maintainer.
+    - Approved reruns must preserve CSV duplicate-row counts, invalid-row counts, and `source_row_number` provenance even when execution is fully no-op.

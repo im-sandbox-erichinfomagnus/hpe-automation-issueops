@@ -4,6 +4,10 @@ function hasNonEmptyArray(value) {
   return Array.isArray(value) && value.length > 0;
 }
 
+function hasPopulatedString(value) {
+  return typeof value === 'string' && value.trim() !== '';
+}
+
 function determineOperation(request = {}, runContext = {}) {
   const explicitOperation = runContext.operation || request.operation;
   if (explicitOperation) {
@@ -53,6 +57,37 @@ function determineOperation(request = {}, runContext = {}) {
   return 'team_membership';
 }
 
+function inferRequestIntakeMode(request = {}, operation = determineOperation(request)) {
+  if (request.intake_mode) {
+    return request.intake_mode;
+  }
+
+  if (
+    hasPopulatedString(request.bulk_csv_input) ||
+    hasNonEmptyArray(request.csv_row_findings) ||
+    (request.bulk_csv_submission && request.bulk_csv_submission.schema_status && request.bulk_csv_submission.schema_status !== 'not_provided')
+  ) {
+    return 'bulk_csv';
+  }
+
+  if (operation === 'team_creation' && (
+    hasPopulatedString(request.requested_team_names_input) ||
+    hasNonEmptyArray(request.requested_teams) ||
+    hasNonEmptyArray(request.requested_team_detail)
+  )) {
+    return 'manual';
+  }
+
+  if (operation === 'team_membership' && (
+    hasPopulatedString(request.requested_people_input) ||
+    hasNonEmptyArray(request.requested_people)
+  )) {
+    return 'manual';
+  }
+
+  return null;
+}
+
 function buildAuditArtifact(input = {}) {
   const request = input.request || {};
   const validation = input.validation || {};
@@ -62,6 +97,7 @@ function buildAuditArtifact(input = {}) {
   const executionOutcome = input.executionOutcome || input.execution_outcome || {};
   const runContext = input.runContext || input.run_context || {};
   const operation = determineOperation(request, runContext);
+  const intakeMode = inferRequestIntakeMode(request, operation);
 
   return {
     request: {
@@ -71,8 +107,9 @@ function buildAuditArtifact(input = {}) {
       requester_login: request.requester_login,
       organization: request.organization,
       team_slug: request.team_slug,
-      intake_mode: request.intake_mode || null,
+      intake_mode: intakeMode,
       requested_people_input: request.requested_people_input || '',
+      requested_team_names_input: request.requested_team_names_input || '',
       bulk_csv_input: request.bulk_csv_input || '',
       bulk_csv_submission: request.bulk_csv_submission || null,
       team_name: request.team_name,
@@ -157,6 +194,7 @@ function buildAuditArtifact(input = {}) {
       teams_to_create: reconciliationPlan.teams_to_create || [],
       teams_already_present: reconciliationPlan.teams_already_present || [],
       teams_rejected: reconciliationPlan.teams_rejected || [],
+      intake_mode: reconciliationPlan.intake_mode || intakeMode,
       child_links_to_apply: reconciliationPlan.child_links_to_apply || [],
       child_links_already_present: reconciliationPlan.child_links_already_present || [],
       child_links_rejected: reconciliationPlan.child_links_rejected || [],
@@ -181,5 +219,6 @@ function toAuditArtifactJson(input = {}) {
 module.exports = {
   buildAuditArtifact,
   determineOperation,
+  inferRequestIntakeMode,
   toAuditArtifactJson,
 };

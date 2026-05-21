@@ -22,6 +22,76 @@ function writeArtifact(baseArtifact) {
   return artifactPath;
 }
 
+function createBulkCsvApprovedArtifact() {
+  const artifact = loadFixture('create-team-success.json').approved_artifact;
+  artifact.request.intake_mode = 'bulk_csv';
+  artifact.request.bulk_csv_input = '```csv\nteam_name\nPlatform Engineering\nAI Model Routing Specialists\n```';
+  artifact.request.bulk_csv_submission = {
+    encoding: 'utf-8',
+    header_columns: ['team_name'],
+    required_columns: ['team_name'],
+    unsupported_columns: [],
+    row_count: 3,
+    valid_row_count: 2,
+    invalid_row_count: 0,
+    duplicate_row_count: 1,
+    schema_status: 'valid',
+    schema_errors: [],
+  };
+  artifact.request.csv_row_findings = [
+    {
+      row_number: 1,
+      original_row: 'Platform Engineering',
+      team_name: 'Platform Engineering',
+      normalized_slug: 'platform-engineering',
+      validation_status: 'valid',
+      failure_reason: null,
+    },
+    {
+      row_number: 2,
+      original_row: 'AI Model Routing Specialists',
+      team_name: 'AI Model Routing Specialists',
+      normalized_slug: 'ai-model-routing-specialists',
+      validation_status: 'valid',
+      failure_reason: null,
+    },
+    {
+      row_number: 3,
+      original_row: 'Platform Engineering',
+      team_name: 'Platform Engineering',
+      normalized_slug: 'platform-engineering',
+      validation_status: 'duplicate',
+      failure_reason: 'duplicate_slug',
+    },
+  ];
+  artifact.request.csv_row_numbering_convention = '1-based data-row numbers that exclude the header row';
+  artifact.request.requested_teams = [
+    {
+      requested_name: 'Platform Engineering',
+      normalized_slug: 'platform-engineering',
+      intended_owner_login: 'himanshu-im',
+      source_row_number: 1,
+      validation_status: 'valid',
+      desired_action: 'create_team',
+      execution_result: 'not_started',
+      failure_reason: null,
+    },
+    {
+      requested_name: 'AI Model Routing Specialists',
+      normalized_slug: 'ai-model-routing-specialists',
+      intended_owner_login: 'himanshu-im',
+      source_row_number: 2,
+      validation_status: 'valid',
+      desired_action: 'create_team',
+      execution_result: 'not_started',
+      failure_reason: null,
+    },
+  ];
+  artifact.validation.csv_row_findings = [...artifact.request.csv_row_findings];
+  artifact.validation.requested_teams = [...artifact.request.requested_teams];
+  return artifact;
+}
+
 test('executes approved team creation and records created teams', async () => {
   const baseArtifact = loadFixture('create-team-success.json').approved_artifact;
   const artifactPath = writeArtifact(baseArtifact);
@@ -249,4 +319,120 @@ test('execution summary documents the creator-maintainer constraint for operator
   });
 
   assert.match(result.execution.summary, /creator becomes a team maintainer/i);
+});
+
+test('bulk CSV reruns preserve CSV counts and row provenance for no-op execution', async () => {
+  const artifactPath = writeArtifact(createBulkCsvApprovedArtifact());
+
+  const result = await runApprovedExecution({
+    env: {
+      AUDIT_ARTIFACT_PATH: artifactPath,
+    },
+    tokenInfo: { token: 'test-token', source: 'ISSUEOPS_GITHUB_TOKEN', is_pat_backed: true, token_kind: 'pat' },
+    createApi: () => ({
+      listOrgTeams: async () => [
+        { id: 1, name: 'Platform Engineering', slug: 'platform-engineering' },
+        { id: 2, name: 'AI Model Routing Specialists', slug: 'ai-model-routing-specialists' },
+      ],
+      createTeam: async () => {
+        throw new Error('mutation should not run for satisfied teams');
+      },
+    }),
+  });
+
+  const persisted = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
+  const summary = formatAuditSummary(persisted);
+
+  assert.equal(result.request.request_status, 'executed');
+  assert.equal(persisted.execution.duplicate_row_count, 1);
+  assert.equal(persisted.execution.invalid_row_count, 0);
+  assert.deepEqual(
+    persisted.reconciliation.teams_already_present.map((entry) => entry.source_row_number),
+    [1, 2]
+  );
+  assert.deepEqual(
+    persisted.execution.noop_teams.map((entry) => entry.source_row_number),
+    [1, 2]
+  );
+  assert.match(summary, /Intake mode: bulk_csv/i);
+  assert.match(summary, /CSV duplicate rows: 1/i);
+  assert.match(summary, /No-op: 2/i);
+});
+
+test('partial failure for bulk CSV team creation keeps CSV execution details and failed row provenance', async () => {
+  const artifactPath = writeArtifact(createBulkCsvApprovedArtifact());
+  let firstCall = true;
+
+  const result = await runApprovedExecution({
+    env: {
+      AUDIT_ARTIFACT_PATH: artifactPath,
+    },
+    tokenInfo: { token: 'test-token', source: 'ISSUEOPS_GITHUB_TOKEN', is_pat_backed: true, token_kind: 'pat' },
+    createApi: () => ({
+      listOrgTeams: async () => [],
+      createTeam: async ({ name }) => {
+        if (firstCall) {
+          firstCall = false;
+          return { id: 1, name, slug: 'platform-engineering' };
+        }
+
+        const error = new Error('Failed to create team');
+        error.status = 422;
+        error.payload = { message: 'Validation failed' };
+        error.headers = {};
+        throw error;
+      },
+    }),
+    sleep: async () => {
+      throw new Error('sleep should not be called for non-retryable failures');
+    },
+  });
+
+  const persisted = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
+
+  assert.equal(result.request.request_status, 'partially_executed');
+  assert.equal(persisted.execution.duplicate_row_count, 1);
+  assert.equal(persisted.execution.invalid_row_count, 0);
+  assert.deepEqual(
+    persisted.execution.created_teams.map((entry) => entry.source_row_number),
+    [1]
+  );
+  assert.deepEqual(
+    persisted.execution.failed_teams.map((entry) => entry.source_row_number),
+    [2]
+  );
+  assert.match(result.execution.remediation_instructions[0], /ai-model-routing-specialists/i);
+});
+
+test('retryable rate-limit handling for bulk CSV team creation preserves CSV execution metadata', async () => {
+  const artifactPath = writeArtifact(createBulkCsvApprovedArtifact());
+  const rateLimitError = loadFixture('team-create-rate-limit.json').secondary_limit_error;
+  let attempts = 0;
+
+  const result = await runApprovedExecution({
+    env: {
+      AUDIT_ARTIFACT_PATH: artifactPath,
+    },
+    tokenInfo: { token: 'test-token', source: 'ISSUEOPS_GITHUB_TOKEN', is_pat_backed: true, token_kind: 'pat' },
+    createApi: () => ({
+      listOrgTeams: async () => [],
+      createTeam: async ({ name }) => {
+        attempts += 1;
+        if (attempts === 1) {
+          const error = new Error('secondary rate limit');
+          error.status = rateLimitError.status;
+          error.payload = rateLimitError.payload;
+          error.headers = rateLimitError.headers;
+          throw error;
+        }
+        return { id: attempts, name, slug: name.toLowerCase().replace(/[^a-z0-9]+/g, '-') };
+      },
+    }),
+    sleep: async () => {},
+  });
+
+  assert.equal(result.request.request_status, 'executed');
+  assert.equal(result.execution.duplicate_row_count, 1);
+  assert.equal(result.execution.invalid_row_count, 0);
+  assert.equal(result.reconciliation.rate_limit_snapshot.retry_after_seconds, 2);
 });
