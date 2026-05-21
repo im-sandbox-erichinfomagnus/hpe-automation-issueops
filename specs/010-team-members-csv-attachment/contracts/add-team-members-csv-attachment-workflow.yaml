@@ -1,0 +1,213 @@
+name: add-team-members-csv-attachment-workflow-contract
+version: 1
+purpose: >-
+  Contract for the IssueOps workflow enhancement that preserves the existing
+  add-team-members manual request path and adds a requester-comment CSV
+  attachment intake mode for high-volume membership requests.
+
+scaffolding:
+  fixtures:
+    - tests/fixtures/add-team-members-csv-attachment-issue.md
+    - tests/fixtures/add-team-members-csv-attachment-comments.json
+  tests:
+    - tests/contract/add-team-members-csv-attachment-parser-fixture.test.js
+    - tests/contract/add-team-members-csv-attachment-validation.test.js
+    - tests/integration/add-team-members-csv-attachment-request.test.js
+
+issue_form:
+  path: .github/ISSUE_TEMPLATE/add-team-members.yml
+  required_fields:
+    - id: organization
+      type: input
+      description: Target GitHub organization slug.
+    - id: team_slug
+      type: input
+      description: Target team slug or canonical team identifier.
+    - id: intake_mode
+      type: dropdown
+      description: Select whether the request uses manual usernames or CSV attachment intake.
+      allowed:
+        - manual
+        - csv_attachment
+    - id: business_justification
+      type: textarea
+      description: Reason for the requested team membership changes.
+    - id: dry_run
+      type: dropdown
+      description: Whether to execute validation only or allow mutation after approval.
+  conditional_fields:
+    - id: requested_people
+      type: textarea
+      description: Existing manual input path for one or more GitHub usernames.
+      rules:
+        - May be populated only when intake_mode is manual.
+        - Accepts one username per line or comma-separated values for backward compatibility.
+        - Must be empty when intake_mode is csv_attachment.
+
+parser:
+  action: issue-ops/parser@v5
+  inputs:
+    body: ${{ github.event.issue.body }}
+    issue-form-template: add-team-members.yml
+  outputs:
+    json: Parsed request payload as JSON string.
+    parsed_organization: Normalized organization field.
+    parsed_team_slug: Normalized target team field.
+    parsed_intake_mode: Parsed intake mode selection.
+    parsed_requested_people: Parsed manual people field before downstream normalization.
+    parsed_dry_run: Parsed dry-run selection.
+
+workflow_inputs:
+  validation:
+    - name: organization
+      required: true
+    - name: team_slug
+      required: true
+    - name: intake_mode
+      required: true
+      allowed:
+        - manual
+        - csv_attachment
+    - name: requested_people
+      required: false
+    - name: requester_login
+      required: true
+    - name: issue_number
+      required: true
+    - name: event_name
+      required: true
+    - name: dry_run
+      required: true
+  comment_context:
+    - name: comment_id
+      required: false
+      description: Issue comment id from the issue_comment event when present.
+    - name: comment_author_login
+      required: false
+      description: Author login of the triggering issue comment.
+    - name: issue_comments
+      required: false
+      description: Repository issue comments read during attachment discovery and approval evaluation.
+    - name: issue_labels_json
+      required: false
+      description: Serialized issue labels used to preserve terminal-state ignore behavior on fresh runners.
+  approval_gate:
+    - name: approver_login
+      required: true
+    - name: approver_role
+      required: true
+      allowed:
+        - org_owner
+  reconciliation:
+    - name: execution_token_source
+      required: true
+      description: PAT-backed workflow token source.
+    - name: audit_artifact_path
+      required: true
+      description: Persisted validation and approval artifact used by the execution runner.
+
+authorization:
+  requester_identity: github.event.issue.user.login
+  attachment_uploader_requirement: The accepted CSV attachment comment author must equal the requester identity.
+  allowed_approvers:
+    - organization owner
+  execution_identity:
+    model: personal access token supplied to the workflow
+    bootstrap: repository or organization secret injection
+    required_permissions:
+      issues: read
+      members: write
+      metadata: read
+
+validation_rules:
+  - Exactly one supported intake mode must be selected.
+  - Manual-mode behavior must remain equivalent to the baseline add-team-members workflow.
+  - When intake_mode is csv_attachment, the initial issue validation result is waiting_for_attachment rather than approval-ready.
+  - Approval must not be requested while the request is waiting_for_attachment.
+  - Attachment candidates are discovered from issue comment content and linked URLs rather than a dedicated issue-attachment API resource.
+  - Only requester-authored comments on the same issue may supply an accepted attachment.
+  - The active attachment candidate is the newest requester attachment comment posted after the latest failed CSV-attachment validation result.
+  - Comments without an acceptable attachment do not advance the request.
+  - Exactly one CSV attachment must be accepted for an active attachment-validation attempt.
+  - Accepted attachments must satisfy the configured size cap, decode as UTF-8 text, and have an inferable `.csv` filename extension when filename inference is available.
+  - Attachment downloads use bounded retry for retryable GitHub-hosted content failures and preserve the latest rate-limit snapshot in the audit artifact.
+  - Attachment provenance must record attachment URL, comment id, uploader login, filename if inferable, content hash, and download timestamp.
+  - CSV row findings must use 1-based data-row numbers that exclude the header row.
+  - Attachment-derived CSV must preserve the required `username` header and the same normalization, duplicate handling, blank-row handling, and invalid-username behavior defined for feature 006.
+  - Invalid CSV content blocks approval readiness and requires the requester to post a corrected attachment in a later comment.
+  - The target team must exist and be visible to the executing identity.
+  - Requested people that cannot be resolved to valid GitHub accounts must not be mutated.
+  - Approval must be present as an issue comment containing exactly `approved` and must be granted by an organization owner.
+  - Later attachment comments must be ignored once the request has reached an executed terminal state.
+
+reconciliation:
+  current_state_reads:
+    - issue comments lookup for attachment discovery and approval detection
+    - team existence lookup
+    - current team memberships lookup
+    - per-user membership state lookup when needed
+  mutation_rule: Add only missing users to the target team after accepted attachment content is normalized into one deduplicated requested_people list.
+  no_op_rule: Report already active or pending memberships without rewriting them.
+  partial_success_rule: Persist per-user success or failure and surface required follow-up.
+  terminal_state_rule: Executed, partially_executed, and failed-after-approved-execution requests are not reopened by later attachment comments.
+  terminal_state_signal:
+    restore_source: Latest prior per-issue audit artifact when available.
+    fallback_labels:
+      - issueops:add-team-members:executed
+      - issueops:add-team-members:partially_executed
+      - issueops:add-team-members:failed
+  dry_run_rule: Approved dry-run attachment requests stop before membership mutation and retain attachment provenance in the persisted audit state.
+
+rate_limit_handling:
+  inspect_headers:
+    - x-ratelimit-remaining
+    - x-ratelimit-reset
+    - retry-after
+  retry_policy:
+    strategy: bounded exponential backoff
+    retryable_conditions:
+      - transient secondary rate limit
+      - explicit retry-after guidance
+      - transient attachment-download failure from GitHub-hosted content
+    non_retryable_conditions:
+      - team synchronization forbidden
+      - invalid approval
+      - missing target team
+      - ambiguous attachment discovery
+      - oversized attachment
+      - UTF-8 decode failure
+      - malformed or invalid CSV content
+
+observability:
+  outputs:
+    - GitHub step summary
+    - JSON audit artifact
+    - requester-facing workflow summary in the Actions run
+  required_fields:
+    - issue_number
+    - run_id
+    - requester_login
+    - approver_login
+    - organization
+    - team_slug
+    - intake_mode
+    - request_status
+    - attachment_url
+    - attachment_comment_id
+    - attachment_uploader_login
+    - attachment_filename
+    - attachment_content_hash
+    - attachment_downloaded_at
+    - attachment_rate_limit_snapshot
+    - requested_people
+    - duplicate_people
+    - duplicate_row_count
+    - invalid_row_count
+    - csv_row_findings
+    - csv_row_numbering_convention
+    - added_people
+    - noop_people
+    - failed_people
+    - rollback_status
+    - reconciliation.people_to_add
+    - reconciliation.people_already_present

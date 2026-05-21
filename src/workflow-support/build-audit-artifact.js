@@ -64,6 +64,10 @@ function inferRequestIntakeMode(request = {}, operation = determineOperation(req
     return request.intake_mode;
   }
 
+  if (request.accepted_attachment_submission && request.accepted_attachment_submission.attachment_url) {
+    return 'csv_attachment';
+  }
+
   const hasBulkCsvSignals = (
     hasPopulatedString(request.bulk_csv_input) ||
     hasNonEmptyArray(request.csv_row_findings) ||
@@ -151,6 +155,8 @@ function buildAuditArtifact(input = {}) {
       requested_people_input: request.requested_people_input || '',
       requested_team_names_input: request.requested_team_names_input || '',
       bulk_csv_input: request.bulk_csv_input || '',
+      accepted_attachment_submission: request.accepted_attachment_submission || null,
+      attachment_validation_attempt: request.attachment_validation_attempt || null,
       bulk_csv_submission: request.bulk_csv_submission || validation.bulk_csv_submission || (
         operation === 'team_repo_access' ? buildDefaultRepoAccessBulkCsvSubmission(request.bulk_csv_input || '') : null
       ),
@@ -159,6 +165,7 @@ function buildAuditArtifact(input = {}) {
       parent_team_name: request.parent_team_name,
       requested_child_teams_input: request.requested_child_teams_input || '',
       requested_people: request.requested_people,
+      requested_people_detail: request.requested_people_detail || [],
       csv_row_findings: request.csv_row_findings || validation.csv_row_findings || [],
       csv_row_numbering_convention: request.csv_row_numbering_convention || validation.csv_row_numbering_convention || null,
       intended_owner_login: request.intended_owner_login,
@@ -187,6 +194,9 @@ function buildAuditArtifact(input = {}) {
       is_valid: validation.is_valid,
       errors: validation.errors || [],
       warnings: validation.warnings || [],
+      accepted_attachment_submission: validation.accepted_attachment_submission || null,
+      attachment_validation_attempt: validation.attachment_validation_attempt || null,
+      attachment_rate_limit_snapshot: validation.attachment_rate_limit_snapshot || null,
       team_exists: validation.team_exists,
       team_sync_blocked: validation.team_sync_blocked,
       bulk_csv_submission: validation.bulk_csv_submission || null,

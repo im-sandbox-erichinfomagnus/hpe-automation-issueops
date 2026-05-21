@@ -21,6 +21,8 @@ function parseFixtureMarkdown(markdown) {
       fields.organization = value;
     } else if (heading === 'team slug') {
       fields.team_slug = value;
+    } else if (heading === 'intake mode') {
+      fields.intake_mode = value;
     } else if (heading === 'requested people') {
       fields.requested_people = value;
     } else if (heading === 'bulk csv requested people') {
@@ -51,6 +53,7 @@ test('parses a valid submission fixture into a normalized request', () => {
 
   assert.equal(request.organization, 'octo-org');
   assert.equal(request.team_slug, 'platform-engineering');
+  assert.equal(request.intake_mode, 'manual');
   assert.equal(request.intake_mode, 'manual');
   assert.equal(request.requested_people_input, parsedRequest.requested_people);
   assert.equal(request.bulk_csv_input, '');
@@ -132,6 +135,82 @@ test('manual requests remain valid when the CSV field is omitted entirely', () =
   assert.deepEqual(request.requested_people, ['octocat', 'hubot']);
 });
 
+test('manual requests stay on the manual path when intake mode scaffolding is present but attachment input is absent', () => {
+  const request = parseTeamMembershipRequest({
+    parsedRequest: {
+      organization: 'octo-org',
+      team_slug: 'platform-engineering',
+      intake_mode: 'manual',
+      requested_people: 'octocat\nhubot',
+      business_justification: 'Need support access',
+      dry_run: 'true',
+    },
+    issue: { number: 107, user: { login: 'requester' } },
+    repository: 'octo-org/issueops-speckit',
+  });
+
+  assert.equal(request.intake_mode, 'manual');
+  assert.equal(request.request_status, 'submitted');
+  assert.equal(request.bulk_csv_input, '');
+  assert.equal(request.bulk_csv_submission.schema_status, 'not_provided');
+  assert.deepEqual(request.requested_people, ['octocat', 'hubot']);
+  assert.deepEqual(request.csv_row_findings, []);
+});
+
+test('csv attachment requests preserve the selected intake mode before any attachment is posted', () => {
+  const request = parseTeamMembershipRequest({
+    parsedRequest: {
+      organization: 'octo-org',
+      team_slug: 'platform-engineering',
+      intake_mode: 'csv_attachment',
+      requested_people: '',
+      business_justification: 'Need support access',
+      dry_run: 'true',
+    },
+    issue: { number: 109, user: { login: 'requester' } },
+    repository: 'octo-org/issueops-speckit',
+  });
+
+  assert.equal(request.intake_mode, 'csv_attachment');
+  assert.equal(request.requested_people_input, '');
+  assert.equal(request.bulk_csv_input, '');
+  assert.deepEqual(request.requested_people, []);
+  assert.equal(request.request_status, 'submitted');
+});
+
+test('manual validation remains approval-ready even when issue-comment metadata is present in the input envelope', async () => {
+  const validation = await validateTeamMembershipRequest(
+    {
+      parsedRequest: {
+        organization: 'octo-org',
+        team_slug: 'platform-engineering',
+        requested_people: 'octocat\nhubot',
+        business_justification: 'Need support access',
+        dry_run: 'true',
+      },
+      issue: { number: 108, user: { login: 'requester' } },
+      repository: 'octo-org/issueops-speckit',
+      comment: {
+        id: 9001,
+        body: 'non-attachment comment that must not change manual intake behavior',
+        user: { login: 'requester' },
+      },
+    },
+    {
+      getTeam: async () => ({ exists: true, team_sync_blocked: false }),
+      resolveUser: async () => ({ exists: true }),
+    }
+  );
+
+  assert.equal(validation.is_valid, true);
+  assert.equal(validation.request.intake_mode, 'manual');
+  assert.equal(validation.request_status, 'awaiting_approval');
+  assert.deepEqual(
+    validation.requested_people.map((entry) => entry.username),
+    ['octocat', 'hubot']
+  );
+});
+
 test('rejects an empty requested-people fixture submission', async () => {
   const parsedRequest = loadBaseFixture();
   parsedRequest.requested_people = '';
@@ -143,7 +222,30 @@ test('rejects an empty requested-people fixture submission', async () => {
   });
 
   assert.equal(validation.is_valid, false);
-  assert.equal(validation.request.intake_mode, null);
+  assert.equal(validation.request.intake_mode, 'manual');
   assert.deepEqual(validation.request.csv_row_findings, []);
   assert.match(validation.errors.join('\n'), /At least one valid requested person is required/);
+});
+
+test('rejects the retired textarea bulk CSV intake path after the intake selector rollout', async () => {
+  const validation = await validateTeamMembershipRequest(
+    {
+      parsedRequest: {
+        organization: 'octo-org',
+        team_slug: 'platform-engineering',
+        bulk_csv_requested_people: 'username\noctocat\nhubot',
+        business_justification: 'Need support access',
+        dry_run: 'true',
+      },
+      issue: { number: 110, user: { login: 'requester' } },
+      repository: 'octo-org/issueops-speckit',
+    },
+    {
+      getTeam: async () => ({ exists: true, team_sync_blocked: false }),
+      resolveUser: async () => ({ exists: true }),
+    }
+  );
+
+  assert.equal(validation.is_valid, false);
+  assert.match(validation.errors.join('\n'), /bulk csv textarea intake is no longer supported/i);
 });

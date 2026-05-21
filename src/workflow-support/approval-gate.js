@@ -17,8 +17,14 @@ function isApprovalComment(body = '', approvalCommand = APPROVAL_COMMAND) {
   return String(body || '').trim().toLowerCase() === approvalCommand;
 }
 
-function findLatestApprovalComment(issueComments = [], approvalCommand = APPROVAL_COMMAND) {
+function findLatestApprovalComment(issueComments = [], approvalCommand = APPROVAL_COMMAND, options = {}) {
+  const notBefore = options.notBefore || null;
+
   return sortEventsDescending(issueComments).find((comment) => {
+    if (notBefore && String(comment.created_at || '') <= String(notBefore)) {
+      return false;
+    }
+
     return isApprovalComment(comment.body, approvalCommand);
   }) || null;
 }
@@ -42,6 +48,12 @@ function buildPendingApprovalNote(approvalMode, approvalCommand) {
 async function evaluateApprovalGate(input = {}, options = {}) {
   const approvalCommand = options.approvalCommand || APPROVAL_COMMAND;
   const approvalMode = input.approvalMode || options.approvalMode || 'team_membership';
+  const requestStatus = input.request_status || input.requestStatus || '';
+  const intakeMode = input.intake_mode || input.intakeMode || '';
+  const acceptedAttachmentCommentCreatedAt =
+    input.acceptedAttachmentCommentCreatedAt ||
+    input.accepted_attachment_submission && input.accepted_attachment_submission.comment_created_at ||
+    null;
   const issueComments = input.issueComments || [];
   const priorApprovalStatus = input.priorApprovalStatus || 'pending';
   const resolveRole = options.resolveRole || ((args) => {
@@ -59,9 +71,29 @@ async function evaluateApprovalGate(input = {}, options = {}) {
 
     return resolveApproverRole(args, options);
   });
-  const approvalComment = findLatestApprovalComment(issueComments, approvalCommand);
+
+  if (approvalMode === 'team_membership' && intakeMode === 'csv_attachment' && requestStatus === 'waiting_for_attachment') {
+    return {
+      approval_status: 'not_requested',
+      approver_login: '',
+      approver_role: 'other',
+      decision_source: 'validation',
+      decision_note: 'Request is still waiting for a requester-authored CSV attachment comment before approval can be evaluated.',
+    };
+  }
+
+  const approvalComment = findLatestApprovalComment(issueComments, approvalCommand, {
+    notBefore: approvalMode === 'team_membership' && intakeMode === 'csv_attachment'
+      ? acceptedAttachmentCommentCreatedAt
+      : null,
+  });
 
   if (!approvalComment) {
+    const requiresFreshAttachmentApproval =
+      approvalMode === 'team_membership' &&
+      intakeMode === 'csv_attachment' &&
+      acceptedAttachmentCommentCreatedAt;
+
     return {
       approval_status: priorApprovalStatus === 'approved' ? 'invalidated' : 'pending',
       approver_login: '',
@@ -69,7 +101,9 @@ async function evaluateApprovalGate(input = {}, options = {}) {
       decision_source: 'comment',
       decision_note: priorApprovalStatus === 'approved'
         ? `The approval comment '${approvalCommand}' is no longer present and execution must remain blocked.`
-        : buildPendingApprovalNote(approvalMode, approvalCommand),
+        : requiresFreshAttachmentApproval
+          ? `Add an issue comment containing exactly '${approvalCommand}' as an organization owner after the accepted CSV attachment comment to authorize execution.`
+          : buildPendingApprovalNote(approvalMode, approvalCommand),
     };
   }
 

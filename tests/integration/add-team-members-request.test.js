@@ -151,7 +151,7 @@ test('manual requests remain approval-ready through runRequestValidation without
   assert.match(summary, /Request is validated and ready for approval. No membership mutation was attempted\./i);
 });
 
-test('runRequestValidation rejects ambiguous membership intake when both manual and CSV fields are populated', async () => {
+test('runRequestValidation rejects the retired bulk CSV textarea even when manual input is also present', async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'add-team-members-ambiguous-request-'));
   const artifactPath = path.join(workspace, 'audit.json');
 
@@ -180,8 +180,159 @@ test('runRequestValidation rejects ambiguous membership intake when both manual 
   const summary = formatAuditSummary(persisted);
 
   assert.equal(result.validation.is_valid, false);
-  assert.equal(persisted.request.intake_mode, null);
-  assert.match(result.validation.errors.join('\n'), /Exactly one intake source must be populated/i);
+  assert.equal(persisted.request.intake_mode, 'manual');
+  assert.match(result.validation.errors.join('\n'), /bulk csv textarea intake is no longer supported/i);
   assert.match(summary, /Validation: failed/i);
-  assert.match(summary, /Validation errors: .*Exactly one intake source must be populated/i);
+  assert.match(summary, /Validation errors: .*bulk CSV textarea intake is no longer supported/i);
+});
+
+test('manual requests remain approval-ready through runRequestValidation when issue-comment context is present', async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'add-team-members-manual-comment-context-'));
+  const artifactPath = path.join(workspace, 'audit.json');
+
+  const result = await runRequestValidation({
+    env: {
+      GITHUB_REPOSITORY: 'octo-org/issueops-speckit',
+      ISSUE_NUMBER: '615',
+      REQUESTER_LOGIN: 'requester',
+      PARSED_ORGANIZATION: 'octo-org',
+      PARSED_TEAM_SLUG: 'platform-engineering',
+      PARSED_REQUESTED_PEOPLE: 'octocat\nhubot',
+      PARSED_BUSINESS_JUSTIFICATION: 'Need support access',
+      PARSED_DRY_RUN: 'true',
+      COMMENT_ID: '9002',
+      COMMENT_AUTHOR_LOGIN: 'requester',
+      COMMENT_BODY: 'requester follow-up comment without attachment',
+      GITHUB_TOKEN: 'test-token',
+      AUDIT_ARTIFACT_PATH: artifactPath,
+    },
+    api: {
+      getTeamBySlug: async () => ({ exists: true, team_sync_blocked: false }),
+      getOrganizationMembership: async () => ({ exists: true }),
+    },
+    setProcessExitCode: false,
+  });
+
+  const persisted = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
+
+  assert.equal(result.validation.is_valid, true);
+  assert.equal(result.validation.request_status, 'awaiting_approval');
+  assert.equal(persisted.request.intake_mode, 'manual');
+  assert.deepEqual(persisted.request.requested_people, ['octocat', 'hubot']);
+});
+
+test('csv attachment requests remain blocked in waiting state before approval when no attachment comment is present', async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'add-team-members-waiting-attachment-'));
+  const artifactPath = path.join(workspace, 'audit.json');
+
+  const result = await runRequestValidation({
+    env: {
+      GITHUB_REPOSITORY: 'octo-org/issueops-speckit',
+      ISSUE_NUMBER: '616',
+      REQUESTER_LOGIN: 'requester',
+      PARSED_ORGANIZATION: 'octo-org',
+      PARSED_TEAM_SLUG: 'platform-engineering',
+      PARSED_INTAKE_MODE: 'csv_attachment',
+      PARSED_BUSINESS_JUSTIFICATION: 'Need support access',
+      PARSED_DRY_RUN: 'true',
+      GITHUB_TOKEN: 'test-token',
+      AUDIT_ARTIFACT_PATH: artifactPath,
+    },
+    api: {
+      getTeamBySlug: async () => ({ exists: true, team_sync_blocked: false }),
+      getOrganizationMembership: async () => ({ exists: true }),
+      listIssueComments: async () => [
+        {
+          id: 9100,
+          body: 'approved',
+          user: { login: 'org-owner-user' },
+          created_at: '2026-05-21T10:05:00Z',
+        },
+      ],
+    },
+    setProcessExitCode: false,
+  });
+
+  const persisted = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
+  const summary = formatAuditSummary(persisted);
+
+  assert.equal(result.validation.is_valid, false);
+  assert.equal(result.validation.request_status, 'waiting_for_attachment');
+  assert.equal(persisted.request.intake_mode, 'csv_attachment');
+  assert.equal(persisted.approval.approval_status, 'not_requested');
+  assert.match(summary, /Approval: not_requested/i);
+  assert.match(summary, /waiting for requester CSV attachment comment/i);
+});
+
+test('csv attachment requests ignore requester comments that do not include an attachment', async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'add-team-members-waiting-non-attachment-comment-'));
+  const artifactPath = path.join(workspace, 'audit.json');
+
+  const result = await runRequestValidation({
+    env: {
+      GITHUB_REPOSITORY: 'octo-org/issueops-speckit',
+      ISSUE_NUMBER: '618',
+      REQUESTER_LOGIN: 'requester',
+      PARSED_ORGANIZATION: 'octo-org',
+      PARSED_TEAM_SLUG: 'platform-engineering',
+      PARSED_INTAKE_MODE: 'csv_attachment',
+      PARSED_BUSINESS_JUSTIFICATION: 'Need support access',
+      PARSED_DRY_RUN: 'true',
+      GITHUB_TOKEN: 'test-token',
+      AUDIT_ARTIFACT_PATH: artifactPath,
+    },
+    api: {
+      getTeamBySlug: async () => ({ exists: true, team_sync_blocked: false }),
+      getOrganizationMembership: async () => ({ exists: true }),
+      listIssueComments: async () => [
+        {
+          id: 9101,
+          body: 'approved',
+          user: { login: 'requester' },
+          created_at: '2026-05-21T10:06:00Z',
+        },
+      ],
+    },
+    setProcessExitCode: false,
+  });
+
+  const persisted = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
+  const summary = formatAuditSummary(persisted);
+
+  assert.equal(result.validation.is_valid, false);
+  assert.equal(result.validation.request_status, 'waiting_for_attachment');
+  assert.equal(persisted.request.intake_mode, 'csv_attachment');
+  assert.equal(persisted.request.accepted_attachment_submission.comment_id, null);
+  assert.equal(persisted.approval.approval_status, 'not_requested');
+  assert.doesNotMatch(summary, /Attachment comment ID:/i);
+  assert.doesNotMatch(summary, /Attachment uploader:/i);
+  assert.match(summary, /waiting for requester CSV attachment comment/i);
+});
+
+test('runRequestValidation rejects the retired bulk CSV textarea intake path', async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'add-team-members-retired-bulk-csv-'));
+  const artifactPath = path.join(workspace, 'audit.json');
+
+  const result = await runRequestValidation({
+    env: {
+      GITHUB_REPOSITORY: 'octo-org/issueops-speckit',
+      ISSUE_NUMBER: '617',
+      REQUESTER_LOGIN: 'requester',
+      PARSED_ORGANIZATION: 'octo-org',
+      PARSED_TEAM_SLUG: 'platform-engineering',
+      PARSED_BULK_CSV_REQUESTED_PEOPLE: 'username\noctocat\nhubot',
+      PARSED_BUSINESS_JUSTIFICATION: 'Need support access',
+      PARSED_DRY_RUN: 'true',
+      GITHUB_TOKEN: 'test-token',
+      AUDIT_ARTIFACT_PATH: artifactPath,
+    },
+    api: {
+      getTeamBySlug: async () => ({ exists: true, team_sync_blocked: false }),
+      getOrganizationMembership: async () => ({ exists: true }),
+    },
+    setProcessExitCode: false,
+  });
+
+  assert.equal(result.validation.is_valid, false);
+  assert.match(result.validation.errors.join('\n'), /bulk csv textarea intake is no longer supported/i);
 });

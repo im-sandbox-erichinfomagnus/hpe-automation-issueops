@@ -20,6 +20,8 @@ const { validateTeamHierarchyRequest } = require('../workflow-support/validate-t
 const { validateTeamMembershipRequest } = require('../workflow-support/validate-team-membership-request');
 const { validateTeamRepoAccessRequest } = require('../workflow-support/validate-team-repo-access-request');
 const { emitAuditSummary } = require('./emit-audit-summary');
+const { createGitHubTeamApi: createMembershipGitHubApi } = require('../workflow-support/github-team-api');
+const { executeWithBoundedRetry } = require('../workflow-support/handle-rate-limit');
 
 function parseParsedRequestJson(rawValue) {
   if (!rawValue) {
@@ -55,6 +57,7 @@ function readParsedRequestFromEnv(env = process.env) {
     bulk_csv_requested_team_names: env.PARSED_BULK_CSV_REQUESTED_TEAM_NAMES || '',
     team_slug: env.PARSED_TEAM_SLUG || '',
     requested_people: env.PARSED_REQUESTED_PEOPLE || '',
+    intake_mode: env.PARSED_INTAKE_MODE || '',
     bulk_csv_requested_people: env.PARSED_BULK_CSV_REQUESTED_PEOPLE || '',
     business_justification: env.PARSED_BUSINESS_JUSTIFICATION || '',
     dry_run: env.PARSED_DRY_RUN || 'true',
@@ -102,6 +105,144 @@ function writeGitHubOutput(key, value, outputPath = process.env.GITHUB_OUTPUT) {
   }
 
   fs.appendFileSync(outputPath, `${key}=${value}\n`, 'utf8');
+}
+
+function buildCommentContextFromEnv(env = process.env) {
+  return {
+    id: env.COMMENT_ID || null,
+    author_login: env.COMMENT_AUTHOR_LOGIN || '',
+    body: env.COMMENT_BODY || '',
+  };
+}
+
+function isTerminalRequestStatus(status) {
+  return ['executed', 'partially_executed', 'failed'].includes(status);
+}
+
+const TERMINAL_STATE_LABEL_PREFIX = 'issueops:add-team-members:';
+
+function readIssueLabelsFromEnv(env = process.env) {
+  if (!env.ISSUE_LABELS_JSON) {
+    return [];
+  }
+
+  try {
+    const labels = JSON.parse(env.ISSUE_LABELS_JSON);
+    return Array.isArray(labels)
+      ? labels.map((label) => String(label && label.name || label || '').toLowerCase()).filter(Boolean)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function deriveTerminalStatusFromIssueLabels(labels = []) {
+  for (const status of ['executed', 'partially_executed', 'failed']) {
+    if (labels.includes(`${TERMINAL_STATE_LABEL_PREFIX}${status}`)) {
+      return status;
+    }
+  }
+
+  return null;
+}
+
+function readPriorAuditArtifact(artifactPath) {
+  if (!artifactPath || !fs.existsSync(artifactPath)) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function readPriorAttachmentRetryState(artifactPath) {
+  const priorArtifact = readPriorAuditArtifact(artifactPath);
+  if (!priorArtifact) {
+    return {
+      priorArtifact: null,
+      latestFailedValidationAt: null,
+      latestFailedValidationAttemptId: null,
+    };
+  }
+
+  const priorAttempt = priorArtifact.validation && priorArtifact.validation.attachment_validation_attempt
+    || priorArtifact.request && priorArtifact.request.attachment_validation_attempt
+    || null;
+  const priorRequest = priorArtifact.request || {};
+
+  if (!priorAttempt || priorRequest.intake_mode !== 'csv_attachment') {
+    return {
+      priorArtifact,
+      latestFailedValidationAt: null,
+      latestFailedValidationAttemptId: null,
+    };
+  }
+
+  if (!['csv_invalid', 'attachment_rejected'].includes(priorAttempt.attempt_status)) {
+    return {
+      priorArtifact,
+      latestFailedValidationAt: null,
+      latestFailedValidationAttemptId: null,
+    };
+  }
+
+  return {
+    priorArtifact,
+    latestFailedValidationAt: priorAttempt.evaluated_at || null,
+    latestFailedValidationAttemptId: priorAttempt.attempt_id || null,
+  };
+}
+
+function buildTerminalStateValidation(priorArtifact, request) {
+  const priorRequest = priorArtifact.request || {};
+  const priorValidation = priorArtifact.validation || {};
+  const warning = 'Later attachment comments are ignored after the request reaches a terminal execution state.';
+  const attachmentValidationAttempt = {
+    ...(priorRequest.attachment_validation_attempt || priorValidation.attachment_validation_attempt || {}),
+    request_id: priorRequest.request_id || request.request_id,
+    candidate_comment_id: request.comment_context.comment_id || null,
+    attempt_status: 'ignored_terminal_state',
+    evaluated_at: new Date().toISOString(),
+  };
+  const acceptedAttachmentSubmission = {
+    ...(priorRequest.accepted_attachment_submission || priorValidation.accepted_attachment_submission || {}),
+    acceptance_status: 'ignored_terminal_state',
+    rejection_reason: 'terminal_state_ignored',
+  };
+
+  return {
+    ...priorValidation,
+    is_valid: priorValidation.is_valid !== false,
+    request_status: priorRequest.request_status,
+    attachment_validation_attempt: attachmentValidationAttempt,
+    accepted_attachment_submission: acceptedAttachmentSubmission,
+    warnings: [...new Set([...(priorValidation.warnings || []), warning])],
+    request: {
+      ...priorRequest,
+      comment_context: request.comment_context,
+      attachment_validation_attempt: attachmentValidationAttempt,
+      accepted_attachment_submission: acceptedAttachmentSubmission,
+      request_status: priorRequest.request_status,
+    },
+  };
+}
+
+async function executeGitHubReadWithRetry(operation, options = {}) {
+  const result = await executeWithBoundedRetry(operation, {
+    maxRetries: options.maxRetries || 2,
+    sleep: options.sleep,
+  });
+
+  if (!result.ok) {
+    throw Object.assign(result.error || new Error('GitHub read failed.'), {
+      rate_limit_snapshot: result.retry_plan && result.retry_plan.rate_limit_snapshot || null,
+    });
+  }
+
+  return result.value;
 }
 
 function buildMissingTokenHierarchyValidation(request) {
@@ -158,10 +299,21 @@ function buildMissingTokenRepoAccessValidation(request) {
 async function runRequestValidation(options = {}) {
   const env = options.env || process.env;
   const shouldSetProcessExitCode = options.setProcessExitCode !== false && env === process.env;
+  const artifactPath = path.resolve(
+    env.AUDIT_ARTIFACT_PATH ||
+      path.join(
+        'artifacts',
+        `${isTeamRepoAccessParsedRequest(readParsedRequestFromEnv(env)) ? 'add-team-repo-access' : isTeamCreationParsedRequest(readParsedRequestFromEnv(env)) ? 'create-org-teams' : isTeamHierarchyParsedRequest(readParsedRequestFromEnv(env)) ? 'add-child-teams' : 'add-team-members'}-validation-${env.ISSUE_NUMBER || 'manual'}.json`
+      )
+  );
   const parsedRequest = readParsedRequestFromEnv(env);
   const isTeamRepoAccess = isTeamRepoAccessParsedRequest(parsedRequest);
   const isTeamCreation = isTeamCreationParsedRequest(parsedRequest);
   const isTeamHierarchy = isTeamHierarchyParsedRequest(parsedRequest);
+  const priorAttachmentRetryState = readPriorAttachmentRetryState(artifactPath);
+  const priorArtifact = priorAttachmentRetryState.priorArtifact;
+  const issueLabels = readIssueLabelsFromEnv(env);
+  const terminalStatusFromIssueLabels = deriveTerminalStatusFromIssueLabels(issueLabels);
   const request = (isTeamRepoAccess
     ? parseTeamRepoAccessRequest
     : isTeamCreation
@@ -174,6 +326,7 @@ async function runRequestValidation(options = {}) {
       number: env.ISSUE_NUMBER,
       user: { login: env.REQUESTER_LOGIN || '' },
     },
+    comment: buildCommentContextFromEnv(env),
     repository: env.GITHUB_REPOSITORY || '',
     runContext: {
       run_id: env.GITHUB_RUN_ID,
@@ -184,7 +337,71 @@ async function runRequestValidation(options = {}) {
 
   let validation;
   let reconciliationPlan = {};
+  let approvalArtifact = null;
+  let executionOutcome = null;
   try {
+    if (
+      !isTeamRepoAccess &&
+      !isTeamCreation &&
+      !isTeamHierarchy &&
+      request.intake_mode === 'csv_attachment' &&
+      request.comment_context.comment_id &&
+      terminalStatusFromIssueLabels
+    ) {
+      validation = buildTerminalStateValidation({
+        request: {
+          ...request,
+          request_status: terminalStatusFromIssueLabels,
+        },
+        validation: {
+          is_valid: true,
+          warnings: [],
+          errors: [],
+        },
+        approval: {
+          approval_status: 'not_requested',
+          approver_role: 'other',
+        },
+        execution: {
+          mutation_count: 0,
+          noop_count: 0,
+          pending_count: 0,
+          failure_count: 0,
+          rollback_status: 'not_needed',
+          summary: 'Later attachment comments are ignored after the request reaches a terminal execution state.',
+        },
+        reconciliation: {},
+      }, request);
+      approvalArtifact = {
+        approval_status: 'not_requested',
+        approver_login: '',
+        approver_role: 'other',
+        decision_source: 'validation',
+        decision_note: 'Later attachment comments are ignored after the request reaches a terminal execution state.',
+      };
+      executionOutcome = {
+        mutation_count: 0,
+        noop_count: 0,
+        pending_count: 0,
+        failure_count: 0,
+        rollback_status: 'not_needed',
+        summary: 'Later attachment comments are ignored after the request reaches a terminal execution state.',
+      };
+    } else if (
+      !isTeamRepoAccess &&
+      !isTeamCreation &&
+      !isTeamHierarchy &&
+      request.intake_mode === 'csv_attachment' &&
+      request.comment_context.comment_id &&
+      priorArtifact &&
+      priorArtifact.request &&
+      isTerminalRequestStatus(priorArtifact.request.request_status)
+    ) {
+      validation = buildTerminalStateValidation(priorArtifact, request);
+      reconciliationPlan = priorArtifact.reconciliation || {};
+      approvalArtifact = priorArtifact.approval || null;
+      executionOutcome = priorArtifact.execution || null;
+    } else {
     const tokenInfo = loadWorkflowToken({ env, required: false });
     if (!tokenInfo.token) {
       if (isTeamRepoAccess) {
@@ -299,12 +516,39 @@ async function runRequestValidation(options = {}) {
           dry_run: validation.request.dry_run,
         });
       } else {
+        const membershipApi = options.api || createMembershipGitHubApi({ token: tokenInfo.token });
+        const issueComments = env.ISSUE_NUMBER
+          ? typeof membershipApi.listIssueComments === 'function'
+            ? await executeGitHubReadWithRetry(
+                () => membershipApi.listIssueComments({
+                  repository: env.GITHUB_REPOSITORY || '',
+                  issueNumber: env.ISSUE_NUMBER,
+                }),
+                { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+              )
+            : []
+          : [];
         validation = await validateTeamMembershipRequest(request, {
-          getTeam: ({ organization, teamSlug }) => api.getTeamBySlug({ organization, teamSlug }),
+          getTeam: ({ organization, teamSlug }) => executeGitHubReadWithRetry(
+            () => membershipApi.getTeamBySlug({ organization, teamSlug }),
+            { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+          ),
           resolveUser: ({ organization, username }) =>
-            api.getOrganizationMembership({ organization, username }),
+            executeGitHubReadWithRetry(
+              () => membershipApi.getOrganizationMembership({ organization, username }),
+              { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+            ),
+          issueComments,
+          latestFailedValidationAt: priorAttachmentRetryState.latestFailedValidationAt,
+          latestFailedValidationAttemptId: priorAttachmentRetryState.latestFailedValidationAttemptId,
+          token: tokenInfo.token,
+          fetchImpl: options.fetchImpl,
+          maxAttachmentBytes: options.maxAttachmentBytes,
+          maxRetries: options.maxRetries,
+          sleep: options.sleep,
         });
       }
+    }
     }
   } catch (error) {
     validation = {
@@ -325,7 +569,7 @@ async function runRequestValidation(options = {}) {
     };
   }
 
-  const executionOutcome = buildExecutionOutcome({
+  executionOutcome = executionOutcome || buildExecutionOutcome({
     executionResults: [],
     operationLabel: isTeamRepoAccess ? 'repository' : isTeamCreation ? 'team' : isTeamHierarchy ? 'child_link' : 'membership',
     intake_mode: validation.request && validation.request.intake_mode,
@@ -335,29 +579,38 @@ async function runRequestValidation(options = {}) {
     invalid_row_count: validation.request && validation.request.bulk_csv_submission
       ? validation.request.bulk_csv_submission.invalid_row_count
       : 0,
+    attachment_rate_limit_snapshot: validation.attachment_rate_limit_snapshot || null,
   });
 
-  executionOutcome.summary = validation.is_valid
-    ? isTeamRepoAccess
-      ? 'Request is validated and ready for approval. No repository-access mutation was attempted.'
-      : isTeamCreation
-      ? 'Request is validated and ready for approval. No team creation was attempted.'
-      : isTeamHierarchy
-      ? 'Request is validated and ready for approval. No child-team mutation was attempted.'
-      : 'Request is validated and ready for approval. No membership mutation was attempted.'
-    : isTeamRepoAccess
-      ? 'Request validation failed. No repository-access mutation was attempted.'
-      : isTeamCreation
-      ? 'Request validation failed. No team creation was attempted.'
-      : isTeamHierarchy
-      ? 'Request validation failed. No child-team mutation was attempted.'
-      : 'Request validation failed. No membership mutation was attempted.';
+  if (!approvalArtifact) {
+    executionOutcome.summary = validation.request_status === 'waiting_for_attachment'
+      ? 'Request metadata is valid, but execution remains blocked until the requester posts a qualifying CSV attachment comment.'
+      : validation.is_valid
+      ? isTeamRepoAccess
+        ? 'Request is validated and ready for approval. No repository-access mutation was attempted.'
+        : isTeamCreation
+        ? 'Request is validated and ready for approval. No team creation was attempted.'
+        : isTeamHierarchy
+        ? 'Request is validated and ready for approval. No child-team mutation was attempted.'
+        : 'Request is validated and ready for approval. No membership mutation was attempted.'
+      : isTeamRepoAccess
+        ? 'Request validation failed. No repository-access mutation was attempted.'
+        : isTeamCreation
+        ? 'Request validation failed. No team creation was attempted.'
+        : isTeamHierarchy
+        ? 'Request validation failed. No child-team mutation was attempted.'
+        : 'Request validation failed. No membership mutation was attempted.';
+  }
 
   const auditArtifact = buildAuditArtifact({
     request: validation.request,
     validation,
-    approval: {
-      approval_status: validation.is_valid ? 'pending' : 'not_requested',
+    approval: approvalArtifact || {
+      approval_status: validation.request_status === 'waiting_for_attachment'
+        ? 'not_requested'
+        : validation.is_valid
+          ? 'pending'
+          : 'not_requested',
       approver_role: 'other',
     },
     reconciliationPlan,
@@ -367,14 +620,6 @@ async function runRequestValidation(options = {}) {
       run_attempt: env.GITHUB_RUN_ATTEMPT,
     },
   });
-
-  const artifactPath = path.resolve(
-    env.AUDIT_ARTIFACT_PATH ||
-      path.join(
-        'artifacts',
-        `${isTeamRepoAccess ? 'add-team-repo-access' : isTeamCreation ? 'create-org-teams' : isTeamHierarchy ? 'add-child-teams' : 'add-team-members'}-validation-${env.ISSUE_NUMBER || 'manual'}.json`
-      )
-  );
 
   fs.mkdirSync(path.dirname(artifactPath), { recursive: true });
   fs.writeFileSync(artifactPath, toAuditArtifactJson({
@@ -409,10 +654,13 @@ if (require.main === module) {
 }
 
 module.exports = {
+  deriveTerminalStatusFromIssueLabels,
   isTeamRepoAccessParsedRequest,
   isTeamHierarchyParsedRequest,
   isTeamCreationParsedRequest,
   parseParsedRequestJson,
+  readIssueLabelsFromEnv,
   readParsedRequestFromEnv,
+  buildCommentContextFromEnv,
   runRequestValidation,
 };
