@@ -1,11 +1,13 @@
 'use strict';
 
+const { unwrapCodeFence } = require('./normalize-requested-repositories');
+
 function hasNonEmptyArray(value) {
   return Array.isArray(value) && value.length > 0;
 }
 
 function hasPopulatedString(value) {
-  return typeof value === 'string' && value.trim() !== '';
+  return typeof value === 'string' && unwrapCodeFence(value).trim() !== '';
 }
 
 function determineOperation(request = {}, runContext = {}) {

@@ -51,3 +51,20 @@ test('buildAuditArtifact preserves an explicit prior operation during artifact r
 
   assert.equal(artifact.metadata.operation, 'team_creation');
 });
+
+test('buildAuditArtifact ignores empty fenced bulk CSV input when inferring intake mode', () => {
+  const artifact = buildAuditArtifact({
+    request: {
+      organization: 'octo-org',
+      team_slug: 'platform-engineering',
+      requested_people_input: 'octocat',
+      bulk_csv_input: '```csv\n\n```',
+      csv_row_findings: [],
+      bulk_csv_submission: {
+        schema_status: 'not_provided',
+      },
+    },
+  });
+
+  assert.equal(artifact.request.intake_mode, 'manual');
+});
