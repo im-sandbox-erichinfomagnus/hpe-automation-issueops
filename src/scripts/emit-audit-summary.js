@@ -5,6 +5,10 @@ const path = require('path');
 
 const { determineOperation } = require('../workflow-support/build-audit-artifact');
 
+function readBulkCsvCount(executionCount, requestCount) {
+  return executionCount ?? requestCount ?? 0;
+}
+
 function formatAuditSummary(auditArtifact = {}) {
   const request = auditArtifact.request || {};
   const validation = auditArtifact.validation || {};
@@ -52,10 +56,10 @@ function formatAuditSummary(auditArtifact = {}) {
         ? `- CSV row findings: ${(validation.csv_row_findings || request.csv_row_findings || []).length}`
         : null,
       isBulkCsv
-        ? `- CSV duplicate rows: ${execution.duplicate_row_count || request.bulk_csv_submission && request.bulk_csv_submission.duplicate_row_count || 0}`
+        ? `- CSV duplicate rows: ${readBulkCsvCount(execution.duplicate_row_count, request.bulk_csv_submission?.duplicate_row_count)}`
         : null,
       isBulkCsv
-        ? `- CSV invalid rows: ${execution.invalid_row_count || request.bulk_csv_submission && request.bulk_csv_submission.invalid_row_count || 0}`
+        ? `- CSV invalid rows: ${readBulkCsvCount(execution.invalid_row_count, request.bulk_csv_submission?.invalid_row_count)}`
         : null,
       isBulkCsv && request.csv_row_numbering_convention
         ? `- CSV row numbering: ${request.csv_row_numbering_convention}`
@@ -105,10 +109,10 @@ function formatAuditSummary(auditArtifact = {}) {
         ? `- CSV row findings: ${(validation.csv_row_findings || request.csv_row_findings || []).length}`
         : null,
       isBulkCsv
-        ? `- CSV duplicate rows: ${execution.duplicate_row_count || request.bulk_csv_submission && request.bulk_csv_submission.duplicate_row_count || 0}`
+        ? `- CSV duplicate rows: ${readBulkCsvCount(execution.duplicate_row_count, request.bulk_csv_submission?.duplicate_row_count)}`
         : null,
       isBulkCsv
-        ? `- CSV invalid rows: ${execution.invalid_row_count || request.bulk_csv_submission && request.bulk_csv_submission.invalid_row_count || 0}`
+        ? `- CSV invalid rows: ${readBulkCsvCount(execution.invalid_row_count, request.bulk_csv_submission?.invalid_row_count)}`
         : null,
       isBulkCsv && request.csv_row_numbering_convention
         ? `- CSV row numbering: ${request.csv_row_numbering_convention}`
@@ -157,10 +161,10 @@ function formatAuditSummary(auditArtifact = {}) {
         ? `- CSV row findings: ${(validation.csv_row_findings || request.csv_row_findings || []).length}`
         : null,
       isBulkCsv
-        ? `- CSV duplicate rows: ${execution.duplicate_row_count || request.bulk_csv_submission && request.bulk_csv_submission.duplicate_row_count || 0}`
+        ? `- CSV duplicate rows: ${readBulkCsvCount(execution.duplicate_row_count, request.bulk_csv_submission?.duplicate_row_count)}`
         : null,
       isBulkCsv
-        ? `- CSV invalid rows: ${execution.invalid_row_count || request.bulk_csv_submission && request.bulk_csv_submission.invalid_row_count || 0}`
+        ? `- CSV invalid rows: ${readBulkCsvCount(execution.invalid_row_count, request.bulk_csv_submission?.invalid_row_count)}`
         : null,
       isBulkCsv && request.csv_row_numbering_convention
         ? `- CSV row numbering: ${request.csv_row_numbering_convention}`
@@ -206,13 +210,13 @@ function formatAuditSummary(auditArtifact = {}) {
       ? `- CSV row findings: ${(validation.csv_row_findings || request.csv_row_findings || []).length}`
       : null,
     isBulkCsv
-      ? `- CSV valid rows: ${request.bulk_csv_submission && request.bulk_csv_submission.valid_row_count || 0}`
+      ? `- CSV valid rows: ${request.bulk_csv_submission?.valid_row_count ?? 0}`
       : null,
     isBulkCsv
-      ? `- CSV duplicate rows: ${execution.duplicate_row_count || request.bulk_csv_submission && request.bulk_csv_submission.duplicate_row_count || 0}`
+      ? `- CSV duplicate rows: ${readBulkCsvCount(execution.duplicate_row_count, request.bulk_csv_submission?.duplicate_row_count)}`
       : null,
     isBulkCsv
-      ? `- CSV invalid rows: ${execution.invalid_row_count || request.bulk_csv_submission && request.bulk_csv_submission.invalid_row_count || 0}`
+      ? `- CSV invalid rows: ${readBulkCsvCount(execution.invalid_row_count, request.bulk_csv_submission?.invalid_row_count)}`
       : null,
     isBulkCsv && request.csv_row_numbering_convention
       ? `- CSV row numbering: ${request.csv_row_numbering_convention}`
@@ -273,5 +277,6 @@ if (require.main === module) {
 module.exports = {
   emitAuditSummary,
   formatAuditSummary,
+  readBulkCsvCount,
   readAuditArtifact,
 };
