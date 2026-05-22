@@ -1,12 +1,14 @@
 name: add-team-repo-access
 
 on:
+  issues:
+    types:
       - opened
       - edited
       - reopened
       - labeled
   issue_comment:
-          if [ -n "${PARSED_TARGET_TEAM:-}" ] && [ -n "${PARSED_DESIGNATED_APPROVER:-}" ] && [ -n "${PARSED_PERMISSION_LEVEL:-}" ]; then
+    types:
       - created
       - edited
       - deleted
