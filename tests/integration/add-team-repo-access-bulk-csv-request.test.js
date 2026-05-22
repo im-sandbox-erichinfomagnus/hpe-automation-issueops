@@ -110,6 +110,20 @@ test('runRequestValidation records an approval-ready add-team-repo-access reques
   assert.match(fs.readFileSync(outputPath, 'utf8'), /validation-status=awaiting_approval/);
 });
 
+test('workflow applicability keeps empty-intake add-team-repo-access requests in validation scope', () => {
+  const workflowPath = path.join(__dirname, '..', '..', '.github', 'workflows', 'add-team-repo-access.yml');
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
+  const requestScopeBlock = workflow.match(/- name: Check request applicability[\s\S]*?echo "matches-request=\$matches_request" >> "\$GITHUB_OUTPUT"/);
+
+  assert.ok(requestScopeBlock);
+  assert.match(requestScopeBlock[0], /PARSED_TARGET_TEAM:/);
+  assert.match(requestScopeBlock[0], /PARSED_DESIGNATED_APPROVER:/);
+  assert.match(requestScopeBlock[0], /PARSED_PERMISSION_LEVEL:/);
+  assert.doesNotMatch(requestScopeBlock[0], /PARSED_REQUESTED_REPOSITORIES:/);
+  assert.doesNotMatch(requestScopeBlock[0], /PARSED_BULK_CSV_REQUESTED_REPOSITORIES:/);
+  assert.match(requestScopeBlock[0], /if \[ -n "\$\{PARSED_TARGET_TEAM:-\}" \] && \[ -n "\$\{PARSED_DESIGNATED_APPROVER:-\}" \] && \[ -n "\$\{PARSED_PERMISSION_LEVEL:-\}" \]; then/);
+});
+
 test('approved bulk CSV requests preserve intake mode and source row provenance through the final artifact', async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'add-team-repo-access-bulk-csv-approved-'));
   const auditPath = path.join(workspace, 'audit.json');
