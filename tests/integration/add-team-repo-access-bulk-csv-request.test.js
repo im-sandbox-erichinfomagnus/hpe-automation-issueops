@@ -31,13 +31,6 @@ function createRepoAccessApi(scenario) {
   };
 }
 
-function writeArtifact(baseArtifact) {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'issueops-speckit-team-repo-access-bulk-csv-'));
-  const artifactPath = path.join(tempDir, 'artifact.json');
-  fs.writeFileSync(artifactPath, JSON.stringify(baseArtifact, null, 2));
-  return artifactPath;
-}
-
 function loadBulkCsvFixtureMarkdown() {
   const fixturePath = path.join(__dirname, '..', 'fixtures', 'add-team-repo-access-bulk-csv-issue.md');
   return fs.readFileSync(fixturePath, 'utf8');
