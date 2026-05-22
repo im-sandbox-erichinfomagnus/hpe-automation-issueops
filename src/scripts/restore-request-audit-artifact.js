@@ -4,6 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const { toAuditArtifactJson } = require('../workflow-support/build-audit-artifact');
 
 function writeGitHubOutput(key, value, outputPath = process.env.GITHUB_OUTPUT) {
   if (!outputPath) {
@@ -139,6 +140,22 @@ function readRestorableArtifact(filePath) {
   return artifact;
 }
 
+function serializeRestorableArtifact(artifact = {}) {
+  return toAuditArtifactJson({
+    request: artifact.request || {},
+    validation: artifact.validation || {},
+    assignment: artifact.assignment || {},
+    approval: artifact.approval || {},
+    reconciliationPlan: artifact.reconciliation || artifact.reconciliationPlan || artifact.reconciliation_plan || {},
+    executionOutcome: artifact.execution || artifact.executionOutcome || artifact.execution_outcome || {},
+    runContext: {
+      run_id: artifact.metadata && artifact.metadata.run_id || null,
+      run_attempt: artifact.metadata && artifact.metadata.run_attempt || null,
+      operation: artifact.metadata && artifact.metadata.operation || null,
+    },
+  });
+}
+
 async function materializeArtifactArchive(options = {}) {
   const archiveBuffer = await (options.downloadArtifactArchive || downloadArtifactArchive)({
     artifact: options.artifact,
@@ -235,7 +252,7 @@ async function restoreRequestAuditArtifact(options = {}) {
   const restoredArtifact = selection.restoredArtifact || readRestorableArtifact(extractedArtifactPath);
 
   fs.mkdirSync(path.dirname(artifactPath), { recursive: true });
-  fs.writeFileSync(artifactPath, `${JSON.stringify(restoredArtifact, null, 2)}\n`, 'utf8');
+  fs.writeFileSync(artifactPath, serializeRestorableArtifact(restoredArtifact), 'utf8');
   writeGitHubOutput('audit-artifact-restored', 'true', env.GITHUB_OUTPUT);
 
   return {
@@ -264,6 +281,7 @@ module.exports = {
   pickLatestArtifact,
   readArtifactRequestStatus,
   readRestorableArtifact,
+  serializeRestorableArtifact,
   restoreRequestAuditArtifact,
   selectArtifactForRestore,
 };
