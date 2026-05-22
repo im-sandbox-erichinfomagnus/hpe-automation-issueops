@@ -119,7 +119,7 @@ function findFirstJsonFile(directory) {
 function readArtifactRequestStatus(filePath) {
   try {
     const artifact = readRestorableArtifact(filePath);
-    return artifact && artifact.request ? artifact.request.request_status || null : null;
+    return artifact.request.request_status || null;
   } catch {
     return null;
   }
