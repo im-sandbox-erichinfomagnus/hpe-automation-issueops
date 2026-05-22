@@ -633,6 +633,52 @@ test('restoreRequestAuditArtifact skips restore when no prior artifact exists fo
   assert.equal(fs.existsSync(artifactPath), false);
 });
 
+test('restoreRequestAuditArtifact ignores malformed extracted artifacts instead of writing them to disk', async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'issueops-artifact-invalid-restore-'));
+  const artifactPath = path.join(workspace, 'artifacts', 'add-team-members-validation-1221.json');
+  const zipBuffer = createArtifactZipBuffer({
+    'artifacts/add-team-members-validation-1221.json': '{"request":null}',
+  });
+
+  const result = await restoreRequestAuditArtifact({
+    env: {
+      GITHUB_REPOSITORY: 'octo-org/issueops-speckit',
+      ISSUE_NUMBER: '1221',
+      GITHUB_TOKEN: 'test-token',
+      GITHUB_RUN_ID: '10001',
+      AUDIT_ARTIFACT_PATH: artifactPath,
+    },
+    fetchImpl: async (url) => {
+      if (url.includes('/actions/artifacts?')) {
+        return {
+          ok: true,
+          json: async () => ({
+            artifacts: [
+              {
+                id: 1221,
+                name: 'add-team-members-validation-1221',
+                expired: false,
+                created_at: '2026-05-21T10:00:00Z',
+                archive_download_url: 'https://api.github.com/repos/octo-org/issueops-speckit/actions/artifacts/1221/zip',
+                workflow_run: { id: 9999 },
+              },
+            ],
+          }),
+        };
+      }
+
+      return {
+        ok: true,
+        arrayBuffer: async () => zipBuffer,
+      };
+    },
+  });
+
+  assert.equal(result.restored, false);
+  assert.equal(result.reason, 'not_found');
+  assert.equal(fs.existsSync(artifactPath), false);
+});
+
 test('restoreRequestAuditArtifact prefers the newest terminal artifact over a newer reopened awaiting-approval artifact', async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'issueops-artifact-terminal-restore-'));
   const artifactPath = path.join(workspace, 'artifacts', 'add-team-members-validation-123.json');

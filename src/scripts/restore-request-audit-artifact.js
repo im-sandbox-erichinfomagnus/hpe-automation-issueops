@@ -118,11 +118,25 @@ function findFirstJsonFile(directory) {
 
 function readArtifactRequestStatus(filePath) {
   try {
-    const artifact = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    const artifact = readRestorableArtifact(filePath);
     return artifact && artifact.request ? artifact.request.request_status || null : null;
   } catch {
     return null;
   }
+}
+
+function readRestorableArtifact(filePath) {
+  const artifact = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+
+  if (!artifact || typeof artifact !== 'object' || Array.isArray(artifact)) {
+    throw new Error('Workflow artifact archive did not contain a valid audit artifact object.');
+  }
+
+  if (!artifact.request || typeof artifact.request !== 'object' || Array.isArray(artifact.request)) {
+    throw new Error('Workflow artifact archive did not contain a valid audit artifact request payload.');
+  }
+
+  return artifact;
 }
 
 async function materializeArtifactArchive(options = {}) {
@@ -159,14 +173,26 @@ async function selectArtifactForRestore(options = {}) {
       downloadArtifactArchive: options.downloadArtifactArchive,
       extractZipArchive: options.extractZipArchive,
     });
-    const requestStatus = readArtifactRequestStatus(extractedArtifactPath);
+    const restoredArtifact = (() => {
+      try {
+        return readRestorableArtifact(extractedArtifactPath);
+      } catch {
+        return null;
+      }
+    })();
+
+    if (!restoredArtifact) {
+      continue;
+    }
+
+    const requestStatus = restoredArtifact.request.request_status || null;
 
     if (!fallbackSelection) {
-      fallbackSelection = { artifact, extractedArtifactPath, requestStatus };
+      fallbackSelection = { artifact, extractedArtifactPath, requestStatus, restoredArtifact };
     }
 
     if (isTerminalRequestStatus(requestStatus)) {
-      return { artifact, extractedArtifactPath, requestStatus };
+      return { artifact, extractedArtifactPath, requestStatus, restoredArtifact };
     }
   }
 
@@ -206,9 +232,10 @@ async function restoreRequestAuditArtifact(options = {}) {
     return { restored: false, artifactPath, reason: 'not_found' };
   }
   const extractedArtifactPath = selection.extractedArtifactPath;
+  const restoredArtifact = selection.restoredArtifact || readRestorableArtifact(extractedArtifactPath);
 
   fs.mkdirSync(path.dirname(artifactPath), { recursive: true });
-  fs.copyFileSync(extractedArtifactPath, artifactPath);
+  fs.writeFileSync(artifactPath, `${JSON.stringify(restoredArtifact, null, 2)}\n`, 'utf8');
   writeGitHubOutput('audit-artifact-restored', 'true', env.GITHUB_OUTPUT);
 
   return {
@@ -236,6 +263,7 @@ module.exports = {
   listCandidateArtifacts,
   pickLatestArtifact,
   readArtifactRequestStatus,
+  readRestorableArtifact,
   restoreRequestAuditArtifact,
   selectArtifactForRestore,
 };

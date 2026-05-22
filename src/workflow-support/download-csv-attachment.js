@@ -11,12 +11,17 @@ function getGlobalFetch() {
 }
 
 function buildAttachmentHeaders(token, extraHeaders = {}) {
-  return {
+  const headers = {
     Accept: 'application/octet-stream',
-    Authorization: token ? `Bearer ${token}` : undefined,
     'User-Agent': 'issueops-speckit',
     ...extraHeaders,
   };
+
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  return headers;
 }
 
 function inferContentLength(headers) {
@@ -112,6 +117,7 @@ async function downloadCsvAttachment(options = {}) {
 }
 
 module.exports = {
+  buildAttachmentHeaders,
   decodeUtf8,
   downloadCsvAttachment,
   inferContentLength,

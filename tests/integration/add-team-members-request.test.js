@@ -309,6 +309,44 @@ test('csv attachment requests ignore requester comments that do not include an a
   assert.match(summary, /waiting for requester CSV attachment comment/i);
 });
 
+test('csv attachment requests with manual people input fail validation instead of entering waiting state', async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'add-team-members-invalid-attachment-intake-'));
+  const artifactPath = path.join(workspace, 'audit.json');
+
+  const result = await runRequestValidation({
+    env: {
+      GITHUB_REPOSITORY: 'octo-org/issueops-speckit',
+      ISSUE_NUMBER: '619',
+      REQUESTER_LOGIN: 'requester',
+      PARSED_ORGANIZATION: 'octo-org',
+      PARSED_TEAM_SLUG: 'platform-engineering',
+      PARSED_INTAKE_MODE: 'csv_attachment',
+      PARSED_REQUESTED_PEOPLE: 'octocat',
+      PARSED_BUSINESS_JUSTIFICATION: 'Need support access',
+      PARSED_DRY_RUN: 'true',
+      GITHUB_TOKEN: 'test-token',
+      AUDIT_ARTIFACT_PATH: artifactPath,
+    },
+    api: {
+      getTeamBySlug: async () => ({ exists: true, team_sync_blocked: false }),
+      getOrganizationMembership: async () => ({ exists: true }),
+      listIssueComments: async () => [
+        {
+          id: 9102,
+          body: 'approved',
+          user: { login: 'requester' },
+          created_at: '2026-05-21T10:07:00Z',
+        },
+      ],
+    },
+    setProcessExitCode: false,
+  });
+
+  assert.equal(result.validation.is_valid, false);
+  assert.equal(result.validation.request_status, 'validation_failed');
+  assert.match(result.validation.errors.join('\n'), /requested_people must be empty when intake_mode is csv_attachment/i);
+});
+
 test('runRequestValidation rejects the retired bulk CSV textarea intake path', async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'add-team-members-retired-bulk-csv-'));
   const artifactPath = path.join(workspace, 'audit.json');

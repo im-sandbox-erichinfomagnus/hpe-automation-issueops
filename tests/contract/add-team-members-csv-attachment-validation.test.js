@@ -10,6 +10,7 @@ const {
   extractCommentLinks,
   resolveCsvAttachmentComment,
 } = require('../../src/workflow-support/resolve-csv-attachment-comment');
+const { buildAttachmentHeaders } = require('../../src/workflow-support/download-csv-attachment');
 const { parseTeamMembershipRequest } = require('../../src/workflow-support/parse-team-membership-request');
 const { validateTeamMembershipRequest } = require('../../src/workflow-support/validate-team-membership-request');
 
@@ -100,6 +101,13 @@ test('attachment discovery extracts CSV links from HTML anchors in comment bodie
   assert.equal(links[0].filename, 'team-members.csv');
 });
 
+test('attachment download headers omit Authorization entirely when no token is provided', () => {
+  const headers = buildAttachmentHeaders('', { 'X-Test': 'value' });
+
+  assert.equal(Object.prototype.hasOwnProperty.call(headers, 'Authorization'), false);
+  assert.equal(headers['X-Test'], 'value');
+});
+
 test('attachment discovery keeps GitHub attachment URLs found in image-style markdown', () => {
   const classification = classifyAttachmentComment(
     {
@@ -153,6 +161,38 @@ test('non-requester attachment comments do not advance validation out of waiting
   assert.equal(validation.request_status, 'waiting_for_attachment');
   assert.equal(validation.is_valid, false);
   assert.equal(validation.request.accepted_attachment_submission.comment_id, null);
+});
+
+test('csv attachment requests with blocking intake errors fail validation instead of staying in waiting state', async () => {
+  const request = parseTeamMembershipRequest({
+    parsedRequest: {
+      organization: 'octo-org',
+      team_slug: 'platform-engineering',
+      intake_mode: 'csv_attachment',
+      requested_people: 'octocat',
+      business_justification: 'Need support access',
+      dry_run: 'true',
+    },
+    issue: { number: 702, user: { login: 'requester' } },
+    repository: 'octo-org/issueops-speckit',
+  });
+
+  const validation = await validateTeamMembershipRequest(
+    request,
+    createValidationOptions({
+      issueComments: [
+        {
+          id: 7301,
+          created_at: '2026-05-21T12:14:00Z',
+          body: 'approved',
+          user: { login: 'requester' },
+        },
+      ],
+    })
+  );
+
+  assert.equal(validation.request_status, 'validation_failed');
+  assert.match(validation.errors.join('\n'), /requested_people must be empty when intake_mode is csv_attachment/i);
 });
 
 test('requester comments with multiple CSV attachments fail closed as ambiguous', async () => {

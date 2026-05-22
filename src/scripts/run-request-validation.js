@@ -172,6 +172,9 @@ function readPriorAttachmentRetryState(artifactPath) {
     || priorArtifact.request && priorArtifact.request.attachment_validation_attempt
     || null;
   const priorRequest = priorArtifact.request || {};
+  const priorAcceptedAttachment = priorArtifact.validation && priorArtifact.validation.accepted_attachment_submission
+    || priorRequest.accepted_attachment_submission
+    || null;
 
   if (!priorAttempt || priorRequest.intake_mode !== 'csv_attachment') {
     return {
@@ -191,7 +194,9 @@ function readPriorAttachmentRetryState(artifactPath) {
 
   return {
     priorArtifact,
-    latestFailedValidationAt: priorAttempt.evaluated_at || null,
+    latestFailedValidationAt: priorAcceptedAttachment && priorAcceptedAttachment.comment_created_at
+      ? priorAcceptedAttachment.comment_created_at
+      : priorAttempt.evaluated_at || null,
     latestFailedValidationAttemptId: priorAttempt.attempt_id || null,
   };
 }

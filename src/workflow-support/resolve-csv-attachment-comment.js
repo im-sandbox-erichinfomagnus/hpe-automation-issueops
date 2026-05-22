@@ -30,6 +30,11 @@ function inferFilenameFromLink(link = {}) {
   return inferredFromUrl || normalizedLabel || null;
 }
 
+function normalizeAnchorLabel(label = '') {
+  const text = String(label || '').trim();
+  return /[<>]/.test(text) ? '' : text;
+}
+
 function extractCommentLinks(body = '') {
   const links = [];
   const seen = new Set();
@@ -67,7 +72,7 @@ function extractCommentLinks(body = '') {
 
   const htmlAnchorPattern = /<a\b[^>]*href=["'](https?:\/\/[^"']+)["'][^>]*>(.*?)<\/a>/gi;
   for (const match of text.matchAll(htmlAnchorPattern)) {
-    const rawLabel = String(match[2] || '').replace(/<[^>]+>/g, '').trim();
+    const rawLabel = normalizeAnchorLabel(match[2]);
     addLink({
       label: rawLabel,
       url: match[1],

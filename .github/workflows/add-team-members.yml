@@ -102,13 +102,11 @@ jobs:
         env:
           PARSED_TEAM_SLUG: ${{ steps.parse_request.outputs.parsed_team_slug }}
           PARSED_INTAKE_MODE: ${{ steps.parse_request.outputs.parsed_intake_mode }}
-          PARSED_REQUESTED_PEOPLE: ${{ steps.parse_request.outputs.parsed_requested_people }}
-          PARSED_BULK_CSV_REQUESTED_PEOPLE: ${{ steps.parse_request.outputs.parsed_bulk_csv_requested_people }}
         run: |
           set -euo pipefail
 
           matches_request=false
-          if [ -n "${PARSED_TEAM_SLUG:-}" ] && { [ -n "${PARSED_REQUESTED_PEOPLE:-}" ] || [ -n "${PARSED_BULK_CSV_REQUESTED_PEOPLE:-}" ] || [ "${PARSED_INTAKE_MODE:-}" = "csv_attachment" ]; }; then
+          if [ -n "${PARSED_TEAM_SLUG:-}" ] && [ -n "${PARSED_INTAKE_MODE:-}" ]; then
             matches_request=true
           fi
 

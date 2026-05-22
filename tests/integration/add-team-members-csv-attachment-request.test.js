@@ -27,6 +27,19 @@ function loadCommentsFixture() {
   );
 }
 
+test('workflow applicability keeps empty-manual-input attachment requests in scope for validation', () => {
+  const workflowPath = path.join(__dirname, '..', '..', '.github', 'workflows', 'add-team-members.yml');
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
+  const requestScopeBlock = workflow.match(/- name: Check request applicability[\s\S]*?echo "matches-request=\$matches_request" >> "\$GITHUB_OUTPUT"/);
+
+  assert.ok(requestScopeBlock);
+  assert.match(requestScopeBlock[0], /PARSED_TEAM_SLUG/);
+  assert.match(requestScopeBlock[0], /PARSED_INTAKE_MODE/);
+  assert.doesNotMatch(requestScopeBlock[0], /PARSED_REQUESTED_PEOPLE/);
+  assert.doesNotMatch(requestScopeBlock[0], /PARSED_BULK_CSV_REQUESTED_PEOPLE/);
+  assert.match(requestScopeBlock[0], /if \[ -n "\$\{PARSED_TEAM_SLUG:-\}" \] && \[ -n "\$\{PARSED_INTAKE_MODE:-\}" \]; then/);
+});
+
 test('attachment integration scaffold stays aligned to the single-team dry-run waiting scenario', () => {
   const markdown = loadIssueFixture();
 

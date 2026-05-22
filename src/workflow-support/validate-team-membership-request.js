@@ -73,7 +73,7 @@ async function validateTeamMembershipRequest(input = {}, options = {}) {
         attempt_status: 'ignored_terminal_state',
         evaluated_at: new Date().toISOString(),
       };
-    } else if (attachmentResolution.resolution_status === 'waiting_for_attachment') {
+    } else if (attachmentResolution.resolution_status === 'waiting_for_attachment' && errors.length === 0) {
       request.request_status = 'waiting_for_attachment';
       request.attachment_validation_attempt = {
         ...request.attachment_validation_attempt,

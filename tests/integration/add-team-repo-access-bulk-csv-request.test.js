@@ -31,17 +31,24 @@ function createRepoAccessApi(scenario) {
   };
 }
 
-function writeArtifact(baseArtifact) {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'issueops-speckit-team-repo-access-bulk-csv-'));
-  const artifactPath = path.join(tempDir, 'artifact.json');
-  fs.writeFileSync(artifactPath, JSON.stringify(baseArtifact, null, 2));
-  return artifactPath;
-}
-
 function loadBulkCsvFixtureMarkdown() {
   const fixturePath = path.join(__dirname, '..', 'fixtures', 'add-team-repo-access-bulk-csv-issue.md');
   return fs.readFileSync(fixturePath, 'utf8');
 }
+
+test('workflow applicability keeps empty-intake add-team-repo-access requests in scope for validation', () => {
+  const workflowPath = path.join(__dirname, '..', '..', '.github', 'workflows', 'add-team-repo-access.yml');
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
+  const requestScopeBlock = workflow.match(/- name: Check request applicability[\s\S]*?echo "matches-request=\$matches_request" >> "\$GITHUB_OUTPUT"/);
+
+  assert.ok(requestScopeBlock);
+  assert.match(requestScopeBlock[0], /PARSED_TARGET_TEAM/);
+  assert.match(requestScopeBlock[0], /PARSED_DESIGNATED_APPROVER/);
+  assert.match(requestScopeBlock[0], /PARSED_PERMISSION_LEVEL/);
+  assert.doesNotMatch(requestScopeBlock[0], /PARSED_REQUESTED_REPOSITORIES/);
+  assert.doesNotMatch(requestScopeBlock[0], /PARSED_BULK_CSV_REQUESTED_REPOSITORIES/);
+  assert.match(requestScopeBlock[0], /if \[ -n "\$\{PARSED_TARGET_TEAM:-\}" \] && \[ -n "\$\{PARSED_DESIGNATED_APPROVER:-\}" \] && \[ -n "\$\{PARSED_PERMISSION_LEVEL:-\}" \]; then/);
+});
 
 test('workflow scaffolding keeps add-team-repo-access runtime and lint assumptions in place', () => {
   const workflowPath = path.join(__dirname, '..', '..', '.github', 'workflows', 'add-team-repo-access.yml');

@@ -54,7 +54,6 @@ test('parses a valid submission fixture into a normalized request', () => {
   assert.equal(request.organization, 'octo-org');
   assert.equal(request.team_slug, 'platform-engineering');
   assert.equal(request.intake_mode, 'manual');
-  assert.equal(request.intake_mode, 'manual');
   assert.equal(request.requested_people_input, parsedRequest.requested_people);
   assert.equal(request.bulk_csv_input, '');
   assert.deepEqual(request.requested_people, ['octocat', 'hubot']);

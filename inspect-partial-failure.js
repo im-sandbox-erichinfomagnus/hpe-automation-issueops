@@ -1,5 +1,8 @@
-﻿const fs = require('fs');
-const path = require('path');
+﻿'use strict';
+
+const fs = require('node:fs');
+const path = require('node:path');
+
 const { runApprovedExecution } = require('./src/scripts/run-approved-execution');
 
 const githubTeamApi = require('./src/workflow-support/github-team-api');
@@ -7,8 +10,8 @@ const githubTeamApi = require('./src/workflow-support/github-team-api');
 let callCount = 0;
 githubTeamApi.createGitHubTeamApi = () => {
     return {
-        addOrUpdateMembershipForUserInOrg: async (org, team, user) => {
-            callCount++;
+        addOrUpdateMembershipForUserInOrg: async () => {
+            callCount += 1;
             if (callCount === 2) {
                 const err = new Error('Unprocessable Entity');
                 err.status = 422;
@@ -16,7 +19,7 @@ githubTeamApi.createGitHubTeamApi = () => {
                 throw err;
             }
             return { status: 200, data: { state: 'active' } };
-        }
+        },
     };
 };
 
@@ -35,10 +38,10 @@ async function run() {
             ]
         },
         reconciliation: {
-             people_to_add: [
+            people_to_add: [
                 { username: 'octocat', source_row_number: 1 },
                 { username: 'hubot', source_row_number: 2 }
-             ]
+            ]
         }
     };
 
