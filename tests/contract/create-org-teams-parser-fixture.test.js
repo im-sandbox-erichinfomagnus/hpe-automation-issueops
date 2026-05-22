@@ -21,6 +21,8 @@ function parseFixtureMarkdown(markdown) {
       fields.organization = value;
     } else if (heading === 'intended owner') {
       fields.intended_owner = value;
+    } else if (heading === 'intake mode') {
+      fields.intake_mode = value;
     } else if (heading === 'requested team names') {
       fields.requested_team_names = value;
     } else if (heading === 'business justification') {
@@ -157,6 +159,21 @@ test('preserves manual-mode validation defaults while exposing empty CSV metadat
   assert.equal(validation.request.requested_team_names_input, parsedRequest.requested_team_names);
 });
 
+test('manual create-org-teams fixture remains a manual-only request surface before attachment handling is added', async () => {
+  const parsedRequest = loadBaseFixture();
+
+  const validation = await validateTeamCreationRequest({
+    parsedRequest,
+    issue: { number: 309, user: { login: 'requester' } },
+    repository: 'octo-org/issueops-speckit',
+  });
+
+  assert.equal(validation.request.intake_mode, 'manual');
+  assert.equal(validation.request.requested_team_names_input, parsedRequest.requested_team_names);
+  assert.equal(validation.request.bulk_csv_input, '');
+  assert.equal(validation.request.request_status, validation.is_valid ? 'awaiting_approval' : 'validation_failed');
+});
+
 test('rejects out-of-scope parent-team input with a clear message', async () => {
   const validation = await validateTeamCreationRequest({
     parsedRequest: {
@@ -191,6 +208,58 @@ test('rejects out-of-scope team member instructions with a clear message', async
 
   assert.equal(validation.is_valid, false);
   assert.match(validation.errors.join('\n'), /only creates empty teams/i);
+});
+
+test('explicit intake_mode manual dropdown preserves manual request behavior identical to legacy inference', () => {
+  const parsedRequest = loadBaseFixture();
+  assert.equal(parsedRequest.intake_mode, 'manual');
+
+  const request = parseTeamCreationRequest({
+    parsedRequest,
+    issue: { number: 310, user: { login: 'requester' } },
+    repository: 'octo-org/issueops-speckit',
+  });
+
+  assert.equal(request.intake_mode, 'manual');
+  assert.deepEqual(
+    request.requested_teams.map((team) => team.normalized_slug),
+    ['platform-engineering', 'release-managers']
+  );
+  assert.equal(request.bulk_csv_submission, null);
+  assert.equal(request.csv_row_numbering_convention, null);
+  assert.equal(request.accepted_attachment_submission.acceptance_status, 'waiting');
+});
+
+test('intake_mode csv_attachment with empty requested team names produces waiting-eligible parsed request', () => {
+  const request = parseTeamCreationRequest({
+    parsedRequest: {
+      organization: 'octo-org',
+      intended_owner: 'octocat',
+      intake_mode: 'csv_attachment',
+      requested_team_names: '',
+      business_justification: 'Need empty teams',
+      dry_run: 'true',
+    },
+    issue: { number: 311, user: { login: 'requester' } },
+    repository: 'octo-org/issueops-speckit',
+  });
+
+  assert.equal(request.intake_mode, 'csv_attachment');
+  assert.deepEqual(request.requested_teams, []);
+  assert.equal(request.request_status, 'submitted');
+  assert.equal(request.accepted_attachment_submission.acceptance_status, 'waiting');
+  assert.equal(request.attachment_validation_attempt.attempt_status, 'waiting');
+  assert.equal(request.csv_row_numbering_convention, '1-based data-row numbers that exclude the header row');
+});
+
+test('issue form provides an intake_mode dropdown with manual and csv_attachment options', () => {
+  const templatePath = path.join(__dirname, '..', '..', '.github', 'ISSUE_TEMPLATE', 'create-org-teams.yml');
+  const template = fs.readFileSync(templatePath, 'utf8');
+
+  assert.match(template, /id:\s+intake_mode/);
+  assert.match(template, /- .?manual.?/i);
+  assert.match(template, /- .?csv_attachment.?/i);
+  assert.doesNotMatch(template, /id:\s+bulk_csv_requested_team_names/);
 });
 
 test('rejects normalized requests whose teams do not share the same intended owner', async () => {

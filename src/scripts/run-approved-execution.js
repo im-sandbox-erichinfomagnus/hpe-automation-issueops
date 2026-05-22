@@ -19,7 +19,14 @@ const { reconcileTeamRepoAccess } = require('../workflow-support/reconcile-team-
 const { validateTeamRepoAccessRequest } = require('../workflow-support/validate-team-repo-access-request');
 const { emitAuditSummary } = require('./emit-audit-summary');
 
-const TERMINAL_STATE_LABEL_PREFIX = 'issueops:add-team-members:';
+function terminalStateLabelPrefix(operation) {
+  const operationPrefixes = {
+    team_creation: 'issueops:create-org-teams:',
+    team_hierarchy: 'issueops:add-child-teams:',
+    team_repo_access: 'issueops:add-team-repo-access:',
+  };
+  return operationPrefixes[operation] || 'issueops:add-team-members:';
+}
 
 function readAuditArtifact(filePath) {
   const resolvedPath = path.resolve(filePath);
@@ -229,6 +236,7 @@ async function runApprovedExecution(options = {}) {
   const isTeamRepoAccess = auditArtifact.metadata && auditArtifact.metadata.operation === 'team_repo_access';
   const isTeamHierarchy = auditArtifact.metadata && auditArtifact.metadata.operation === 'team_hierarchy';
   const isTeamCreation = auditArtifact.metadata && auditArtifact.metadata.operation === 'team_creation';
+  const operation = auditArtifact.metadata && auditArtifact.metadata.operation || 'team_membership';
 
   if (!auditArtifact.validation || auditArtifact.validation.is_valid !== true) {
     writeGitHubOutput('execution-status', 'not_requested', env.GITHUB_OUTPUT);
@@ -432,6 +440,7 @@ async function runApprovedExecution(options = {}) {
         normalized_slug: team.normalized_slug,
         requested_name: team.requested_name,
         source_row_number: team.source_row_number || null,
+        source_comment_id: team.source_comment_id || null,
         current_team_id: team.current_team_id || null,
         execution_result: 'noop',
         failure_reason: null,
@@ -443,6 +452,7 @@ async function runApprovedExecution(options = {}) {
         normalized_slug: team.normalized_slug,
         requested_name: team.requested_name,
         source_row_number: team.source_row_number || null,
+        source_comment_id: team.source_comment_id || null,
         execution_result: 'failed',
         failure_reason: team.failure_reason || 'rejected',
       });
@@ -528,6 +538,7 @@ async function runApprovedExecution(options = {}) {
             normalized_slug: team.normalized_slug,
             requested_name: team.requested_name,
             source_row_number: team.source_row_number || null,
+            source_comment_id: team.source_comment_id || null,
             created_team_id: attemptResult.value && attemptResult.value.id || null,
             execution_result: 'created',
             failure_reason: null,
@@ -539,6 +550,7 @@ async function runApprovedExecution(options = {}) {
           normalized_slug: team.normalized_slug,
           requested_name: team.requested_name,
           source_row_number: team.source_row_number || null,
+          source_comment_id: team.source_comment_id || null,
           execution_result: 'failed',
           failure_reason: classifyFailureReason(attemptResult.error),
         });
@@ -711,18 +723,16 @@ async function runApprovedExecution(options = {}) {
   }), 'utf8');
 
   if (
-    !isTeamCreation &&
-    !isTeamHierarchy &&
-    !isTeamRepoAccess &&
     updatedArtifact.request &&
     updatedArtifact.request.intake_mode === 'csv_attachment' &&
     updatedArtifact.request.issue_number != null &&
     typeof api.addIssueLabels === 'function'
   ) {
+    const labelPrefix = terminalStateLabelPrefix(operation);
     await api.addIssueLabels({
       repository: updatedArtifact.request.repository,
       issueNumber: updatedArtifact.request.issue_number,
-      labels: [`${TERMINAL_STATE_LABEL_PREFIX}${updatedArtifact.request.request_status}`],
+      labels: [`${labelPrefix}${updatedArtifact.request.request_status}`],
     });
   }
 

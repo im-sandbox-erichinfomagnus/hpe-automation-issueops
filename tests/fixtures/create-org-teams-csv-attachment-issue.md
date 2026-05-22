@@ -4,20 +4,19 @@ octo-org
 
 ### Intended owner
 
-octocat
+platform-owner
 
 ### Intake mode
 
-manual
+csv_attachment
 
 ### Requested team names
 
-Platform Engineering
-Release Managers
+
 
 ### Business justification
 
-New empty teams are required to support delegated ownership and future membership workflows.
+Create the requested teams to support the platform rollout.
 
 ### Dry-run mode
 

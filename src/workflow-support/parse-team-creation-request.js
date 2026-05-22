@@ -11,6 +11,36 @@ const {
   normalizeBulkCsvRequestedTeams,
 } = require('./normalize-bulk-csv-requested-teams');
 
+function createEmptyAttachmentSubmission() {
+  return {
+    comment_id: null,
+    comment_created_at: null,
+    uploader_login: null,
+    attachment_url: null,
+    filename: null,
+    extension: null,
+    content_hash: null,
+    downloaded_at: null,
+    byte_size: 0,
+    acceptance_status: 'waiting',
+    rejection_reason: null,
+  };
+}
+
+function createEmptyAttachmentValidationAttempt() {
+  return {
+    attempt_id: null,
+    request_id: null,
+    candidate_comment_id: null,
+    attempt_status: 'waiting',
+    selection_rule: 'newest requester attachment comment after the latest failed CSV attachment validation result',
+    evaluated_at: null,
+    errors: [],
+    warnings: [],
+    supersedes_attempt_id: null,
+  };
+}
+
 function readField(source, keys) {
   for (const key of keys) {
     if (source && source[key] != null && source[key] !== '') {
@@ -102,13 +132,30 @@ function parseTeamCreationRequest(input = {}) {
       'bulk_csv_requested_team_names',
       'parsed_bulk_csv_requested_team_names',
     ]) ?? input.bulkCsvRequestedTeamNames ?? input.bulkCsvInput ?? '';
+  const requestedIntakeMode = readFieldIncludingEmpty(parsed, [
+    'intake_mode',
+    'parsed_intake_mode',
+  ]) ?? input.intakeMode ?? '';
+  const comment = input.comment || input.comment_context || {};
+  const issueComments = input.issueComments || input.issue_comments || [];
+  const commentId = input.commentId || comment.id || null;
+  const commentAuthorLogin = normalizeLogin(
+    input.commentAuthorLogin || comment.author_login || comment.user && comment.user.login || ''
+  );
   const manualPopulated = hasPopulatedInput(requestedTeamNamesInput);
   const bulkCsvPopulated = hasPopulatedInput(bulkCsvInput);
-  const intakeMode = manualPopulated === bulkCsvPopulated
-    ? null
-    : manualPopulated
+  const normalizedRequestedIntakeMode = String(requestedIntakeMode || '').trim().toLowerCase();
+  const intakeMode = normalizedRequestedIntakeMode === 'csv_attachment'
+    ? 'csv_attachment'
+    : normalizedRequestedIntakeMode === 'manual'
       ? 'manual'
-      : 'bulk_csv';
+      : normalizedRequestedIntakeMode === 'bulk_csv'
+        ? 'bulk_csv'
+        : manualPopulated === bulkCsvPopulated
+          ? null
+          : manualPopulated
+            ? 'manual'
+            : 'bulk_csv';
   const manualNormalization = manualPopulated
     ? normalizeRequestedTeams(requestedTeamNamesInput)
     : createEmptyManualNormalization();
@@ -145,9 +192,17 @@ function parseTeamCreationRequest(input = {}) {
     organization,
     intended_owner_login: intendedOwnerLogin,
     intake_mode: intakeMode,
+    comment_context: {
+      comment_id: commentId,
+      comment_author_login: commentAuthorLogin || null,
+      comment_body: comment.body || input.commentBody || '',
+      issue_comment_count: Array.isArray(issueComments) ? issueComments.length : 0,
+    },
     requested_team_names_input: requestedTeamNamesInput,
     bulk_csv_input: bulkCsvInput,
-    bulk_csv_submission: intakeMode === 'bulk_csv'
+    accepted_attachment_submission: createEmptyAttachmentSubmission(),
+    attachment_validation_attempt: createEmptyAttachmentValidationAttempt(),
+    bulk_csv_submission: (intakeMode === 'bulk_csv' || intakeMode === 'csv_attachment')
       ? {
         encoding: bulkCsvNormalization.encoding,
         header_columns: bulkCsvNormalization.header_columns,
@@ -177,7 +232,7 @@ function parseTeamCreationRequest(input = {}) {
     conflicting_slugs: selectedNormalization.conflictingSlugs,
     invalid_team_names: selectedNormalization.invalidTeamNames,
     csv_row_findings: bulkCsvNormalization.csv_row_findings,
-    csv_row_numbering_convention: intakeMode === 'bulk_csv'
+    csv_row_numbering_convention: (intakeMode === 'bulk_csv' || intakeMode === 'csv_attachment')
       ? CSV_ROW_NUMBERING_CONVENTION
       : null,
     request_status: 'submitted',
@@ -189,7 +244,7 @@ function parseTeamCreationRequest(input = {}) {
       conflicting_slugs: selectedNormalization.conflictingSlugs,
       invalid_team_names: selectedNormalization.invalidTeamNames,
       csv_row_findings: bulkCsvNormalization.csv_row_findings,
-      csv_row_numbering_convention: intakeMode === 'bulk_csv'
+      csv_row_numbering_convention: (intakeMode === 'bulk_csv' || intakeMode === 'csv_attachment')
         ? CSV_ROW_NUMBERING_CONVENTION
         : null,
     },

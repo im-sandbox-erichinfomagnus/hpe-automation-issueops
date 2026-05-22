@@ -226,7 +226,10 @@ async function restoreRequestAuditArtifact(options = {}) {
   );
   const currentRunId = options.currentRunId || env.GITHUB_RUN_ID || null;
   const fetchImpl = options.fetchImpl || global.fetch;
-  const artifactName = `add-team-members-validation-${issueNumber}`;
+  const defaultArtifactName = `add-team-members-validation-${issueNumber}`;
+  const artifactName = options.artifactName
+    || env.ARTIFACT_NAME
+    || (artifactPath ? path.basename(artifactPath, '.json') : defaultArtifactName);
 
   if (!repository || !issueNumber || !token) {
     writeGitHubOutput('audit-artifact-restored', 'false', env.GITHUB_OUTPUT);
