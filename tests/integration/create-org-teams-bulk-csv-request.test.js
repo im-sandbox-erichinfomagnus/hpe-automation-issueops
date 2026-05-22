@@ -23,6 +23,18 @@ function writeArtifact(baseArtifact) {
 	return artifactPath;
 }
 
+test('workflow applicability keeps empty-intake create-org-teams requests in scope for validation', () => {
+	const workflowPath = path.join(__dirname, '..', '..', '.github', 'workflows', 'create-org-teams.yml');
+	const workflow = fs.readFileSync(workflowPath, 'utf8');
+	const requestScopeBlock = workflow.match(/- name: Check request applicability[\s\S]*?echo "matches-request=\$matches_request" >> "\$GITHUB_OUTPUT"/);
+
+	assert.ok(requestScopeBlock);
+	assert.match(requestScopeBlock[0], /PARSED_INTENDED_OWNER/);
+	assert.doesNotMatch(requestScopeBlock[0], /PARSED_REQUESTED_TEAM_NAMES/);
+	assert.doesNotMatch(requestScopeBlock[0], /PARSED_BULK_CSV_REQUESTED_TEAM_NAMES/);
+	assert.match(requestScopeBlock[0], /if \[ -n "\$\{PARSED_INTENDED_OWNER:-\}" \]; then/);
+});
+
 test('records an approval-ready create-org-teams request from bulk CSV intake', async () => {
 	const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'create-org-teams-bulk-csv-valid-'));
 	const auditPath = path.join(workspace, 'audit.json');

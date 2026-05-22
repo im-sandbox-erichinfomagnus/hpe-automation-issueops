@@ -36,6 +36,19 @@ function writeArtifact(baseArtifact) {
   return artifactPath;
 }
 
+test('workflow applicability keeps empty-intake add-child-teams requests in scope for validation', () => {
+  const workflowPath = path.join(__dirname, '..', '..', '.github', 'workflows', 'add-child-teams.yml');
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
+  const requestScopeBlock = workflow.match(/- name: Check request applicability[\s\S]*?echo "matches-request=\$matches_request" >> "\$GITHUB_OUTPUT"/);
+
+  assert.ok(requestScopeBlock);
+  assert.match(requestScopeBlock[0], /PARSED_PARENT_TEAM/);
+  assert.match(requestScopeBlock[0], /PARSED_DESIGNATED_APPROVER/);
+  assert.doesNotMatch(requestScopeBlock[0], /PARSED_REQUESTED_CHILD_TEAMS/);
+  assert.doesNotMatch(requestScopeBlock[0], /PARSED_BULK_CSV_REQUESTED_CHILD_TEAMS/);
+  assert.match(requestScopeBlock[0], /if \[ -n "\$\{PARSED_PARENT_TEAM:-\}" \] && \[ -n "\$\{PARSED_DESIGNATED_APPROVER:-\}" \]; then/);
+});
+
 test('workflow scaffolding keeps add-child-teams runtime and lint assumptions in place', () => {
   const workflowPath = path.join(__dirname, '..', '..', '.github', 'workflows', 'add-child-teams.yml');
   const lintWorkflowPath = path.join(__dirname, '..', '..', '.github', 'workflows', 'lint-workflows.yml');
