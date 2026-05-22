@@ -68,3 +68,22 @@ test('buildAuditArtifact ignores empty fenced bulk CSV input when inferring inta
 
   assert.equal(artifact.request.intake_mode, 'manual');
 });
+
+test('buildAuditArtifact preserves an explicitly ambiguous intake mode', () => {
+  const artifact = buildAuditArtifact({
+    request: {
+      organization: 'octo-org',
+      intended_owner_login: 'octocat',
+      intake_mode: null,
+      bulk_csv_input: '```csv\nteam_name\nPlatform Engineering\n```',
+      requested_teams: [
+        {
+          requested_name: 'Platform Engineering',
+          normalized_slug: 'platform-engineering',
+        },
+      ],
+    },
+  });
+
+  assert.equal(artifact.request.intake_mode, null);
+});
