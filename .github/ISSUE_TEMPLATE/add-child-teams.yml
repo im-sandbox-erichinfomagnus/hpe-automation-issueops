@@ -24,7 +24,7 @@ body:
       required: true
 
   - type: input
-    id: designated_approver
+    id: designated_hierarchy_approver
     attributes:
       label: Designated hierarchy approver
       description: GitHub login of the single approver who must be a current maintainer of the requested parent team and every requested child team in this batch.
@@ -32,11 +32,23 @@ body:
     validations:
       required: true
 
+  - type: dropdown
+    id: intake_mode
+    attributes:
+      label: Intake mode
+      description: Choose how requested child teams will be provided for this request.
+      options:
+        - manual
+        - csv_attachment
+      default: 0
+    validations:
+      required: true
+
   - type: textarea
     id: requested_child_teams
     attributes:
-      label: Requested child teams
-      description: Use this field for the manual request path and provide one existing child team per line. Leave this field empty when using the bulk CSV textarea. Validation enforces exactly one populated intake mode. Duplicate child teams, re-parenting requests, cycle-creating requests, and team-creation or member-management instructions are rejected.
+      label: Requested child teams (manual mode only)
+      description: Use this field only when intake mode is manual and provide one existing child team per line. Leave this field empty when intake mode is csv_attachment. Duplicate child teams, re-parenting requests, cycle-creating requests, and team-creation or member-management instructions are rejected.
       placeholder: |
         application-platform
         release-engineering
@@ -44,18 +56,16 @@ body:
     validations:
       required: false
 
-  - type: textarea
-    id: bulk_csv_requested_child_teams
+  - type: markdown
     attributes:
-      label: Bulk CSV requested child teams
-      description: Paste UTF-8 CSV here when submitting higher-volume requests. Leave the manual requested child teams field empty when using this textarea. Validation enforces exactly one populated intake mode.
-      placeholder: |
-        child_team
-        application-platform
-        release-engineering
-      render: text
-    validations:
-      required: false
+      value: |
+        ### CSV Attachment Mode Instructions
+
+        When intake mode is `csv_attachment`:
+        1. Submit this issue with `Requested child teams` left empty.
+        2. Post a same-issue comment authored by the requester with exactly one CSV attachment.
+        3. Use UTF-8 CSV with header `child_team` and one child team per data row.
+        4. The request remains `waiting_for_attachment` until a qualifying attachment is accepted.
 
   - type: textarea
     id: business_justification

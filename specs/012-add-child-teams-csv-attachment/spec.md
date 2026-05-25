@@ -53,7 +53,7 @@ After a CSV attachment is accepted and validated, execution uses the same approv
 **Acceptance Scenarios**:
 
 1. **Given** an approved attachment-driven request with mixed already-linked and missing child links, **When** execution runs, **Then** only missing links are applied and already-linked items remain no-op.
-2. **Given** a request is already `executed`, `partially_executed`, or `failed` after approved execution, **When** a new requester CSV attachment comment is posted, **Then** the workflow ignores it and does not transition to any pre-execution state.
+2. **Given** a request is already `executed`, `partially_executed`, or `failed_after_approved_execution`, **When** a new requester CSV attachment comment is posted, **Then** the workflow ignores it and does not transition to any pre-execution state.
 3. **Given** an approved attachment-driven request is rerun with no remaining drift, **When** reconciliation runs, **Then** the workflow reports idempotent no-op outcomes.
 
 ### Edge Cases
@@ -75,24 +75,24 @@ After a CSV attachment is accepted and validated, execution uses the same approv
 
 - **FR-001**: The enhancement MUST preserve manual-path behavior from `specs/004-add-child-teams/spec.md`.
 - **FR-002**: The enhancement MUST preserve CSV row-level semantics from `specs/008-add-child-teams-bulk-csv-mode/spec.md` while moving high-volume intake from textarea to attachment comments.
-- **FR-003**: The system MUST support intake modes `manual` and `csv_attachment`.
-- **FR-004**: The system MUST continue to support manual requested-child-team intake without requiring attachments.
+- **FR-003**: The system MUST support exactly two intake modes for add-child-teams requests: `manual` and `csv_attachment`.
+- **FR-004**: When intake mode is `manual`, the workflow MUST preserve existing 004-compatible form fields and requested-child-team parsing semantics, and MUST NOT require attachments.
 - **FR-005**: A `csv_attachment` request MUST begin in `waiting_for_attachment` when baseline metadata is valid but no accepted attachment has been processed.
 - **FR-006**: Approval MUST NOT be requested or accepted while request status is `waiting_for_attachment`.
 - **FR-007**: Accepted CSV attachment input MUST come from requester-authored comments on the same issue.
 - **FR-008**: For an active validation attempt, exactly one qualifying attachment candidate MUST be accepted; ambiguous or multiple candidates in a comment MUST fail closed.
 - **FR-009**: Attachment candidate selection MUST use the newest eligible requester attachment comment posted after the latest failed attachment-validation attempt.
-- **FR-010**: Attachment validation MUST enforce bounded file-size limits and UTF-8 decodability before CSV parsing.
+- **FR-010**: Attachment validation MUST enforce bounded file-size limits and UTF-8 decodability before CSV parsing, where the size cap is sourced from repository policy configuration (`attachment_max_bytes`) with a documented default fallback.
 - **FR-011**: Accepted attachment CSV MUST preserve `child_team` header requirements and row-level handling from `specs/008-add-child-teams-bulk-csv-mode/spec.md`.
 - **FR-012**: The system MUST capture provenance for accepted attachments: comment id, comment timestamp, uploader login, attachment URL, inferable filename when available, content hash, download timestamp, and rate-limit snapshot.
 - **FR-013**: Non-requester, cross-issue, or non-qualifying comments MUST NOT advance request status.
 - **FR-014**: After accepted attachment CSV passes validation, request progression MUST use the same approval, reconciliation, and execution semantics as baseline add-child-teams.
 - **FR-015**: Re-parenting and cycle-creating requests MUST remain rejected as in baseline behavior.
 - **FR-016**: Dry-run behavior MUST remain non-mutating while still producing reconciliation and audit output.
-- **FR-017**: Requests in `executed`, `partially_executed`, or `failed` (post-approved execution) terminal states MUST NOT be reopened by later attachment comments.
-- **FR-018**: Later attachment comments on terminal requests MUST be ignored and MUST NOT transition status back to `waiting_for_attachment`, `validation_failed`, or `awaiting_approval`.
+- **FR-017**: Requests in `executed`, `partially_executed`, or `failed_after_approved_execution` terminal states MUST NOT be reopened by later attachment comments.
+- **FR-018**: The request state machine MUST reject transitions from `executed`, `partially_executed`, or `failed_after_approved_execution` to pre-execution states (`waiting_for_attachment`, `validation_failed`, `awaiting_approval`) and record the ignored-comment decision in audit evidence.
 - **FR-019**: The system MUST include operation-aware terminal label/status detection so fresh runners can enforce terminal-state ignore behavior deterministically.
-- **FR-020**: The system MUST preserve clear status reporting across waiting, validation-failed, approval-pending, approved, executed, partially executed, and failed outcomes.
+- **FR-020**: The system MUST preserve clear status reporting across waiting, validation-failed, approval-pending, approved, executed, partially executed, and failed_after_approved_execution outcomes.
 
 ### Authorization Requirements *(mandatory)*
 
@@ -165,7 +165,7 @@ After a CSV attachment is accepted and validated, execution uses the same approv
 ### Measurable Outcomes
 
 - **SC-001**: 100% of valid manual requests preserve baseline 004 behavior without requester workflow changes.
-- **SC-002**: 95% of syntactically valid requester attachment submissions with valid metadata reach approval-ready state on first valid attachment attempt.
+- **SC-002**: In pre-release integration validation for this feature, at least 95% of syntactically valid requester attachment submissions with valid baseline metadata MUST reach `awaiting_approval` on the first valid attachment attempt, measured from structured test outcomes in `tests/integration/add-child-teams-csv-attachment-request.test.js`.
 - **SC-003**: 100% of requests in `waiting_for_attachment` remain blocked from approval and mutation.
 - **SC-004**: 100% of execution attempts without valid designated-approver approval remain blocked.
 - **SC-005**: 100% of post-terminal attachment comments are ignored for reprocessing and do not reopen lifecycle states.
@@ -179,3 +179,4 @@ After a CSV attachment is accepted and validated, execution uses the same approv
 - GitHub issue attachments are discoverable via issue/comment-linked URLs; no dedicated issue-attachment API object is assumed.
 - One organization, one parent team, and one designated approver remain request-scoped boundaries.
 - Team creation/member management/repo access changes remain out of scope.
+- Repository policy configuration provides `attachment_max_bytes` for CSV attachment intake, and workflows use a documented default when policy value resolution is unavailable.

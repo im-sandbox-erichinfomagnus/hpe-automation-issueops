@@ -1,0 +1,225 @@
+name: add-child-teams-csv-attachment-workflow-contract
+version: 1
+purpose: >-
+  Contract for the IssueOps enhancement that preserves the existing
+  add-child-teams manual request path and adds requester-comment CSV attachment
+  intake for high-volume child-link requests.
+
+scaffolding:
+  fixtures:
+    - tests/fixtures/add-child-teams-csv-attachment-issue.md
+    - tests/fixtures/add-child-teams-csv-attachment-comments.json
+  tests:
+    - tests/contract/add-child-teams-csv-attachment-parser-fixture.test.js
+    - tests/contract/add-child-teams-csv-attachment-validation.test.js
+    - tests/integration/add-child-teams-csv-attachment-request.test.js
+  automation_baseline:
+    - .github/workflows/codeql.yml
+    - .github/dependabot.yml
+
+issue_form:
+  path: .github/ISSUE_TEMPLATE/add-child-teams.yml
+  required_fields:
+    - id: organization
+      type: input
+      description: Target GitHub organization slug.
+    - id: parent_team
+      type: input
+      description: Existing parent team slug or canonical identifier.
+    - id: designated_hierarchy_approver
+      type: input
+      description: GitHub login of the single approver for the full hierarchy batch.
+    - id: intake_mode
+      type: dropdown
+      description: Select manual input or CSV attachment intake.
+      allowed:
+        - manual
+        - csv_attachment
+    - id: business_justification
+      type: textarea
+      description: Reason for requested hierarchy updates.
+    - id: dry_run
+      type: dropdown
+      description: Whether to validate only or allow mutation after approval.
+  conditional_fields:
+    - id: requested_child_teams
+      type: textarea
+      description: Existing manual input path for child-team entries.
+      rules:
+        - May be populated only when intake_mode is manual.
+        - Must be empty when intake_mode is csv_attachment.
+
+parser:
+  action: issue-ops/parser@v5
+  inputs:
+    body: ${{ github.event.issue.body }}
+    issue-form-template: add-child-teams.yml
+  outputs:
+    json: Parsed request payload as JSON string.
+    parsed_organization: Normalized organization field.
+    parsed_parent_team: Normalized parent-team field.
+    parsed_designated_hierarchy_approver: Parsed approver login.
+    parsed_intake_mode: Parsed intake mode selection.
+    parsed_requested_child_teams: Parsed manual child-team field before downstream normalization.
+    parsed_dry_run: Parsed dry-run selection.
+
+workflow_inputs:
+  validation:
+    - name: organization
+      required: true
+    - name: parent_team
+      required: true
+    - name: designated_hierarchy_approver
+      required: true
+    - name: intake_mode
+      required: true
+      allowed:
+        - manual
+        - csv_attachment
+    - name: requested_child_teams
+      required: false
+    - name: requester_login
+      required: true
+    - name: issue_number
+      required: true
+    - name: event_name
+      required: true
+    - name: dry_run
+      required: true
+  comment_context:
+    - name: comment_id
+      required: false
+      description: Issue comment id when event_name is issue_comment.
+    - name: comment_author_login
+      required: false
+      description: Author login of triggering comment.
+    - name: issue_comments
+      required: false
+      description: Issue comments loaded for attachment and approval checks.
+    - name: issue_labels_json
+      required: false
+      description: Serialized issue labels for terminal-state detection fallback.
+  approval_gate:
+    - name: approver_login
+      required: true
+    - name: designated_hierarchy_approver
+      required: true
+  reconciliation:
+    - name: execution_token_source
+      required: true
+      description: PAT-backed execution credential source.
+    - name: audit_artifact_path
+      required: true
+      description: Persisted artifact used for execution continuity.
+
+authorization:
+  requester_identity: github.event.issue.user.login
+  attachment_uploader_requirement: Accepted CSV attachment comment author must equal requester identity.
+  allowed_approvers:
+    - single designated hierarchy approver for full request batch
+  execution_identity:
+    model: personal access token supplied to workflow
+    bootstrap: repository or organization secret injection
+    required_permissions:
+      issues: read
+      members: write
+      metadata: read
+  workflow_token_permissions:
+    actions: read
+    contents: read
+    issues: write
+  terminal_state_labels:
+    prefix: "issueops:add-child-teams:"
+    statuses:
+      - executed
+      - partially_executed
+      - failed
+    description: Operation-aware terminal labels applied after execution to prevent reopening by later comments.
+
+validation_rules:
+  - Exactly one supported intake mode must be selected.
+  - Manual-mode behavior must remain equivalent to baseline add-child-teams workflow.
+  - csv_attachment requests with valid metadata must enter waiting_for_attachment until accepted attachment CSV passes validation.
+  - Approval must not be requested while request is waiting_for_attachment.
+  - Attachment candidates are discovered from issue comments and linked URLs rather than dedicated attachment API resources.
+  - Only requester-authored comments on same issue may provide accepted candidates.
+  - Active candidate is newest eligible requester attachment comment after latest failed attachment-validation attempt.
+  - Comments without acceptable attachment must not advance request status.
+  - Exactly one CSV attachment may be accepted per active attempt.
+  - Accepted attachment must satisfy size cap, UTF-8 decode checks, and CSV file checks.
+  - Attachment-derived CSV must preserve feature 008 child_team header and row-level normalization semantics.
+  - CSV row findings use 1-based data-row numbers excluding header row.
+  - Invalid CSV content blocks approval readiness until corrected later requester comment is processed.
+  - Parent and child teams must exist in target organization for links to be eligible.
+  - Re-parenting and cycle-creating links are rejected.
+  - Approval must be provided by designated hierarchy approver and validated against current organization and team-maintainer state.
+  - Later requester attachment comments are ignored once request is in executed, partially_executed, or failed-after-approved-execution terminal state.
+
+reconciliation:
+  current_state_reads:
+    - issue comments lookup for attachment discovery and approval detection
+    - target organization and parent team visibility checks
+    - child-team existence and hierarchy reads
+  mutation_rule: Apply only missing child links under requested parent team after accepted attachment rows are normalized.
+  no_op_rule: Already-linked child relationships are reported and not rewritten.
+  partial_success_rule: Preserve per-link success/failure and operator follow-up guidance.
+  terminal_state_rule: Executed, partially_executed, and failed-after-approved-execution requests are immutable for attachment reprocessing.
+  terminal_state_signal:
+    restore_source: Latest per-issue audit artifact when available.
+    fallback_labels:
+      - issueops:add-child-teams:executed
+      - issueops:add-child-teams:partially_executed
+      - issueops:add-child-teams:failed
+  dry_run_rule: Approved dry-run requests stop before mutation and still emit reconciliation and provenance outputs.
+
+rate_limit_handling:
+  inspect_headers:
+    - x-ratelimit-remaining
+    - x-ratelimit-reset
+    - retry-after
+  retry_policy:
+    strategy: bounded exponential backoff
+    retryable_conditions:
+      - transient secondary rate limit
+      - explicit retry-after guidance
+      - transient comment-read or attachment-download failures
+    non_retryable_conditions:
+      - invalid approval
+      - missing organization or parent team
+      - ambiguous attachment candidate selection
+      - oversized attachment
+      - UTF-8 decode failure
+      - malformed or invalid CSV content
+
+observability:
+  outputs:
+    - GitHub step summary
+    - JSON audit artifact
+    - requester-facing workflow summary in Actions run
+  required_fields:
+    - issue_number
+    - run_id
+    - requester_login
+    - approver_login
+    - organization
+    - parent_team
+    - intake_mode
+    - request_status
+    - attachment_url
+    - attachment_comment_id
+    - attachment_uploader_login
+    - attachment_filename
+    - attachment_content_hash
+    - attachment_downloaded_at
+    - requested_child_links
+    - duplicate_row_count
+    - invalid_row_count
+    - csv_row_findings
+    - csv_row_numbering_convention
+    - applied_links
+    - noop_links
+    - rejected_links
+    - failed_links
+    - rollback_status
+    - reconciliation.links_to_apply
+    - reconciliation.links_already_present

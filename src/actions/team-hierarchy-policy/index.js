@@ -2,6 +2,8 @@
 
 const { loadWorkflowToken } = require('../../workflow-support/load-workflow-token');
 
+const DEFAULT_ATTACHMENT_MAX_BYTES = 1024 * 1024;
+
 function normalizeComparableLogin(value) {
   return String(value || '').toLowerCase();
 }
@@ -32,6 +34,34 @@ function hasPatBackedHierarchyMutationToken(tokenInfo) {
       tokenInfo.is_pat_backed &&
       tokenInfo.supports_team_hierarchy_mutation !== false
   );
+}
+
+function normalizePositiveInteger(value) {
+  if (value == null || value === '') {
+    return null;
+  }
+
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || !Number.isInteger(numeric) || numeric <= 0) {
+    return null;
+  }
+
+  return numeric;
+}
+
+function resolveTeamHierarchyAttachmentMaxBytes(context = {}) {
+  const direct = normalizePositiveInteger(context.attachment_max_bytes ?? context.attachmentMaxBytes);
+  if (direct != null) {
+    return direct;
+  }
+
+  const policy = context.repository_policy || context.repositoryPolicy || context.policy || {};
+  const policyValue = normalizePositiveInteger(policy.attachment_max_bytes ?? policy.attachmentMaxBytes);
+  if (policyValue != null) {
+    return policyValue;
+  }
+
+  return DEFAULT_ATTACHMENT_MAX_BYTES;
 }
 
 function assertTeamHierarchyAllowed(context = {}, options = {}) {
@@ -88,9 +118,12 @@ function buildTeamHierarchyPermissionGuard(context = {}, options = {}) {
 }
 
 module.exports = {
+  DEFAULT_ATTACHMENT_MAX_BYTES,
   assertTeamHierarchyAllowed,
   buildTeamHierarchyPermissionGuard,
   hasPatBackedHierarchyMutationToken,
   isEligibleTeamHierarchyApprover,
   normalizeComparableLogin,
+  normalizePositiveInteger,
+  resolveTeamHierarchyAttachmentMaxBytes,
 };

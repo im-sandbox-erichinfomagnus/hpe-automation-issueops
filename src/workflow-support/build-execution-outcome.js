@@ -92,6 +92,7 @@ function buildExecutionOutcome(input = {}) {
     run_id: runContext.run_id || process.env.GITHUB_RUN_ID || null,
     run_attempt: runContext.run_attempt || process.env.GITHUB_RUN_ATTEMPT || null,
     intake_mode: input.intake_mode || null,
+    terminal_state: input.terminal_state || 'not_started',
     mutation_count: summary.mutated.length,
     created_count: summary.mutated.length,
     linked_count: summary.mutated.length,

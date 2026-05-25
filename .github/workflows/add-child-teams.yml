@@ -20,6 +20,7 @@ on:
         type: string
 
 permissions:
+  actions: read
   contents: read
   issues: write
 
@@ -61,6 +62,7 @@ jobs:
           if [ "$EVENT_NAME" = "issues" ] || [ "$EVENT_NAME" = "issue_comment" ]; then
             issue_body=$(jq -r '.issue.body // ""' "$GITHUB_EVENT_PATH")
             requester_login=$(jq -r '.issue.user.login // ""' "$GITHUB_EVENT_PATH")
+            issue_labels_json=$(jq -c '.issue.labels // []' "$GITHUB_EVENT_PATH")
           else
             if [ -z "$ISSUE_NUMBER" ]; then
               echo "workflow_dispatch requires an issue number to replay" >&2
@@ -75,9 +77,11 @@ jobs:
 
             issue_body=$(printf '%s' "$issue_json" | jq -r '.body // ""')
             requester_login=$(printf '%s' "$issue_json" | jq -r '.user.login // ""')
+            issue_labels_json=$(printf '%s' "$issue_json" | jq -c '.labels // []')
           fi
 
           echo "requester_login=$requester_login" >> "$GITHUB_OUTPUT"
+          echo "issue_labels_json=$issue_labels_json" >> "$GITHUB_OUTPUT"
           {
             echo 'issue_body<<EOF'
             printf '%s\n' "$issue_body"
@@ -94,13 +98,30 @@ jobs:
       - name: Check request applicability
         id: request_scope
         env:
+          PARSED_REQUEST_JSON: ${{ steps.parse_request.outputs.json }}
           PARSED_PARENT_TEAM: ${{ steps.parse_request.outputs.parsed_parent_team }}
+          PARSED_DESIGNATED_HIERARCHY_APPROVER: ${{ steps.parse_request.outputs.parsed_designated_hierarchy_approver }}
           PARSED_DESIGNATED_APPROVER: ${{ steps.parse_request.outputs.parsed_designated_approver }}
         run: |
           set -euo pipefail
 
           matches_request=false
-          if [ -n "${PARSED_PARENT_TEAM:-}" ] && [ -n "${PARSED_DESIGNATED_APPROVER:-}" ]; then
+          parsed_parent_team="${PARSED_PARENT_TEAM:-}"
+          parsed_designated_approver="${PARSED_DESIGNATED_HIERARCHY_APPROVER:-${PARSED_DESIGNATED_APPROVER:-}}"
+
+          if [ -n "${PARSED_REQUEST_JSON:-}" ] && [ "$PARSED_REQUEST_JSON" != 'null' ]; then
+            json_parent_team=$(printf '%s' "$PARSED_REQUEST_JSON" | jq -r '.parent_team // .parsed_parent_team // empty' 2>/dev/null || true)
+            json_designated_approver=$(printf '%s' "$PARSED_REQUEST_JSON" | jq -r '.designated_hierarchy_approver // .parsed_designated_hierarchy_approver // .designated_approver // .parsed_designated_approver // empty' 2>/dev/null || true)
+
+            if [ -z "$parsed_parent_team" ] && [ -n "$json_parent_team" ]; then
+              parsed_parent_team="$json_parent_team"
+            fi
+            if [ -z "$parsed_designated_approver" ] && [ -n "$json_designated_approver" ]; then
+              parsed_designated_approver="$json_designated_approver"
+            fi
+          fi
+
+          if [ -n "$parsed_parent_team" ] && [ -n "$parsed_designated_approver" ]; then
             matches_request=true
           fi
 
@@ -110,6 +131,16 @@ jobs:
         if: ${{ steps.request_scope.outputs.matches-request != 'true' }}
         run: |
           echo 'This issue does not match the add-child-teams form. Exiting without validation or assignment.' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Restore prior request audit artifact
+        if: ${{ steps.request_scope.outputs.matches-request == 'true' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ env.ISSUE_NUMBER }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          AUDIT_ARTIFACT_PATH: artifacts/add-child-teams-validation-${{ env.ISSUE_NUMBER || 'manual' }}.json
+        run: node src/scripts/restore-request-audit-artifact.js
 
       - name: Validate request and record approval-ready state
         id: validate_request
@@ -122,12 +153,19 @@ jobs:
           PARSED_REQUEST_JSON: ${{ steps.parse_request.outputs.json }}
           PARSED_ORGANIZATION: ${{ steps.parse_request.outputs.parsed_organization }}
           PARSED_PARENT_TEAM: ${{ steps.parse_request.outputs.parsed_parent_team }}
+          PARSED_DESIGNATED_HIERARCHY_APPROVER: ${{ steps.parse_request.outputs.parsed_designated_hierarchy_approver }}
           PARSED_DESIGNATED_APPROVER: ${{ steps.parse_request.outputs.parsed_designated_approver }}
+          PARSED_INTAKE_MODE: ${{ steps.parse_request.outputs.parsed_intake_mode }}
           PARSED_REQUESTED_CHILD_TEAMS: ${{ steps.parse_request.outputs.parsed_requested_child_teams }}
           PARSED_BULK_CSV_REQUESTED_CHILD_TEAMS: ${{ steps.parse_request.outputs.parsed_bulk_csv_requested_child_teams }}
           PARSED_BUSINESS_JUSTIFICATION: ${{ steps.parse_request.outputs.parsed_business_justification }}
           PARSED_DRY_RUN: ${{ steps.parse_request.outputs.parsed_dry_run }}
-          AUDIT_ARTIFACT_PATH: ${{ env.AUDIT_ARTIFACT_PATH }}
+          TEAM_HIERARCHY_POLICY_JSON: ${{ vars.TEAM_HIERARCHY_POLICY_JSON || '' }}
+          ISSUE_LABELS_JSON: ${{ steps.issue_context.outputs.issue_labels_json }}
+          COMMENT_ID: ${{ github.event.comment.id || '' }}
+          COMMENT_AUTHOR_LOGIN: ${{ github.event.comment.user.login || '' }}
+          COMMENT_BODY: ${{ github.event.comment.body || '' }}
+          AUDIT_ARTIFACT_PATH: artifacts/add-child-teams-validation-${{ env.ISSUE_NUMBER || 'manual' }}.json
         run: node src/scripts/run-request-validation.js
 
       - name: Evaluate approval gate and assign central owner
@@ -137,7 +175,7 @@ jobs:
           ISSUEOPS_GITHUB_TOKEN: ${{ secrets.ISSUEOPS_GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ github.token }}
           ISSUE_NUMBER: ${{ env.ISSUE_NUMBER }}
-          AUDIT_ARTIFACT_PATH: ${{ env.AUDIT_ARTIFACT_PATH }}
+          AUDIT_ARTIFACT_PATH: artifacts/add-child-teams-validation-${{ env.ISSUE_NUMBER || 'manual' }}.json
         run: node src/scripts/run-approval-gate.js
 
       - name: Execute approved hierarchy reconciliation
@@ -147,7 +185,7 @@ jobs:
           ISSUEOPS_GITHUB_TOKEN: ${{ secrets.ISSUEOPS_GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ github.token }}
           ISSUE_NUMBER: ${{ env.ISSUE_NUMBER }}
-          AUDIT_ARTIFACT_PATH: ${{ env.AUDIT_ARTIFACT_PATH }}
+          AUDIT_ARTIFACT_PATH: artifacts/add-child-teams-validation-${{ env.ISSUE_NUMBER || 'manual' }}.json
         run: node src/scripts/run-approved-execution.js
 
       - name: Upload validation artifact
@@ -155,5 +193,5 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: add-child-teams-validation-${{ env.ISSUE_NUMBER || github.run_id }}
-          path: ${{ env.AUDIT_ARTIFACT_PATH }}
+          path: artifacts/add-child-teams-validation-${{ env.ISSUE_NUMBER || 'manual' }}.json
           if-no-files-found: error

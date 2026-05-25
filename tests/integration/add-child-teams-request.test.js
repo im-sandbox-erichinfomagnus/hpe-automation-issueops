@@ -77,6 +77,21 @@ test('runRequestValidation records an approval-ready add-child-teams request wit
   assert.match(fs.readFileSync(outputPath, 'utf8'), /validation-status=awaiting_approval/);
 });
 
+test('manual workflow guardrail keeps add-child-teams request applicability independent of attachment comment context', () => {
+  const workflowPath = path.join(__dirname, '..', '..', '.github', 'workflows', 'add-child-teams.yml');
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
+  const requestScopeBlock = workflow.match(/- name: Check request applicability[\s\S]*?echo "matches-request=\$matches_request" >> "\$GITHUB_OUTPUT"/);
+
+  assert.ok(requestScopeBlock);
+  assert.match(requestScopeBlock[0], /PARSED_REQUEST_JSON/);
+  assert.match(requestScopeBlock[0], /json_parent_team/);
+  assert.match(requestScopeBlock[0], /json_designated_approver/);
+  assert.match(requestScopeBlock[0], /PARSED_PARENT_TEAM/);
+  assert.match(requestScopeBlock[0], /PARSED_DESIGNATED_HIERARCHY_APPROVER/);
+  assert.doesNotMatch(requestScopeBlock[0], /COMMENT_ID/);
+  assert.doesNotMatch(requestScopeBlock[0], /COMMENT_AUTHOR_LOGIN/);
+});
+
 test('runRequestValidation fails when the target organization is not visible', async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'add-child-teams-missing-org-'));
   const auditPath = path.join(workspace, 'audit.json');
@@ -198,9 +213,49 @@ test('runRequestValidation rejects requests that leave both manual and CSV intak
   assert.equal(result.validation.is_valid, false);
   assert.equal(result.validation.request_status, 'validation_failed');
   assert.equal(result.validation.request.intake_mode, null);
-  assert.match(result.validation.errors.join('\n'), /Exactly one intake source must be populated/i);
-  assert.match(result.validation.errors.join('\n'), /At least one valid requested child team is required/i);
-  assert.match(fs.readFileSync(summaryPath, 'utf8'), /Validation errors: .*Exactly one intake source must be populated/i);
+  assert.match(result.validation.errors.join('\n'), /Exactly one supported intake mode must be selected/i);
+  assert.match(fs.readFileSync(summaryPath, 'utf8'), /Validation errors: .*Exactly one supported intake mode must be selected/i);
+});
+
+test('runRequestValidation keeps csv_attachment hierarchy requests in waiting_for_attachment until requester attachment arrives', async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'add-child-teams-waiting-'));
+  const auditPath = path.join(workspace, 'audit.json');
+  const summaryPath = path.join(workspace, 'summary.md');
+  const validationFixture = loadJsonFixture('team-hierarchy-validation.json').visible_org;
+
+  const result = await runRequestValidation({
+    env: {
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      GITHUB_REPOSITORY: 'octo-org/issueops-speckit',
+      ISSUE_NUMBER: '6042',
+      REQUESTER_LOGIN: 'requester',
+      PARSED_REQUEST_JSON: JSON.stringify({
+        organization: 'octo-org',
+        parent_team: 'Platform Engineering',
+        designated_hierarchy_approver: 'octocat',
+        intake_mode: 'csv_attachment',
+        requested_child_teams: '',
+        business_justification: 'Need hierarchy updates',
+        dry_run: true,
+      }),
+      AUDIT_ARTIFACT_PATH: auditPath,
+      GITHUB_STEP_SUMMARY: summaryPath,
+      GITHUB_RUN_ID: 'run-6042',
+      GITHUB_RUN_ATTEMPT: '1',
+    },
+    api: createHierarchyApi(validationFixture),
+    setProcessExitCode: false,
+  });
+
+  assert.equal(result.validation.is_valid, false);
+  assert.equal(result.validation.request_status, 'waiting_for_attachment');
+  assert.equal(result.auditArtifact.request.request_status, 'waiting_for_attachment');
+  assert.equal(result.auditArtifact.request.intake_mode, 'csv_attachment');
+  assert.equal(result.auditArtifact.approval.approval_status, 'not_requested');
+  assert.equal(result.auditArtifact.request.requested_child_links.length, 0);
+  assert.match(fs.readFileSync(summaryPath, 'utf8'), /Add Child Teams Workflow Summary/);
+  assert.match(fs.readFileSync(summaryPath, 'utf8'), /Parent team: platform-engineering/i);
+  assert.match(fs.readFileSync(summaryPath, 'utf8'), /Attachment status: waiting for requester CSV attachment comment/i);
 });
 
 test('runRequestValidation rejects re-parenting and cycle-creating requests', async () => {

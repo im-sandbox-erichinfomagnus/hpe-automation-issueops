@@ -64,7 +64,7 @@ function listCandidateArtifacts(artifacts = [], currentRunId = null) {
 }
 
 function isTerminalRequestStatus(status) {
-  return ['executed', 'partially_executed', 'failed'].includes(String(status || ''));
+  return ['executed', 'partially_executed', 'failed', 'failed_after_approved_execution'].includes(String(status || ''));
 }
 
 async function downloadArtifactArchive({ artifact, token, fetchImpl = global.fetch }) {

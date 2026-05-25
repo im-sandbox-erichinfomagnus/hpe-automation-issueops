@@ -14,14 +14,20 @@ function formatAuditSummary(auditArtifact = {}) {
   const approval = auditArtifact.approval || {};
   const reconciliation = auditArtifact.reconciliation || {};
   const execution = auditArtifact.execution || {};
+  const metadata = auditArtifact.metadata || {};
   const isBulkCsv = request.intake_mode === 'bulk_csv';
   const isCsvAttachment = request.intake_mode === 'csv_attachment';
+  const operation = metadata.operation || '';
   const isTeamRepoAccess = Array.isArray(request.requested_repository_grants) && (
     request.requested_repository_grants.length > 0 ||
     Boolean(request.requested_permission_api_value) ||
     Boolean(request.team_slug && request.designated_approver_login)
   );
-  const isTeamHierarchy = !isTeamRepoAccess && Array.isArray(request.requested_child_links) && request.requested_child_links.length > 0;
+  const isTeamHierarchy = !isTeamRepoAccess && (
+    operation === 'team_hierarchy' ||
+    Boolean(request.parent_team_slug || request.parent_team_name) ||
+    (Array.isArray(request.requested_child_links) && request.requested_child_links.length > 0)
+  );
   const isTeamCreation = !isTeamRepoAccess && !isTeamHierarchy && (
     (Array.isArray(request.requested_teams) && request.requested_teams.length > 0) ||
     Boolean(request.intended_owner_login) ||
@@ -109,16 +115,34 @@ function formatAuditSummary(auditArtifact = {}) {
       `- Approval: ${approval.approval_status || 'pending'} (${hierarchyApprovalState})`,
       approval.approver_login ? `- Approver: ${approval.approver_login}` : null,
       `- Validation: ${validation.is_valid ? 'passed' : 'failed'}`,
-      isBulkCsv
+      isCsvAttachment && request.request_status === 'waiting_for_attachment'
+        ? '- Attachment status: waiting for requester CSV attachment comment'
+        : null,
+      isCsvAttachment && request.accepted_attachment_submission && request.accepted_attachment_submission.attachment_url
+        ? `- Attachment URL: ${request.accepted_attachment_submission.attachment_url}`
+        : null,
+      isCsvAttachment && request.accepted_attachment_submission && request.accepted_attachment_submission.comment_id
+        ? `- Attachment comment ID: ${request.accepted_attachment_submission.comment_id}`
+        : null,
+      isCsvAttachment && request.accepted_attachment_submission && request.accepted_attachment_submission.uploader_login
+        ? `- Attachment uploader: ${request.accepted_attachment_submission.uploader_login}`
+        : null,
+      isCsvAttachment && request.accepted_attachment_submission && request.accepted_attachment_submission.filename
+        ? `- Attachment filename: ${request.accepted_attachment_submission.filename}`
+        : null,
+      isCsvAttachment && request.accepted_attachment_submission && request.accepted_attachment_submission.content_hash
+        ? `- Attachment content hash: ${request.accepted_attachment_submission.content_hash}`
+        : null,
+      (isBulkCsv || isCsvAttachment)
         ? `- CSV row findings: ${(validation.csv_row_findings || request.csv_row_findings || []).length}`
         : null,
-      isBulkCsv
+      (isBulkCsv || isCsvAttachment)
         ? `- CSV duplicate rows: ${readBulkCsvCount(execution.duplicate_row_count, request.bulk_csv_submission?.duplicate_row_count)}`
         : null,
-      isBulkCsv
+      (isBulkCsv || isCsvAttachment)
         ? `- CSV invalid rows: ${readBulkCsvCount(execution.invalid_row_count, request.bulk_csv_submission?.invalid_row_count)}`
         : null,
-      isBulkCsv && request.csv_row_numbering_convention
+      (isBulkCsv || isCsvAttachment) && request.csv_row_numbering_convention
         ? `- CSV row numbering: ${request.csv_row_numbering_convention}`
         : null,
       `- Child teams requested: ${(request.requested_child_links || []).length}`,

@@ -162,6 +162,24 @@ function deriveRequestStatus(executionOutcome) {
   return 'failed';
 }
 
+function deriveApprovedExecutionTerminalState(executionOutcome, options = {}) {
+  const baseStatus = deriveRequestStatus(executionOutcome);
+  const operation = options.operation || '';
+  const intakeMode = options.intakeMode || '';
+  const approvalStatus = options.approvalStatus || '';
+
+  if (
+    baseStatus === 'failed' &&
+    approvalStatus === 'approved' &&
+    operation === 'team_hierarchy' &&
+    intakeMode === 'csv_attachment'
+  ) {
+    return 'failed_after_approved_execution';
+  }
+
+  return baseStatus;
+}
+
 function buildPreMutationFailureArtifact(options = {}) {
   const auditArtifact = options.auditArtifact;
   const artifactPath = options.artifactPath;
@@ -463,6 +481,7 @@ async function runApprovedExecution(options = {}) {
         team_slug: childLink.child_team_slug,
         requested_name: childLink.requested_name || childLink.requested_child_name,
         source_row_number: childLink.source_row_number || null,
+        source_comment_id: childLink.source_comment_id || null,
         execution_result: 'noop',
         failure_reason: null,
       });
@@ -473,6 +492,7 @@ async function runApprovedExecution(options = {}) {
         team_slug: childLink.child_team_slug,
         requested_name: childLink.requested_name || childLink.requested_child_name,
         source_row_number: childLink.source_row_number || null,
+        source_comment_id: childLink.source_comment_id || null,
         execution_result: 'failed',
         failure_reason: childLink.failure_reason || 'rejected',
       });
@@ -576,6 +596,7 @@ async function runApprovedExecution(options = {}) {
             team_slug: childLink.child_team_slug,
             requested_name: childLink.requested_name || childLink.requested_child_name,
             source_row_number: childLink.source_row_number || null,
+            source_comment_id: childLink.source_comment_id || null,
             execution_result: 'linked',
             failure_reason: null,
           });
@@ -586,6 +607,7 @@ async function runApprovedExecution(options = {}) {
           team_slug: childLink.child_team_slug,
           requested_name: childLink.requested_name || childLink.requested_child_name,
           source_row_number: childLink.source_row_number || null,
+          source_comment_id: childLink.source_comment_id || null,
           execution_result: 'failed',
           failure_reason: classifyFailureReason(attemptResult.error),
         });
@@ -680,7 +702,11 @@ async function runApprovedExecution(options = {}) {
     artifact_path: artifactPath,
     rate_limit_snapshot: latestRateLimitSnapshot,
   });
-  const requestStatus = deriveRequestStatus(executionOutcome);
+  const requestStatus = deriveApprovedExecutionTerminalState(executionOutcome, {
+    operation,
+    intakeMode: auditArtifact.request && auditArtifact.request.intake_mode,
+    approvalStatus: auditArtifact.approval && auditArtifact.approval.approval_status,
+  });
   if (isTeamCreation && executionOutcome.created_count > 0) {
     executionOutcome.summary = `${executionOutcome.summary} Note: GitHub automatically makes the authenticated creator a team maintainer when a new team is created, so the creator becomes a team maintainer as an operational constraint of this workflow.`;
   }
@@ -760,6 +786,7 @@ module.exports = {
   buildValidatedRepositoryGrants,
   buildValidatedTeams,
   classifyFailureReason,
+  deriveApprovedExecutionTerminalState,
   deriveRequestStatus,
   runApprovedExecution,
 };
