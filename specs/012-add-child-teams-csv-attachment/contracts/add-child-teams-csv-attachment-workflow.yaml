@@ -133,7 +133,7 @@ authorization:
     statuses:
       - executed
       - partially_executed
-      - failed
+      - failed_after_approved_execution
     description: Operation-aware terminal labels applied after execution to prevent reopening by later comments.
 
 validation_rules:
@@ -169,7 +169,7 @@ reconciliation:
     fallback_labels:
       - issueops:add-child-teams:executed
       - issueops:add-child-teams:partially_executed
-      - issueops:add-child-teams:failed
+      - issueops:add-child-teams:failed_after_approved_execution
   dry_run_rule: Approved dry-run requests stop before mutation and still emit reconciliation and provenance outputs.
 
 rate_limit_handling:

@@ -297,3 +297,75 @@ test('malformed attachment CSV blocks approval readiness until corrected attachm
   assert.equal(result.validation.attachment_validation_attempt.attempt_status, 'csv_invalid');
   assert.match(result.validation.errors.join('\n'), /must include the required `child_team` header/i);
 });
+
+test('dry-run attachment validation preserves approval readiness and captures bounded-retry rate-limit evidence', async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'add-child-teams-attachment-dry-run-rate-limit-'));
+  const auditPath = path.join(workspace, 'audit.json');
+  const validationFixture = loadJsonFixture('team-hierarchy-validation.json').visible_org;
+  const delays = [];
+  let attempts = 0;
+
+  const result = await runRequestValidation({
+    env: {
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      GITHUB_REPOSITORY: 'octo-org/issueops-speckit',
+      ISSUE_NUMBER: '7205',
+      REQUESTER_LOGIN: 'requester',
+      PARSED_REQUEST_JSON: JSON.stringify({
+        organization: 'octo-org',
+        parent_team: 'Platform Engineering',
+        designated_hierarchy_approver: 'octocat',
+        intake_mode: 'csv_attachment',
+        requested_child_teams: '',
+        business_justification: 'Need hierarchy updates',
+        dry_run: true,
+      }),
+      AUDIT_ARTIFACT_PATH: auditPath,
+    },
+    api: createHierarchyApi(validationFixture, [
+      {
+        id: 72051,
+        created_at: '2026-05-25T10:09:00Z',
+        body: '[child-teams.csv](https://github.com/user-attachments/files/72051/child-teams.csv)',
+        user: { login: 'requester' },
+      },
+    ]),
+    fetchImpl: async () => {
+      attempts += 1;
+      if (attempts === 1) {
+        return {
+          ok: false,
+          status: 429,
+          headers: {
+            get: (name) => {
+              const key = String(name || '').toLowerCase();
+              if (key === 'retry-after') {
+                return '1';
+              }
+              if (key === 'x-ratelimit-remaining') {
+                return '0';
+              }
+              return null;
+            },
+          },
+        };
+      }
+
+      return {
+        ok: true,
+        headers: { get: () => null },
+        arrayBuffer: async () => new TextEncoder().encode('child_team\napplication-platform\n').buffer,
+      };
+    },
+    sleep: async (delayMs) => {
+      delays.push(delayMs);
+    },
+    setProcessExitCode: false,
+  });
+
+  assert.equal(result.validation.is_valid, true);
+  assert.equal(result.validation.request_status, 'awaiting_approval');
+  assert.equal(result.validation.request.dry_run, true);
+  assert.equal(result.validation.attachment_rate_limit_snapshot.retry_after_seconds, 1);
+  assert.deepEqual(delays, [1000]);
+});

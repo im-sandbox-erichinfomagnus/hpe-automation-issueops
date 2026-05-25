@@ -251,6 +251,79 @@ test('retryable rate-limit failures use bounded retry and eventually succeed for
   assert.deepEqual(delays, [2000]);
 });
 
+test('bounded retry exhaustion still reports partial execution details and rate-limit context', async () => {
+  const fixture = loadFixture('team-hierarchy-update-success.json');
+  const rateLimitError = loadFixture('team-hierarchy-rate-limit.json').secondary_limit_error;
+  const artifact = structuredClone(fixture.approved_artifact);
+  artifact.request.requested_child_links = [
+    {
+      requested_child_name: 'Application Platform',
+      requested_name: 'Application Platform',
+      child_team_slug: 'application-platform',
+      desired_action: 'link_child',
+      validation_status: 'valid',
+    },
+    {
+      requested_child_name: 'Release Engineering',
+      requested_name: 'Release Engineering',
+      child_team_slug: 'release-engineering',
+      desired_action: 'link_child',
+      validation_status: 'valid',
+    },
+  ];
+  artifact.validation.requested_child_links = [...artifact.request.requested_child_links];
+  artifact.validation.existing_child_links = [];
+  artifact.reconciliation.child_links_to_apply = [];
+  artifact.reconciliation.child_links_already_present = [];
+  const artifactPath = writeArtifact(artifact);
+  const currentTeams = [
+    fixture.current_teams[0],
+    { ...fixture.current_teams[1], parent: null },
+    { ...fixture.current_teams[2], parent: null },
+  ];
+  let releaseAttempts = 0;
+  const delays = [];
+
+  const result = await runApprovedExecution({
+    env: {
+      AUDIT_ARTIFACT_PATH: artifactPath,
+    },
+    tokenInfo: {
+      token: 'test-token',
+      source: 'ISSUEOPS_GITHUB_TOKEN',
+      is_pat_backed: true,
+      token_kind: 'pat',
+      supports_team_hierarchy_mutation: true,
+    },
+    createApi: () => ({
+      listOrgTeams: async () => currentTeams,
+      updateTeamParent: async ({ teamSlug, parentTeamId }) => {
+        if (teamSlug === 'application-platform') {
+          return { id: 2, name: 'Application Platform', slug: teamSlug, parent: { id: parentTeamId, slug: 'platform-engineering' } };
+        }
+
+        releaseAttempts += 1;
+        const error = new Error('secondary rate limit');
+        error.status = rateLimitError.status;
+        error.payload = rateLimitError.payload;
+        error.headers = rateLimitError.headers;
+        throw error;
+      },
+    }),
+    sleep: async (delayMs) => {
+      delays.push(delayMs);
+    },
+  });
+
+  assert.equal(releaseAttempts, 2);
+  assert.equal(result.request.request_status, 'partially_executed');
+  assert.equal(result.execution.linked_count, 1);
+  assert.equal(result.execution.failure_count, 1);
+  assert.equal(result.reconciliation.rate_limit_snapshot.retry_after_seconds, 2);
+  assert.match(result.execution.summary, /processed 1 child link\(ies\).*1 failed child link\(ies\)/i);
+  assert.deepEqual(delays, [2000]);
+});
+
 test('execution persists hierarchy audit fields and requester-facing summary content', async () => {
   const fixture = loadFixture('team-hierarchy-update-success.json');
   const artifactPath = writeArtifact(fixture.approved_artifact);

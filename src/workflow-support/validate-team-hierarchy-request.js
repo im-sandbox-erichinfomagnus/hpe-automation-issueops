@@ -27,6 +27,29 @@ function describeCsvRowIssue(finding) {
   }
 }
 
+function appendCsvValidationErrors(errors, schemaErrors = [], rowFindings = []) {
+  for (const schemaError of schemaErrors || []) {
+    errors.push(schemaError);
+  }
+
+  for (const finding of rowFindings || []) {
+    if (finding.validation_status === 'blank') {
+      continue;
+    }
+
+    if (finding.validation_status === 'duplicate') {
+      errors.push(
+        `CSV row ${finding.row_number} duplicates child team ${finding.child_team_name || 'unknown'}.`
+      );
+      continue;
+    }
+
+    if (finding.validation_status === 'invalid') {
+      errors.push(describeCsvRowIssue(finding));
+    }
+  }
+}
+
 function findAncestorSlugs(teamSlug, currentTeamMap) {
   const ancestors = [];
   const seen = new Set();
@@ -231,26 +254,11 @@ async function validateTeamHierarchyRequest(input = {}, options = {}) {
           supersedes_attempt_id: latestFailedValidationAttemptId,
         };
 
-        for (const schemaError of attachmentNormalization.schema_errors || []) {
-          errors.push(schemaError);
-        }
-
-        for (const finding of attachmentNormalization.csv_row_findings || []) {
-          if (finding.validation_status === 'blank') {
-            continue;
-          }
-
-          if (finding.validation_status === 'duplicate') {
-            errors.push(
-              `CSV row ${finding.row_number} duplicates child team ${finding.child_team_name || 'unknown'}.`
-            );
-            continue;
-          }
-
-          if (finding.validation_status === 'invalid') {
-            errors.push(describeCsvRowIssue(finding));
-          }
-        }
+        appendCsvValidationErrors(
+          errors,
+          attachmentNormalization.schema_errors,
+          attachmentNormalization.csv_row_findings
+        );
       } catch (error) {
         attachmentRateLimitSnapshot = error.rate_limit_snapshot || null;
         request.accepted_attachment_submission = {
@@ -282,26 +290,7 @@ async function validateTeamHierarchyRequest(input = {}, options = {}) {
 
   if (request.intake_mode === 'bulk_csv') {
     const bulkCsvSubmission = request.bulk_csv_submission || {};
-    for (const schemaError of bulkCsvSubmission.schema_errors || []) {
-      errors.push(schemaError);
-    }
-
-    for (const finding of request.csv_row_findings || []) {
-      if (finding.validation_status === 'blank') {
-        continue;
-      }
-
-      if (finding.validation_status === 'duplicate') {
-        errors.push(
-          `CSV row ${finding.row_number} duplicates child team ${finding.child_team_name || 'unknown'}.`
-        );
-        continue;
-      }
-
-      if (finding.validation_status === 'invalid') {
-        errors.push(describeCsvRowIssue(finding));
-      }
-    }
+    appendCsvValidationErrors(errors, bulkCsvSubmission.schema_errors, request.csv_row_findings);
   }
 
   if (request.intake_mode === 'manual' && request.requested_child_links.length === 0) {
@@ -543,6 +532,7 @@ async function validateTeamHierarchyRequest(input = {}, options = {}) {
 }
 
 module.exports = {
+  appendCsvValidationErrors,
   findAncestorSlugs,
   validateTeamHierarchyRequest,
 };

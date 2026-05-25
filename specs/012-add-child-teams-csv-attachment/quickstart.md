@@ -37,6 +37,7 @@ reconciliation-first execution, and terminal-state immutability.
 10. Reconcile against latest hierarchy state and apply only missing parent-child links, preserving no-op and dry-run behavior.
 11. Persist audit outputs including attachment provenance and terminal-state evidence.
 12. Ignore later requester attachment comments once request is terminal (`executed`, `partially_executed`, `failed_after_approved_execution`).
+13. Confirm terminal labels match operation-aware outcomes: `issueops:add-child-teams:executed`, `issueops:add-child-teams:partially_executed`, and `issueops:add-child-teams:failed_after_approved_execution`.
 
 ## Validation Scenarios
 

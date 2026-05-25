@@ -131,10 +131,10 @@ Use the constitution section `Repository Structure Conventions` as the default a
 
 **Purpose**: Final hardening, cross-story regression, and documentation synchronization.
 
-- [ ] T042 [P] Add cross-story regression coverage for dry-run, bounded retries, and rate-limit partial-result reporting in tests/contract/add-child-teams-csv-attachment-validation.test.js and tests/integration/add-child-teams-workflow.test.js
-- [ ] T043 Refactor shared child-team normalization and validation reuse in src/workflow-support/normalize-requested-child-teams.js, src/workflow-support/normalize-bulk-csv-requested-child-teams.js, and src/workflow-support/validate-team-hierarchy-request.js
-- [ ] T044 [P] Synchronize contract and quickstart examples with implemented behavior in specs/012-add-child-teams-csv-attachment/contracts/add-child-teams-csv-attachment-workflow.yaml and specs/012-add-child-teams-csv-attachment/quickstart.md
-- [ ] T045 Run quickstart-aligned end-to-end validation for manual and csv_attachment paths in tests/integration/add-child-teams-request.test.js, tests/integration/add-child-teams-csv-attachment-request.test.js, and tests/integration/add-child-teams-workflow.test.js
+- [X] T042 [P] Add cross-story regression coverage for dry-run, bounded retries, and rate-limit partial-result reporting in tests/contract/add-child-teams-csv-attachment-validation.test.js and tests/integration/add-child-teams-workflow.test.js
+- [X] T043 Refactor shared child-team normalization and validation reuse in src/workflow-support/normalize-requested-child-teams.js, src/workflow-support/normalize-bulk-csv-requested-child-teams.js, and src/workflow-support/validate-team-hierarchy-request.js
+- [X] T044 [P] Synchronize contract and quickstart examples with implemented behavior in specs/012-add-child-teams-csv-attachment/contracts/add-child-teams-csv-attachment-workflow.yaml and specs/012-add-child-teams-csv-attachment/quickstart.md
+- [X] T045 Run quickstart-aligned end-to-end validation for manual and csv_attachment paths in tests/integration/add-child-teams-request.test.js, tests/integration/add-child-teams-csv-attachment-request.test.js, and tests/integration/add-child-teams-workflow.test.js
 
 ---
 

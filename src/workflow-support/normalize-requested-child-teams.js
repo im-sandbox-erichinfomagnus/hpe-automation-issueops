@@ -92,6 +92,23 @@ function classifyRequestedChildTeam(value, state = createChildTeamNormalizationS
   };
 }
 
+function buildNormalizedChildTeamLink(normalizedChildTeam, options = {}) {
+  if (!normalizedChildTeam || normalizedChildTeam.validation_status !== 'valid') {
+    return null;
+  }
+
+  const link = {
+    requested_name: normalizedChildTeam.requested_name,
+    child_team_slug: normalizedChildTeam.child_team_slug,
+  };
+
+  if (options.source_row_number != null) {
+    link.source_row_number = options.source_row_number;
+  }
+
+  return link;
+}
+
 function normalizeRequestedChildTeams(input) {
   const normalizedChildTeams = [];
   const requestedChildTeamDetail = [];
@@ -109,11 +126,9 @@ function normalizeRequestedChildTeams(input) {
       validation_status: normalizedChildTeam.validation_status,
     });
 
-    if (normalizedChildTeam.validation_status === 'valid') {
-      normalizedChildTeams.push({
-        requested_name: normalizedChildTeam.requested_name,
-        child_team_slug: normalizedChildTeam.child_team_slug,
-      });
+    const normalizedChildTeamLink = buildNormalizedChildTeamLink(normalizedChildTeam);
+    if (normalizedChildTeamLink) {
+      normalizedChildTeams.push(normalizedChildTeamLink);
     }
   }
 
@@ -127,6 +142,7 @@ function normalizeRequestedChildTeams(input) {
 }
 
 module.exports = {
+  buildNormalizedChildTeamLink,
   classifyRequestedChildTeam,
   createChildTeamNormalizationState,
   normalizeLogin,
