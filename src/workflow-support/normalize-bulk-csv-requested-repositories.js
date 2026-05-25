@@ -2,6 +2,7 @@
 
 const {
   buildNormalizedRepositoryGrant,
+  hasPopulatedInput,
   normalizeLogin,
   parseRepositoryReference,
   unwrapCodeFence,
@@ -122,7 +123,7 @@ function normalizeBulkCsvRequestedRepositories(rawInput, options = {}) {
   const defaultOwner = normalizeLogin(options.defaultOwner || options.default_owner || '');
   const empty = createEmptyBulkCsvNormalization(rawInput);
 
-  if (!unwrapCodeFence(rawInput).trim()) {
+  if (!hasPopulatedInput(rawInput)) {
     return empty;
   }
 

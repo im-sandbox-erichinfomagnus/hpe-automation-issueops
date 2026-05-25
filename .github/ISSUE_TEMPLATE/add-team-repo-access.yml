@@ -36,7 +36,7 @@ body:
     id: requested_repositories
     attributes:
       label: Requested repositories
-      description: Existing manual input path for one existing repository per line. Duplicate repositories, mixed-organization requests, repository creation, permission removal, and permission downgrade requests are rejected. Validation enforces exactly one populated intake mode across this field and the bulk CSV textarea.
+      description: Manual input path for one existing repository per line. Populate this only when intake mode is manual. Duplicate repositories, mixed-organization requests, repository creation, permission removal, and permission downgrade requests are rejected.
       placeholder: |
         service-catalog
         developer-portal
@@ -44,18 +44,17 @@ body:
     validations:
       required: false
 
-  - type: textarea
-    id: bulk_csv_requested_repositories
+  - type: dropdown
+    id: intake_mode
     attributes:
-      label: Bulk CSV requested repositories
-      description: Optional CSV intake path for higher-volume requests. Provide a UTF-8 CSV payload with a required `repository` header. Validation enforces exactly one populated intake mode across this field and the manual requested repositories textarea.
-      placeholder: |
-        repository
-        service-catalog
-        developer-portal
-      render: text
+      label: Intake mode
+      description: Choose manual for line-by-line repository input or csv_attachment to upload repository CSV via a requester-authored issue comment attachment.
+      options:
+        - manual
+        - csv_attachment
+      default: 0
     validations:
-      required: false
+      required: true
 
   - type: dropdown
     id: permission_level

@@ -60,7 +60,7 @@ async function runApprovalGate(options = {}) {
   const operation = auditArtifact.metadata && auditArtifact.metadata.operation;
 
   if (
-    (operation === 'team_membership' || operation === 'team_creation' || operation === 'team_hierarchy') &&
+    (operation === 'team_membership' || operation === 'team_creation' || operation === 'team_hierarchy' || operation === 'team_repo_access') &&
     auditArtifact.request &&
     auditArtifact.request.intake_mode === 'csv_attachment' &&
     ['executed', 'partially_executed', 'failed', 'failed_after_approved_execution'].includes(auditArtifact.request.request_status)
@@ -194,6 +194,8 @@ async function runApprovalGate(options = {}) {
       : auditArtifact.metadata && auditArtifact.metadata.operation === 'team_repo_access'
       ? auditArtifact.approval.approval_status === 'approved'
         ? 'Request approval was granted by the authorized designated target organization owner. No repository-access mutation was attempted in this phase.'
+        : auditArtifact.approval.approval_status === 'not_requested'
+          ? 'Request is still waiting for a requester-authored CSV attachment comment before approval can be evaluated. No repository-access mutation was attempted.'
         : auditArtifact.approval.approval_status === 'denied'
           ? 'Approval was denied because the approval comment did not come from the authorized designated target organization owner. No repository-access mutation was attempted.'
           : auditArtifact.approval.approval_status === 'invalidated'

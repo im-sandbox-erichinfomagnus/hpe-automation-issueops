@@ -23,6 +23,7 @@ const { emitAuditSummary } = require('./emit-audit-summary');
 const { createGitHubTeamApi: createMembershipGitHubApi } = require('../workflow-support/github-team-api');
 const { executeWithBoundedRetry } = require('../workflow-support/handle-rate-limit');
 const { resolveTeamHierarchyAttachmentMaxBytes } = require('../actions/team-hierarchy-policy');
+const { resolveTeamRepoAccessAttachmentMaxBytes } = require('../actions/team-repo-access-policy');
 
 function parseParsedRequestJson(rawValue) {
   if (!rawValue) {
@@ -345,6 +346,7 @@ async function runRequestValidation(options = {}) {
   const priorArtifact = priorAttachmentRetryState.priorArtifact;
   const issueLabels = readIssueLabelsFromEnv(env);
   const teamHierarchyRepositoryPolicy = parseJsonFromEnv(env.TEAM_HIERARCHY_POLICY_JSON) || {};
+  const teamRepoAccessRepositoryPolicy = parseJsonFromEnv(env.TEAM_REPO_ACCESS_POLICY_JSON) || {};
   const operation = isTeamRepoAccess ? 'team_repo_access' : isTeamCreation ? 'team_creation' : isTeamHierarchy ? 'team_hierarchy' : 'team_membership';
   const terminalStatusFromIssueLabels = deriveTerminalStatusFromIssueLabels(issueLabels, operation);
   const request = (isTeamRepoAccess
@@ -374,7 +376,6 @@ async function runRequestValidation(options = {}) {
   let executionOutcome = null;
   try {
     if (
-      !isTeamRepoAccess &&
       request.intake_mode === 'csv_attachment' &&
       request.comment_context.comment_id &&
       terminalStatusFromIssueLabels
@@ -419,7 +420,6 @@ async function runRequestValidation(options = {}) {
         summary: 'Later attachment comments are ignored after the request reaches a terminal execution state.',
       };
     } else if (
-      !isTeamRepoAccess &&
       request.intake_mode === 'csv_attachment' &&
       request.comment_context.comment_id &&
       priorArtifact &&
@@ -491,15 +491,54 @@ async function runRequestValidation(options = {}) {
         ? createGitHubTeamRepoApi({ token: tokenInfo.token })
         : createGitHubTeamApi({ token: tokenInfo.token }));
       if (isTeamRepoAccess) {
+        const repoAccessAttachmentMaxBytes = resolveTeamRepoAccessAttachmentMaxBytes({
+          attachment_max_bytes: options.maxAttachmentBytes,
+          repository_policy: teamRepoAccessRepositoryPolicy,
+        });
+        const issueComments = env.ISSUE_NUMBER
+          ? typeof api.listIssueComments === 'function'
+            ? await executeGitHubReadWithRetry(
+                () => api.listIssueComments({
+                  repository: env.GITHUB_REPOSITORY || '',
+                  issueNumber: env.ISSUE_NUMBER,
+                }),
+                { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+              )
+            : []
+          : [];
         validation = await validateTeamRepoAccessRequest(request, {
-          getOrganization: ({ organization }) => api.getOrganization({ organization }),
+          getOrganization: ({ organization }) => executeGitHubReadWithRetry(
+            () => api.getOrganization({ organization }),
+            { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+          ),
           getTeamBySlug: ({ organization, teamSlug }) =>
-            api.getTeamBySlug({ organization, teamSlug }),
-          getRepository: ({ owner, repo }) => api.getRepository({ owner, repo }),
+            executeGitHubReadWithRetry(
+              () => api.getTeamBySlug({ organization, teamSlug }),
+              { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+            ),
+          getRepository: ({ owner, repo }) => executeGitHubReadWithRetry(
+            () => api.getRepository({ owner, repo }),
+            { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+          ),
           getTeamRepositoryPermission: ({ organization, teamSlug, owner, repo }) =>
-            api.getTeamRepositoryPermission({ organization, teamSlug, owner, repo }),
+            executeGitHubReadWithRetry(
+              () => api.getTeamRepositoryPermission({ organization, teamSlug, owner, repo }),
+              { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+            ),
           getOrganizationMembership: ({ organization, username }) =>
-            api.getOrganizationMembership({ organization, username }),
+            executeGitHubReadWithRetry(
+              () => api.getOrganizationMembership({ organization, username }),
+              { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+            ),
+          issueComments,
+          latestFailedValidationAt: priorAttachmentRetryState.latestFailedValidationAt,
+          latestFailedValidationAttemptId: priorAttachmentRetryState.latestFailedValidationAttemptId,
+          repositoryPolicy: teamRepoAccessRepositoryPolicy,
+          token: tokenInfo.token,
+          fetchImpl: options.fetchImpl,
+          maxAttachmentBytes: repoAccessAttachmentMaxBytes,
+          maxRetries: options.maxRetries,
+          sleep: options.sleep,
         });
         reconciliationPlan = reconcileTeamRepoAccess({
           request: validation.request,

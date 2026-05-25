@@ -114,7 +114,10 @@ test('issue form preserves requested_repositories as the manual input path', () 
   const template = loadIssueTemplate();
 
   assert.match(template, /id:\s+requested_repositories/);
-  assert.match(template, /Existing manual input path for one existing repository per line/i);
+  assert.match(template, /Manual input path for one existing repository per line/i);
+  assert.match(template, /id:\s+intake_mode/);
+  assert.match(template, /-\s+csv_attachment/i);
+  assert.doesNotMatch(template, /id:\s+bulk_csv_requested_repositories/);
   assert.match(template, /id:\s+permission_level/);
   assert.doesNotMatch(template, /custom-role/i);
 });
@@ -274,4 +277,59 @@ test('manual validation preserves explicit non-CSV intake metadata', async () =>
   assert.equal(validation.request.bulk_csv_input, '');
   assert.equal(validation.request.bulk_csv_submission.schema_status, 'not_provided');
   assert.deepEqual(validation.request.csv_row_findings, []);
+});
+
+test('manual parser guardrail keeps base fixture in manual intake mode with no attachment metadata selected', () => {
+  const parsedRequest = loadBaseFixture();
+  const request = parseTeamRepoAccessRequest({
+    parsedRequest,
+    issue: { number: 711, user: { login: 'requester' } },
+    repository: 'octo-org/issueops-speckit',
+  });
+
+  assert.equal(request.intake_mode, 'manual');
+  assert.equal(request.request_status, 'submitted');
+  assert.equal(request.comment_context.comment_id, null);
+  assert.equal(request.accepted_attachment_submission.acceptance_status, 'waiting');
+  assert.equal(request.attachment_validation_attempt.attempt_status, 'waiting');
+});
+
+test('parser derives waiting_for_attachment when intake mode is csv_attachment and manual repositories are empty', () => {
+  const parsed = parseTeamRepoAccessRequest(
+    {
+      parsedRequest: {
+        organization: 'octo-org',
+        target_team: 'platform-engineering',
+        designated_approver: 'octocat',
+        permission_level: 'write',
+        business_justification: 'Attachment-based high-volume request',
+        dry_run: 'true',
+        intake_mode: 'csv_attachment',
+        requested_repositories: '   ',
+      },
+      issue: { number: 900, user: { login: 'requester' } },
+      repository: 'octo-org/issueops-speckit',
+    },
+    {
+      requestId: 'repo#900/run.1',
+    }
+  );
+
+  assert.equal(parsed.intake_mode, 'csv_attachment');
+  assert.equal(parsed.request_status, 'waiting_for_attachment');
+  assert.equal(parsed.requested_repository_grants.length, 0);
+});
+
+test('manual parser guardrail rejects accidental csv_attachment mode when manual repositories remain populated', async () => {
+  const parsedRequest = loadBaseFixture();
+  parsedRequest.intake_mode = 'csv_attachment';
+
+  const validation = await validateTeamRepoAccessRequest({
+    parsedRequest,
+    issue: { number: 712, user: { login: 'requester' } },
+    repository: 'octo-org/issueops-speckit',
+  }, createValidationDependencies());
+
+  assert.equal(validation.is_valid, false);
+  assert.match(validation.errors.join('\n'), /requested_repositories must be empty when intake_mode is csv_attachment/i);
 });

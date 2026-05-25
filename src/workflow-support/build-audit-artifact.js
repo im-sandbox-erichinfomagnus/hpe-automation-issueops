@@ -233,6 +233,8 @@ function buildAuditArtifact(input = {}) {
     reconciliation: {
       team_exists: reconciliationPlan.team_exists,
       team_sync_blocked: reconciliationPlan.team_sync_blocked,
+      accepted_attachment_submission: reconciliationPlan.accepted_attachment_submission || null,
+      attachment_validation_attempt: reconciliationPlan.attachment_validation_attempt || null,
       current_members: reconciliationPlan.current_members || [],
       people_to_add: reconciliationPlan.people_to_add || [],
       people_already_present: reconciliationPlan.people_already_present || [],

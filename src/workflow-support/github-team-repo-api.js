@@ -100,6 +100,17 @@ function createGitHubTeamRepoApi(options = {}) {
   }
 
   return {
+    async listIssueComments({ repository, issueNumber }) {
+      const [owner, repo] = String(repository || '').split('/');
+      const result = await request(`/repos/${owner}/${repo}/issues/${issueNumber}/comments?per_page=100`);
+
+      if (!result.ok) {
+        throw Object.assign(new Error('Failed to list issue comments'), result);
+      }
+
+      return Array.isArray(result.payload) ? result.payload : [];
+    },
+
     async getOrganization({ organization }) {
       const result = await request(`/orgs/${organization}`);
       if (result.status === 404) {

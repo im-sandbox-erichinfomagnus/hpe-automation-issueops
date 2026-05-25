@@ -14,6 +14,10 @@ function normalizeRepositoryName(value) {
   return String(value || '').trim().toLowerCase();
 }
 
+function hasPopulatedInput(value) {
+  return unwrapCodeFence(value).trim() !== '';
+}
+
 function toLines(value) {
   if (Array.isArray(value)) {
     return value.flatMap((entry) => toLines(entry));
@@ -163,6 +167,7 @@ function normalizeRequestedRepositories(input, options = {}) {
 
 module.exports = {
   buildNormalizedRepositoryGrant,
+  hasPopulatedInput,
   normalizeLogin,
   normalizeRepositoryName,
   normalizeRequestedRepositories,
