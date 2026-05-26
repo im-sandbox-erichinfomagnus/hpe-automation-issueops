@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-      - 013-setup-feature-branch
+      - 014-tenant-creation-model
   pull_request:
   workflow_dispatch:
 

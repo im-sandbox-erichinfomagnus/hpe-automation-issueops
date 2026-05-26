@@ -45,6 +45,57 @@ function formatAuditSummary(auditArtifact = {}) {
       ? validation.designated_approver_authorization.state || 'unknown'
       : 'n/a';
 
+  const isTenantCreation = operation === 'tenant_creation' || Boolean(request.tenant_key || request.tenant_display_name);
+
+  if (isTenantCreation) {
+    return [
+      '# Create Tenant Model Workflow Summary',
+      '',
+      `- Request ID: ${request.request_id || 'n/a'}`,
+      `- Repository: ${request.repository || 'n/a'}`,
+      `- Target organization: ${request.organization || 'n/a'}`,
+      `- Tenant: ${request.tenant_display_name || 'n/a'} (${request.tenant_key || 'n/a'})`,
+      `- Tenant parent team: ${request.tenant_team_slug || 'n/a'}`,
+      `- Tenant repo-admin team: ${request.repo_admin_team_slug || 'n/a'}`,
+      `- Designated approver: ${request.designated_approver_login || 'n/a'}`,
+      `- Requester: ${request.requester_login || 'n/a'}`,
+      `- Intake mode: ${request.intake_mode || 'n/a'}`,
+      `- Dry-run mode: ${request.dry_run ? 'true' : 'false'}`,
+      `- Request status: ${request.request_status || 'submitted'}`,
+      `- Central assignment: ${assignment.assignment_status || 'not_attempted'}${assignment.assigned_login ? ` (${assignment.assigned_login})` : ''}`,
+      `- Approval: ${approval.approval_status || 'pending'} (${approval.approver_authorization_state || 'unknown'})`,
+      approval.approver_login ? `- Approver: ${approval.approver_login}` : null,
+      `- Validation: ${validation.is_valid ? 'passed' : 'failed'}`,
+      `- Teams to create: ${(reconciliation.teams_to_create || []).length}`,
+      `- Teams already present: ${(reconciliation.teams_already_present || []).length}`,
+      `- Child links to apply: ${(reconciliation.child_links_to_apply || []).length}`,
+      `- Requester bootstrap action: ${reconciliation.requester_bootstrap_action || 'n/a'}`,
+      `- Registry persistence action: ${reconciliation.registry_persistence_action || 'n/a'}`,
+      `- No-mutation intent: ${validation.no_mutation_planned ? 'true' : 'false'}`,
+      `- Added: ${execution.mutation_count || 0}`,
+      `- No-op: ${execution.noop_count || 0}`,
+      `- Pending: ${execution.pending_count || 0}`,
+      `- Failed: ${execution.failure_count || 0}`,
+      `- Rollback status: ${execution.rollback_status || 'not_needed'}`,
+      validation.warnings && validation.warnings.length > 0
+        ? `- Validation warnings: ${validation.warnings.join('; ')}`
+        : null,
+      validation.errors && validation.errors.length > 0
+        ? `- Validation errors: ${validation.errors.join('; ')}`
+        : null,
+      assignment.assignment_note ? `- Assignment note: ${assignment.assignment_note}` : null,
+      approval.decision_note ? `- Approval note: ${approval.decision_note}` : null,
+      '',
+      execution.summary || (validation.is_valid
+        ? approval.approval_status === 'approved'
+          ? 'Request is approved and eligible for tenant bootstrap execution. No tenant mutation was attempted in this phase.'
+          : approval.approval_status === 'denied'
+            ? 'Approval was denied or invalid. No tenant mutation was attempted.'
+            : 'Request is validated and ready for approval. No tenant mutation was attempted.'
+        : 'Request validation failed. No tenant mutation was attempted.'),
+    ].filter(Boolean).join('\n');
+  }
+
   if (isTeamRepoAccess) {
     return [
       '# Add Team Repository Access Workflow Summary',

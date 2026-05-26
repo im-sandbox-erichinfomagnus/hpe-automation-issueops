@@ -1,0 +1,199 @@
+name: create-tenant-model
+
+on:
+  issues:
+    types:
+      - opened
+      - edited
+      - reopened
+      - labeled
+  issue_comment:
+    types:
+      - created
+      - edited
+      - deleted
+  workflow_dispatch:
+    inputs:
+      issue-number:
+        description: Existing issue number to replay for validation or execution.
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+  issues: write
+
+concurrency:
+  group: create-tenant-model-${{ github.event.issue.number || inputs['issue-number'] || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  intake:
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'issues' || github.event_name == 'issue_comment'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    env:
+      ISSUE_NUMBER: ${{ github.event.issue.number || inputs['issue-number'] || '' }}
+      TENANT_REGISTRY_PERSISTENCE_MODE: durable
+      TENANT_REGISTRY_DIR: tenant-registry
+      TENANT_REGISTRY_REQUIRE_DIRECTORY: "true"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Resolve issue context
+        id: issue_context
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          ISSUE_NUMBER: ${{ env.ISSUE_NUMBER }}
+        run: |
+          set -euo pipefail
+
+          if [ "$EVENT_NAME" = "issues" ] || [ "$EVENT_NAME" = "issue_comment" ]; then
+            issue_body=$(jq -r '.issue.body // ""' "$GITHUB_EVENT_PATH")
+            requester_login=$(jq -r '.issue.user.login // ""' "$GITHUB_EVENT_PATH")
+          else
+            if [ -z "$ISSUE_NUMBER" ]; then
+              echo "workflow_dispatch requires an issue number to replay" >&2
+              exit 1
+            fi
+
+            issue_json=$(curl --silent --show-error --fail \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/repos/$REPOSITORY/issues/$ISSUE_NUMBER")
+
+            issue_body=$(printf '%s' "$issue_json" | jq -r '.body // ""')
+            requester_login=$(printf '%s' "$issue_json" | jq -r '.user.login // ""')
+          fi
+
+          echo "requester_login=$requester_login" >> "$GITHUB_OUTPUT"
+
+          if [ "$EVENT_NAME" = "issues" ] || [ "$EVENT_NAME" = "issue_comment" ]; then
+            issue_labels_json=$(jq -c '.issue.labels // []' "$GITHUB_EVENT_PATH")
+          else
+            issue_labels_json=$(printf '%s' "$issue_json" | jq -c '.labels // []')
+          fi
+          echo "issue_labels_json=$issue_labels_json" >> "$GITHUB_OUTPUT"
+
+          {
+            echo 'issue_body<<EOF'
+            printf '%s\n' "$issue_body"
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Parse issue body
+        id: parse_request
+        uses: issue-ops/parser@v5
+        with:
+          body: ${{ steps.issue_context.outputs.issue_body }}
+          issue-form-template: create-tenant-model.yml
+
+      - name: Check request applicability
+        id: request_scope
+        env:
+          PARSED_ORGANIZATION: ${{ steps.parse_request.outputs.parsed_organization }}
+          PARSED_TENANT_NAME: ${{ steps.parse_request.outputs.parsed_tenant_name }}
+          PARSED_DESIGNATED_APPROVER: ${{ steps.parse_request.outputs.parsed_designated_approver }}
+        run: |
+          set -euo pipefail
+
+          matches_request=false
+          if [ -n "${PARSED_ORGANIZATION:-}" ] && [ -n "${PARSED_TENANT_NAME:-}" ] && [ -n "${PARSED_DESIGNATED_APPROVER:-}" ]; then
+            matches_request=true
+          fi
+
+          echo "matches-request=$matches_request" >> "$GITHUB_OUTPUT"
+
+      - name: Skip unrelated issue form
+        if: ${{ steps.request_scope.outputs.matches-request != 'true' }}
+        run: |
+          echo 'This issue does not match the create-tenant-model form. Exiting without validation or execution.' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Restore prior request audit artifact
+        if: ${{ steps.request_scope.outputs.matches-request == 'true' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ env.ISSUE_NUMBER }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          AUDIT_ARTIFACT_PATH: artifacts/create-tenant-model-validation-${{ env.ISSUE_NUMBER || 'manual' }}.json
+        run: node src/scripts/restore-request-audit-artifact.js
+
+      - name: Validate request and record approval-ready state
+        id: validate_request
+        if: ${{ steps.request_scope.outputs.matches-request == 'true' }}
+        env:
+          ISSUEOPS_GITHUB_TOKEN: ${{ secrets.ISSUEOPS_GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.ISSUEOPS_GITHUB_TOKEN || github.token }}
+          ISSUE_NUMBER: ${{ env.ISSUE_NUMBER }}
+          REQUESTER_LOGIN: ${{ steps.issue_context.outputs.requester_login }}
+          PARSED_REQUEST_JSON: ${{ steps.parse_request.outputs.json }}
+          PARSED_ORGANIZATION: ${{ steps.parse_request.outputs.parsed_organization }}
+          PARSED_TENANT_NAME: ${{ steps.parse_request.outputs.parsed_tenant_name }}
+          PARSED_DESIGNATED_APPROVER: ${{ steps.parse_request.outputs.parsed_designated_approver }}
+          PARSED_JUSTIFICATION: ${{ steps.parse_request.outputs.parsed_justification }}
+          PARSED_DRY_RUN: ${{ steps.parse_request.outputs.parsed_dry_run }}
+          ISSUE_LABELS_JSON: ${{ steps.issue_context.outputs.issue_labels_json }}
+          COMMENT_ID: ${{ github.event.comment.id || '' }}
+          COMMENT_AUTHOR_LOGIN: ${{ github.event.comment.user.login || '' }}
+          COMMENT_BODY: ${{ github.event.comment.body || '' }}
+          AUDIT_ARTIFACT_PATH: artifacts/create-tenant-model-validation-${{ env.ISSUE_NUMBER || 'manual' }}.json
+        run: node src/scripts/run-request-validation.js
+
+      - name: Evaluate approval gate
+        id: approval_gate
+        if: ${{ always() && steps.request_scope.outputs.matches-request == 'true' && steps.validate_request.outcome != 'skipped' }}
+        env:
+          ISSUEOPS_GITHUB_TOKEN: ${{ secrets.ISSUEOPS_GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.ISSUEOPS_GITHUB_TOKEN || github.token }}
+          ISSUE_NUMBER: ${{ env.ISSUE_NUMBER }}
+          AUDIT_ARTIFACT_PATH: artifacts/create-tenant-model-validation-${{ env.ISSUE_NUMBER || 'manual' }}.json
+        run: node src/scripts/run-approval-gate.js
+
+      - name: Execute approved reconciliation
+        id: execute_request
+        if: ${{ always() && steps.request_scope.outputs.matches-request == 'true' && steps.approval_gate.outputs.approval-status == 'approved' }}
+        env:
+          ISSUEOPS_GITHUB_TOKEN: ${{ secrets.ISSUEOPS_GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.ISSUEOPS_GITHUB_TOKEN || github.token }}
+          ISSUE_NUMBER: ${{ env.ISSUE_NUMBER }}
+          TENANT_REGISTRY_PERSISTENCE_MODE: ${{ env.TENANT_REGISTRY_PERSISTENCE_MODE }}
+          TENANT_REGISTRY_DIR: ${{ env.TENANT_REGISTRY_DIR }}
+          TENANT_REGISTRY_REQUIRE_DIRECTORY: ${{ env.TENANT_REGISTRY_REQUIRE_DIRECTORY }}
+          AUDIT_ARTIFACT_PATH: artifacts/create-tenant-model-validation-${{ env.ISSUE_NUMBER || 'manual' }}.json
+        run: node src/scripts/run-approved-execution.js
+
+      - name: Upload request audit artifact
+        if: ${{ always() && steps.request_scope.outputs.matches-request == 'true' && steps.validate_request.outcome != 'skipped' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: create-tenant-model-validation-${{ env.ISSUE_NUMBER || github.run_id }}
+          path: artifacts/create-tenant-model-validation-${{ env.ISSUE_NUMBER || 'manual' }}.json
+          if-no-files-found: error
+
+      - name: Upload tenant registry fallback artifact
+        if: ${{ always() && steps.request_scope.outputs.matches-request == 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: create-tenant-model-fallback-${{ env.ISSUE_NUMBER || github.run_id }}
+          path: artifacts/tenant-registry-fallback-${{ env.ISSUE_NUMBER || 'manual' }}.json
+          if-no-files-found: ignore
+
+      - name: Workflow status note
+        if: ${{ steps.request_scope.outputs.matches-request == 'true' }}
+        run: |
+          echo 'create-tenant-model workflow is wired for validation, approval, and approved execution routing.' >> "$GITHUB_STEP_SUMMARY"

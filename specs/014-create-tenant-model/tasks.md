@@ -13,13 +13,13 @@ Use the constitution section `Repository Structure Conventions` as the default a
 
 **Purpose**: Prepare issue-form/workflow surfaces, feature fixtures, and contract baselines for tenant creation.
 
-- [ ] T001 Create feature fixture scaffolding in tests/fixtures/create-tenant-model-issue.md and tests/fixtures/create-tenant-model-comments.json
-- [ ] T002 Create feature contract test scaffolding in tests/contract/create-tenant-model-parser-fixture.test.js and tests/contract/create-tenant-model-validation.test.js
-- [ ] T003 Create feature integration test scaffolding in tests/integration/create-tenant-model-request.test.js and tests/integration/create-tenant-model-workflow.test.js
-- [ ] T004 [P] Create workflow contract baseline in specs/014-create-tenant-model/contracts/create-tenant-model-workflow.yaml
-- [ ] T005 [P] Create operator verification baseline in specs/014-create-tenant-model/quickstart.md
-- [ ] T006 [P] Add create-tenant-model form skeleton in .github/ISSUE_TEMPLATE/create-tenant-model.yml
-- [ ] T007 [P] Add create-tenant-model workflow shim skeleton in .github/workflows/create-tenant-model.yml
+- [X] T001 Create feature fixture scaffolding in tests/fixtures/create-tenant-model-issue.md and tests/fixtures/create-tenant-model-comments.json
+- [X] T002 Create feature contract test scaffolding in tests/contract/create-tenant-model-parser-fixture.test.js and tests/contract/create-tenant-model-validation.test.js
+- [X] T003 Create feature integration test scaffolding in tests/integration/create-tenant-model-request.test.js and tests/integration/create-tenant-model-workflow.test.js
+- [X] T004 [P] Create workflow contract baseline in specs/014-create-tenant-model/contracts/create-tenant-model-workflow.yaml
+- [X] T005 [P] Create operator verification baseline in specs/014-create-tenant-model/quickstart.md
+- [X] T006 [P] Add create-tenant-model form skeleton in .github/ISSUE_TEMPLATE/create-tenant-model.yml
+- [X] T007 [P] Add create-tenant-model workflow shim skeleton in .github/workflows/create-tenant-model.yml
 
 ---
 
@@ -29,19 +29,19 @@ Use the constitution section `Repository Structure Conventions` as the default a
 
 **CRITICAL**: No user story implementation starts until this phase is complete.
 
-- [ ] T008 Implement operation-aware parser wiring for create-tenant-model in src/scripts/run-request-validation.js
-- [ ] T009 [P] Implement tenant request parser module in src/workflow-support/parse-tenant-creation-request.js
-- [ ] T010 [P] Implement tenant request validator module in src/workflow-support/validate-tenant-creation-request.js
-- [ ] T011 [P] Implement tenant approver resolver module in src/workflow-support/resolve-tenant-creation-approver.js
-- [ ] T012 [P] Implement tenant reconciliation planner module in src/workflow-support/reconcile-tenant-creation.js
-- [ ] T013 [P] Implement tenant registry persistence helper module in src/workflow-support/persist-tenant-registry-record.js
-- [ ] T014 [P] Extend approval gate operation routing for tenant creation in src/workflow-support/approval-gate.js
-- [ ] T015 [P] Extend approved execution routing for tenant creation in src/scripts/run-approved-execution.js
-- [ ] T016 [P] Extend audit artifact model for tenant fields and registry results in src/workflow-support/build-audit-artifact.js
-- [ ] T017 [P] Extend execution summary rendering for tenant operation outcomes in src/scripts/emit-audit-summary.js
-- [ ] T018 Add token and permission guard assertions for tenant mutation prerequisites in src/actions/team-creation-policy/index.js, src/actions/team-hierarchy-policy/index.js, and src/actions/team-membership-policy/index.js
-- [ ] T019 Add bounded retry and partial-failure handling hooks for tenant operation in src/workflow-support/handle-rate-limit.js and src/scripts/run-approved-execution.js
-- [ ] T020 Add durable registry persistence mode env wiring plus fail-fast missing-directory behavior that still emits fallback artifact evidence in .github/workflows/create-tenant-model.yml and src/workflow-support/persist-tenant-registry-record.js
+- [X] T008 Implement operation-aware parser wiring for create-tenant-model in src/scripts/run-request-validation.js
+- [X] T009 [P] Implement tenant request parser module in src/workflow-support/parse-tenant-creation-request.js
+- [X] T010 [P] Implement tenant request validator module in src/workflow-support/validate-tenant-creation-request.js
+- [X] T011 [P] Implement tenant approver resolver module in src/workflow-support/resolve-tenant-creation-approver.js
+- [X] T012 [P] Implement tenant reconciliation planner module in src/workflow-support/reconcile-tenant-creation.js
+- [X] T013 [P] Implement tenant registry persistence helper module in src/workflow-support/persist-tenant-registry-record.js
+- [X] T014 [P] Extend approval gate operation routing for tenant creation in src/workflow-support/approval-gate.js
+- [X] T015 [P] Extend approved execution routing for tenant creation in src/scripts/run-approved-execution.js
+- [X] T016 [P] Extend audit artifact model for tenant fields and registry results in src/workflow-support/build-audit-artifact.js
+- [X] T017 [P] Extend execution summary rendering for tenant operation outcomes in src/scripts/emit-audit-summary.js
+- [X] T018 Add token and permission guard assertions for tenant mutation prerequisites in src/actions/team-creation-policy/index.js, src/actions/team-hierarchy-policy/index.js, and src/actions/team-membership-policy/index.js
+- [X] T019 Add bounded retry and partial-failure handling hooks for tenant operation in src/workflow-support/handle-rate-limit.js and src/scripts/run-approved-execution.js
+- [X] T020 Add durable registry persistence mode env wiring plus fail-fast missing-directory behavior that still emits fallback artifact evidence in .github/workflows/create-tenant-model.yml and src/workflow-support/persist-tenant-registry-record.js
 
 **Checkpoint**: Foundational plumbing is ready for story-by-story implementation.
 
@@ -55,18 +55,18 @@ Use the constitution section `Repository Structure Conventions` as the default a
 
 ### Tests for User Story 1
 
-- [ ] T021 [P] [US1] Add parser fixture tests for organization, tenant name, designated approver, dry_run, and justification in tests/contract/create-tenant-model-parser-fixture.test.js
-- [ ] T022 [P] [US1] Add validation tests for tenant-name normalization and derived team-slug collisions in tests/contract/create-tenant-model-validation.test.js
-- [ ] T023 [P] [US1] Add validation tests for missing organization, missing tenant name, and unsafe registry path handling in tests/contract/create-tenant-model-validation.test.js
-- [ ] T024 [P] [US1] Add integration test proving dry-run yields reconciliation plan with no mutation in tests/integration/create-tenant-model-request.test.js
+- [X] T021 [P] [US1] Add parser fixture tests for organization, tenant name, designated approver, dry_run, and justification in tests/contract/create-tenant-model-parser-fixture.test.js
+- [X] T022 [P] [US1] Add validation tests for tenant-name normalization and derived team-slug collisions in tests/contract/create-tenant-model-validation.test.js
+- [X] T023 [P] [US1] Add validation tests for missing organization, missing tenant name, and unsafe registry path handling in tests/contract/create-tenant-model-validation.test.js
+- [X] T024 [P] [US1] Add integration test proving dry-run yields reconciliation plan with no mutation in tests/integration/create-tenant-model-request.test.js
 
 ### Implementation for User Story 1
 
-- [ ] T025 [P] [US1] Implement issue form fields and constraints for tenant intake in .github/ISSUE_TEMPLATE/create-tenant-model.yml
-- [ ] T026 [US1] Implement deterministic tenant key/name and derived team-name generation in src/workflow-support/parse-tenant-creation-request.js
-- [ ] T027 [US1] Implement validation for organization visibility, team slug conflicts, re-parent preconditions, and requester eligibility in src/workflow-support/validate-tenant-creation-request.js
-- [ ] T028 [US1] Implement dry-run validation and reconciliation-intent reporting in src/workflow-support/validate-tenant-creation-request.js and src/scripts/emit-audit-summary.js
-- [ ] T029 [US1] Surface validation findings and no-mutation status in audit artifacts in src/workflow-support/build-audit-artifact.js
+- [X] T025 [P] [US1] Implement issue form fields and constraints for tenant intake in .github/ISSUE_TEMPLATE/create-tenant-model.yml
+- [X] T026 [US1] Implement deterministic tenant key/name and derived team-name generation in src/workflow-support/parse-tenant-creation-request.js
+- [X] T027 [US1] Implement validation for organization visibility, team slug conflicts, re-parent preconditions, and requester eligibility in src/workflow-support/validate-tenant-creation-request.js
+- [X] T028 [US1] Implement dry-run validation and reconciliation-intent reporting in src/workflow-support/validate-tenant-creation-request.js and src/scripts/emit-audit-summary.js
+- [X] T029 [US1] Surface validation findings and no-mutation status in audit artifacts in src/workflow-support/build-audit-artifact.js
 
 **Checkpoint**: User Story 1 is independently functional and testable as MVP.
 
@@ -80,17 +80,17 @@ Use the constitution section `Repository Structure Conventions` as the default a
 
 ### Tests for User Story 2
 
-- [ ] T030 [P] [US2] Add approval-gate tests for designated active-owner approval acceptance in tests/contract/create-tenant-model-validation.test.js and tests/integration/create-tenant-model-request.test.js
-- [ ] T031 [P] [US2] Add approval-gate tests for non-owner and non-designated denial outcomes in tests/integration/create-tenant-model-request.test.js
-- [ ] T032 [P] [US2] Add tests confirming central issue assignment never implies approval in tests/integration/create-tenant-model-request.test.js
-- [ ] T054 [P] [US2] Add explicit missing-token and insufficient-token fail-closed tests in tests/contract/create-tenant-model-validation.test.js and tests/integration/create-tenant-model-request.test.js
+- [X] T030 [P] [US2] Add approval-gate tests for designated active-owner approval acceptance in tests/contract/create-tenant-model-validation.test.js and tests/integration/create-tenant-model-request.test.js
+- [X] T031 [P] [US2] Add approval-gate tests for non-owner and non-designated denial outcomes in tests/integration/create-tenant-model-request.test.js
+- [X] T032 [P] [US2] Add tests confirming central issue assignment never implies approval in tests/integration/create-tenant-model-request.test.js
+- [X] T054 [P] [US2] Add explicit missing-token and insufficient-token fail-closed tests in tests/contract/create-tenant-model-validation.test.js and tests/integration/create-tenant-model-request.test.js
 
 ### Implementation for User Story 2
 
-- [ ] T033 [P] [US2] Implement approver role resolution against organization membership state in src/workflow-support/resolve-tenant-creation-approver.js
-- [ ] T034 [US2] Enforce approval-mode routing and decision notes for tenant operation in src/workflow-support/approval-gate.js
-- [ ] T035 [US2] Wire approval-gate outputs for create-tenant-model workflow path in src/scripts/run-approval-gate.js and .github/workflows/create-tenant-model.yml
-- [ ] T036 [US2] Emit approval authorization evidence in audit and summary outputs in src/workflow-support/build-audit-artifact.js and src/scripts/emit-audit-summary.js
+- [X] T033 [P] [US2] Implement approver role resolution against organization membership state in src/workflow-support/resolve-tenant-creation-approver.js
+- [X] T034 [US2] Enforce approval-mode routing and decision notes for tenant operation in src/workflow-support/approval-gate.js
+- [X] T035 [US2] Wire approval-gate outputs for create-tenant-model workflow path in src/scripts/run-approval-gate.js and .github/workflows/create-tenant-model.yml
+- [X] T036 [US2] Emit approval authorization evidence in audit and summary outputs in src/workflow-support/build-audit-artifact.js and src/scripts/emit-audit-summary.js
 
 **Checkpoint**: User Stories 1 and 2 are independently functional and testable.
 

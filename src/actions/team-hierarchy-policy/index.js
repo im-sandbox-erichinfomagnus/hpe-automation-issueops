@@ -117,9 +117,18 @@ function buildTeamHierarchyPermissionGuard(context = {}, options = {}) {
   };
 }
 
+function assertTenantBootstrapHierarchyAllowed(context = {}, options = {}) {
+  const decision = assertTeamHierarchyAllowed(context, options);
+  if (!context.parent_team_slug) {
+    throw new Error('Tenant hierarchy mutation blocked because parent team slug is missing');
+  }
+  return decision;
+}
+
 module.exports = {
   DEFAULT_ATTACHMENT_MAX_BYTES,
   assertTeamHierarchyAllowed,
+  assertTenantBootstrapHierarchyAllowed,
   buildTeamHierarchyPermissionGuard,
   hasPatBackedHierarchyMutationToken,
   isEligibleTeamHierarchyApprover,

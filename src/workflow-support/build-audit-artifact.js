@@ -16,6 +16,16 @@ function determineOperation(request = {}, runContext = {}) {
     return explicitOperation;
   }
 
+  const isTenantCreation = Boolean(
+    request.tenant_key ||
+      request.tenant_display_name ||
+      (request.tenant_team_slug && request.repo_admin_team_slug)
+  );
+
+  if (isTenantCreation) {
+    return 'tenant_creation';
+  }
+
   const isTeamHierarchy = Boolean(
     request.parent_team_slug ||
       request.parent_team_name ||
@@ -149,6 +159,12 @@ function buildAuditArtifact(input = {}) {
       repository: request.repository,
       requester_login: request.requester_login,
       organization: request.organization,
+      tenant_display_name: request.tenant_display_name,
+      tenant_key: request.tenant_key,
+      tenant_team_name: request.tenant_team_name,
+      tenant_team_slug: request.tenant_team_slug,
+      repo_admin_team_name: request.repo_admin_team_name,
+      repo_admin_team_slug: request.repo_admin_team_slug,
       team_slug: request.team_slug,
       intake_mode: intakeMode,
       requested_repositories_input: request.requested_repositories_input || '',
@@ -205,6 +221,11 @@ function buildAuditArtifact(input = {}) {
       requested_people: validation.requested_people || [],
       organization_visible: validation.organization_visible,
       designated_approver_authorization: validation.designated_approver_authorization || null,
+      requester_eligibility: validation.requester_eligibility || null,
+      validation_findings: validation.validation_findings || null,
+      no_mutation_planned:
+        Boolean(request.dry_run) ||
+        ['submitted', 'awaiting_approval', 'validation_failed', 'waiting_for_attachment'].includes(String(request.request_status || '')),
       requested_repository_grants: validation.requested_repository_grants || [],
       already_satisfied_repository_grants: validation.already_satisfied_repository_grants || [],
       intended_owner_membership: validation.intended_owner_membership || null,
@@ -253,6 +274,9 @@ function buildAuditArtifact(input = {}) {
       child_links_to_apply: reconciliationPlan.child_links_to_apply || [],
       child_links_already_present: reconciliationPlan.child_links_already_present || [],
       child_links_rejected: reconciliationPlan.child_links_rejected || [],
+      requester_bootstrap_action: reconciliationPlan.requester_bootstrap_action || null,
+      registry_persistence_action: reconciliationPlan.registry_persistence_action || null,
+      registry_persistence_result: reconciliationPlan.registry_persistence_result || null,
       dry_run: reconciliationPlan.dry_run,
       rate_limit_snapshot: reconciliationPlan.rate_limit_snapshot || null,
       state: reconciliationPlan.state || '',
