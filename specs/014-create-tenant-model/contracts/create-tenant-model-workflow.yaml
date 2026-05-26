@@ -1,0 +1,151 @@
+name: create-tenant-model-workflow-contract
+version: 1
+purpose: >-
+  Contract for the tenant-creation IssueOps workflow that bootstraps deterministic
+  tenant teams, hierarchy, requester maintainer assignment, and durable
+  per-tenant registry persistence.
+
+issue_form:
+  path: .github/ISSUE_TEMPLATE/create-tenant-model.yml
+  required_fields:
+    - id: organization
+      type: input
+    - id: tenant_name
+      type: input
+    - id: designated_approver
+      type: input
+    - id: dry_run
+      type: dropdown
+    - id: justification
+      type: textarea
+
+parser:
+  action: issue-ops/parser@v5
+  outputs:
+    - json
+    - parsed_organization
+    - parsed_tenant_name
+    - parsed_designated_approver
+    - parsed_dry_run
+    - parsed_justification
+
+workflow_entry_assumptions:
+  create_tenant_model_workflow:
+    events:
+      issues:
+        - opened
+        - edited
+        - reopened
+        - labeled
+      issue_comment:
+        - created
+        - edited
+        - deleted
+    applicability_gate:
+      required_parser_outputs:
+        - parsed_organization
+        - parsed_tenant_name
+        - parsed_designated_approver
+    execution_gate:
+      approval_output_key: approval-status
+      required_expression: steps.approval_gate.outputs['approval-status'] == 'approved'
+
+authorization:
+  requester_identity: github.event.issue.user.login
+  approver_model: designated active target organization owner
+  central_assignment_semantics: routing only; never approval evidence
+  execution_identity:
+    credential: ISSUEOPS_GITHUB_TOKEN
+    least_privilege: true
+
+validation_rules:
+  - Tenant name must normalize deterministically into safe team names/slugs.
+  - Derived team names are exactly <TenantName>_Tenant and <TenantName>_RepoAdmins.
+  - Derived slugs must be valid and non-conflicting.
+  - Target organization must exist and be visible.
+  - Designated approver must be active target organization owner.
+  - Re-parenting existing repo-admin team from another parent is rejected.
+  - Requester must be eligible for tenant-team maintainer assignment.
+  - Registry path must be safe and deterministic under tenant-registry/.
+
+reconciliation:
+  current_state_reads:
+    - organization visibility
+    - existing teams and slugs
+    - current child-parent relationship
+    - requester membership/role on tenant parent team
+    - existing registry record path/state
+  mutation_rule:
+    - create missing tenant teams only
+    - link repo-admin team under tenant parent only when missing
+    - add or promote requester to maintainer on tenant parent only when required
+  no_op_rule:
+    - existing teams, existing hierarchy link, and existing maintainer role remain unchanged
+  stale_state_rule: recompute current state before mutation
+  rerun_rule: idempotent no duplicate side effects
+  dry_run_rule: emit reconciliation and registry intent with no mutation
+
+registry_persistence:
+  preferred_mode: durable repository write (automated commit or pull request)
+  preconditions:
+    - tenant-registry/ directory is pre-provisioned and must exist before runtime
+  path_pattern: tenant-registry/<tenant_key>.json
+  missing_directory_behavior: fail_fast_blocked_or_partial_failure
+  required_fields:
+    - tenant_key
+    - tenant_display_name
+    - organization
+    - tenant_team_name
+    - tenant_team_slug
+    - repo_admin_team_name
+    - repo_admin_team_slug
+    - bootstrap_tenant_admin_login
+    - requester_login
+    - approver_login
+    - lifecycle_status
+    - created_at
+    - updated_at
+    - source_issue_number
+    - source_run_id
+  fallback_behavior:
+    - emit artifact evidence when fail-fast missing-directory behavior is triggered
+    - emit artifact evidence when durable write fails
+    - final run state must be blocked or partial_failure (not full success)
+
+observability:
+  outputs:
+    - github_step_summary
+    - json_audit_artifact
+  required_fields:
+    - issue_number
+    - run_id
+    - requester_login
+    - approver_login
+    - organization
+    - tenant_name
+    - tenant_key
+    - tenant_team_slug
+    - repo_admin_team_slug
+    - team_create_outcomes
+    - hierarchy_outcome
+    - requester_bootstrap_outcome
+    - registry_persistence_outcome
+    - final_request_status
+    - rollback_status
+
+rate_limit_handling:
+  strategy: bounded_exponential_backoff
+  inspect_headers:
+    - x-ratelimit-remaining
+    - x-ratelimit-reset
+    - retry-after
+  retryable_conditions:
+    - transient 5xx responses
+    - secondary rate limit responses
+    - explicit retry-after guidance
+  non_retryable_conditions:
+    - invalid tenant name normalization
+    - unauthorized approver
+    - missing target organization
+    - reparent_blocked conflict
+    - missing/insufficient credential
