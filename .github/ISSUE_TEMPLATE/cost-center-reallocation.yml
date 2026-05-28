@@ -1,0 +1,59 @@
+name: Cost center reallocation
+description: Create enterprise cost centers and add or remove user assignments from a spreadsheet.
+title: "[cost-center-reallocation] <enterprise>: <summary>"
+labels:
+  - issueops
+  - cost-center-reallocation
+body:
+  - type: input
+    id: enterprise
+    attributes:
+      label: Enterprise slug
+      description: The GitHub enterprise slug whose cost centers should be changed.
+      placeholder: octo-enterprise
+    validations:
+      required: true
+
+  - type: input
+    id: intended_approver
+    attributes:
+      label: Intended approver
+      description: GitHub login of the person who must approve this batch by commenting exactly `approved` on the issue.
+      placeholder: octocat
+    validations:
+      required: true
+
+  - type: textarea
+    id: assignments_csv
+    attributes:
+      label: Cost center assignments (CSV)
+      description: Paste UTF-8 CSV with the header `cost_center,login,action`. Action is `add` or `remove` and defaults to `add`. To move someone, add a remove row for the old cost center and an add row for the new one.
+      placeholder: |
+        cost_center,login,action
+        Platform Engineering,octocat,add
+        Platform Engineering,hubot,remove
+        AI Enablement,hubot,add
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: business_justification
+    attributes:
+      label: Business justification
+      description: Explain why these cost center changes are needed.
+      placeholder: Reallocating Copilot seats after the Q2 team reorganization.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: dry_run
+    attributes:
+      label: Dry-run mode
+      description: Dry-run validates and reports the planned changes without calling the cost center API. Turn off only when an enterprise billing token is configured.
+      options:
+        - "true"
+        - "false"
+      default: 0
+    validations:
+      required: true

@@ -1,0 +1,180 @@
+name: cost-center-reallocation
+
+on:
+  issues:
+    types:
+      - opened
+      - edited
+      - reopened
+      - labeled
+  issue_comment:
+    types:
+      - created
+      - edited
+      - deleted
+  workflow_dispatch:
+    inputs:
+      issue-number:
+        description: Existing issue number to replay for validation.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: cost-center-reallocation-${{ github.event.issue.number || inputs.issue-number || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  intake:
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'issues' || github.event_name == 'issue_comment'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    env:
+      ISSUE_NUMBER: ${{ github.event.issue.number || inputs.issue-number || '' }}
+      AUDIT_ARTIFACT_PATH: artifacts/cost-center-reallocation-validation-${{ github.event.issue.number || inputs.issue-number || 'manual' }}.json
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Resolve issue context
+        id: issue_context
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          ISSUE_NUMBER: ${{ env.ISSUE_NUMBER }}
+        run: |
+          set -euo pipefail
+
+          if [ "$EVENT_NAME" = "issues" ] || [ "$EVENT_NAME" = "issue_comment" ]; then
+            issue_body=$(jq -r '.issue.body // ""' "$GITHUB_EVENT_PATH")
+            requester_login=$(jq -r '.issue.user.login // ""' "$GITHUB_EVENT_PATH")
+          else
+            if [ -z "$ISSUE_NUMBER" ]; then
+              echo "workflow_dispatch requires an issue number to replay" >&2
+              exit 1
+            fi
+
+            issue_json=$(curl --silent --show-error --fail \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/repos/$REPOSITORY/issues/$ISSUE_NUMBER")
+
+            issue_body=$(printf '%s' "$issue_json" | jq -r '.body // ""')
+            requester_login=$(printf '%s' "$issue_json" | jq -r '.user.login // ""')
+          fi
+
+          echo "requester_login=$requester_login" >> "$GITHUB_OUTPUT"
+          {
+            echo 'issue_body<<EOF'
+            printf '%s\n' "$issue_body"
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Parse issue body
+        id: parse_request
+        uses: issue-ops/parser@v5
+        with:
+          body: ${{ steps.issue_context.outputs.issue_body }}
+          issue-form-template: cost-center-reallocation.yml
+
+      - name: Check request applicability
+        id: request_scope
+        env:
+          PARSED_ENTERPRISE: ${{ steps.parse_request.outputs.parsed_enterprise }}
+          PARSED_ASSIGNMENTS_CSV: ${{ steps.parse_request.outputs.parsed_assignments_csv }}
+        run: |
+          set -euo pipefail
+
+          matches_request=false
+          if [ -n "${PARSED_ENTERPRISE:-}" ] && [ -n "${PARSED_ASSIGNMENTS_CSV:-}" ]; then
+            matches_request=true
+          fi
+
+          echo "matches-request=$matches_request" >> "$GITHUB_OUTPUT"
+
+      - name: Skip unrelated issue form
+        if: ${{ steps.request_scope.outputs.matches-request != 'true' }}
+        run: |
+          echo 'This issue does not match the cost-center-reallocation form. Exiting without validation.' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Validate request and record approval-ready state
+        id: validate_request
+        if: ${{ steps.request_scope.outputs.matches-request == 'true' }}
+        env:
+          ISSUEOPS_GITHUB_TOKEN: ${{ secrets.ISSUEOPS_GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ env.ISSUE_NUMBER }}
+          REQUESTER_LOGIN: ${{ steps.issue_context.outputs.requester_login }}
+          PARSED_REQUEST_JSON: ${{ steps.parse_request.outputs.json }}
+          PARSED_ENTERPRISE: ${{ steps.parse_request.outputs.parsed_enterprise }}
+          PARSED_INTENDED_APPROVER: ${{ steps.parse_request.outputs.parsed_intended_approver }}
+          PARSED_ASSIGNMENTS_CSV: ${{ steps.parse_request.outputs.parsed_assignments_csv }}
+          PARSED_BUSINESS_JUSTIFICATION: ${{ steps.parse_request.outputs.parsed_business_justification }}
+          PARSED_DRY_RUN: ${{ steps.parse_request.outputs.parsed_dry_run }}
+          AUDIT_ARTIFACT_PATH: ${{ env.AUDIT_ARTIFACT_PATH }}
+        run: node src/scripts/run-cost-center-validation.js
+
+      - name: Evaluate approval gate
+        id: approval_gate
+        if: ${{ always() && steps.request_scope.outputs.matches-request == 'true' && steps.validate_request.outcome != 'skipped' }}
+        env:
+          ISSUEOPS_GITHUB_TOKEN: ${{ secrets.ISSUEOPS_GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ env.ISSUE_NUMBER }}
+          AUDIT_ARTIFACT_PATH: ${{ env.AUDIT_ARTIFACT_PATH }}
+        run: node src/scripts/run-cost-center-approval.js
+
+      - name: Execute approved reallocation
+        id: execute_request
+        if: ${{ always() && steps.request_scope.outputs.matches-request == 'true' && steps.approval_gate.outputs.approval-status == 'approved' }}
+        env:
+          ISSUEOPS_GITHUB_TOKEN: ${{ secrets.ISSUEOPS_GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ env.ISSUE_NUMBER }}
+          AUDIT_ARTIFACT_PATH: ${{ env.AUDIT_ARTIFACT_PATH }}
+        run: node src/scripts/run-cost-center-execution.js
+
+      - name: Post audit summary comment
+        if: ${{ always() && steps.request_scope.outputs.matches-request == 'true' && steps.validate_request.outcome != 'skipped' }}
+        uses: actions/github-script@v7
+        env:
+          AUDIT_ARTIFACT_PATH: ${{ env.AUDIT_ARTIFACT_PATH }}
+        with:
+          script: |
+            const fs = require('fs');
+            const artifactPath = process.env.AUDIT_ARTIFACT_PATH;
+            if (!fs.existsSync(artifactPath)) {
+              return;
+            }
+            const artifact = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
+            const body = artifact.audit_summary_markdown
+              || (artifact.execution && artifact.execution.summary)
+              || 'Cost center reallocation workflow ran but produced no summary.';
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: Number(process.env.ISSUE_NUMBER),
+              body,
+            });
+
+      - name: Upload validation artifact
+        if: ${{ always() && steps.request_scope.outputs.matches-request == 'true' && steps.validate_request.outcome != 'skipped' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: cost-center-reallocation-validation-${{ env.ISSUE_NUMBER || github.run_id }}
+          path: ${{ env.AUDIT_ARTIFACT_PATH }}
+          if-no-files-found: error
