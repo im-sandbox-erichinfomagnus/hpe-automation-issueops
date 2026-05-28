@@ -7,6 +7,31 @@ function ensureJson(value) {
   return `${JSON.stringify(value, null, 2)}\n`;
 }
 
+function normalizeForComparison(value) {
+  if (Array.isArray(value)) {
+    return value.map((entry) => normalizeForComparison(entry));
+  }
+
+  if (value && typeof value === 'object') {
+    const normalized = {};
+    for (const key of Object.keys(value).sort()) {
+      normalized[key] = normalizeForComparison(value[key]);
+    }
+    return normalized;
+  }
+
+  return value;
+}
+
+function stripVolatileRegistryFields(record) {
+  if (!record || typeof record !== 'object') {
+    return record;
+  }
+
+  const { updated_at, source_run_id, ...stable } = record;
+  return stable;
+}
+
 function buildTenantRegistryRecord(input = {}) {
   const request = input.request || {};
   const nowIso = new Date().toISOString();
@@ -87,13 +112,30 @@ function persistTenantRegistryRecord(input = {}) {
 
   try {
     const existedBeforeWrite = fs.existsSync(registryFilePath);
-    const createdAt = existedBeforeWrite
-      ? JSON.parse(fs.readFileSync(registryFilePath, 'utf8')).created_at || record.created_at
+    const existingRecord = existedBeforeWrite
+      ? JSON.parse(fs.readFileSync(registryFilePath, 'utf8'))
+      : null;
+    const createdAt = existingRecord && existingRecord.created_at
+      ? existingRecord.created_at
       : record.created_at;
     const persistedRecord = {
       ...record,
       created_at: createdAt,
     };
+
+    if (existingRecord) {
+      const existingComparable = normalizeForComparison(stripVolatileRegistryFields(existingRecord));
+      const persistedComparable = normalizeForComparison(stripVolatileRegistryFields(persistedRecord));
+
+      if (JSON.stringify(existingComparable) === JSON.stringify(persistedComparable)) {
+        return {
+          status: 'unchanged',
+          mode,
+          registry_path: registryFilePath,
+          record: existingRecord,
+        };
+      }
+    }
 
     fs.writeFileSync(registryFilePath, ensureJson(persistedRecord), 'utf8');
 

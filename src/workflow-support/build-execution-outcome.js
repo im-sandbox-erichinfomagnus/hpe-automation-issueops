@@ -65,7 +65,9 @@ function buildRemediationInstructions(summary) {
     return [];
   }
 
-  const failedEntities = summary.failed.map((entry) => entry.entity_id);
+  const failedEntities = summary.failed
+    .map((entry) => entry.entity_id || entry.failure_reason || 'unknown_failure')
+    .filter(Boolean);
   return [
     `Retry or re-request the failed subset only: ${failedEntities.join(', ')}`,
     'Preserve the successful subset in the audit artifact to avoid duplicate writes on rerun.',

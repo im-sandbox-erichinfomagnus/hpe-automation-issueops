@@ -1,9 +1,9 @@
 name: create-tenant-model-workflow-contract
-version: 1
+version: 2
 purpose: >-
   Contract for the tenant-creation IssueOps workflow that bootstraps deterministic
   tenant teams, hierarchy, requester maintainer assignment, and durable
-  per-tenant registry persistence.
+  per-tenant registry persistence with automated git commit back to the source repository.
 
 issue_form:
   path: .github/ISSUE_TEMPLATE/create-tenant-model.yml
@@ -49,6 +49,13 @@ workflow_entry_assumptions:
     execution_gate:
       approval_output_key: approval-status
       required_expression: steps.approval_gate.outputs['approval-status'] == 'approved'
+    workflow_permissions:
+      actions: read
+      contents: write
+      issues: write
+      note: >-
+        contents:write is required to commit tenant registry records back to the
+        repository via the automated durable write path.
 
 authorization:
   requester_identity: github.event.issue.user.login
@@ -86,9 +93,10 @@ reconciliation:
   dry_run_rule: emit reconciliation and registry intent with no mutation
 
 registry_persistence:
-  preferred_mode: durable repository write (automated commit or pull request)
+  preferred_mode: durable repository write (automated git commit to source branch)
   preconditions:
     - tenant-registry/ directory is pre-provisioned and must exist before runtime
+    - workflow must have contents:write permission to push registry commit
   path_pattern: tenant-registry/<tenant_key>.json
   missing_directory_behavior: fail_fast_blocked_or_partial_failure
   required_fields:
@@ -111,6 +119,16 @@ registry_persistence:
     - emit artifact evidence when fail-fast missing-directory behavior is triggered
     - emit artifact evidence when durable write fails
     - final run state must be blocked or partial_failure (not full success)
+  registry_commit:
+    trigger: after successful created or updated registry file write
+    committer_identity: github-actions[bot]
+    commit_message_pattern: "docs: persist tenant registry for <tenant_key> (issue #<N>)"
+    push_target: origin current_branch
+    commit_result_states:
+      - committed: file staged, committed, and pushed to origin
+      - noop: file was written but git diff --cached was empty (rerun with no change)
+      - failed: git add, commit, or push failed; run status remains executed (soft failure)
+    audit_field: reconciliation.registry_commit_result
 
 observability:
   outputs:
@@ -130,8 +148,15 @@ observability:
     - hierarchy_outcome
     - requester_bootstrap_outcome
     - registry_persistence_outcome
+    - registry_commit_result
     - final_request_status
     - rollback_status
+  terminal_request_states:
+    - executed: all mutations succeeded and registry committed (or noop on rerun)
+    - partially_executed: one or more mutations failed; registry persistence or commit failed
+    - failed: pre-mutation guard or catastrophic failure prevented any mutations
+    - awaiting_approval: validation passed; no approval yet
+    - rejected: validation failed; no mutations made
 
 rate_limit_handling:
   strategy: bounded_exponential_backoff

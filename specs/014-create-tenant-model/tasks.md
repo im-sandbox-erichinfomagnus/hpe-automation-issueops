@@ -104,11 +104,11 @@ Use the constitution section `Repository Structure Conventions` as the default a
 
 ### Tests for User Story 3
 
-- [ ] T037 [P] [US3] Add integration test for full happy-path bootstrap (create teams, link child, requester maintainer, registry created) in tests/integration/create-tenant-model-workflow.test.js
-- [ ] T038 [P] [US3] Add integration test for idempotent no-op rerun with existing converged state in tests/integration/create-tenant-model-workflow.test.js
-- [ ] T039 [P] [US3] Add integration test for re-parent blocked scenario in tests/integration/create-tenant-model-workflow.test.js
-- [ ] T040 [P] [US3] Add integration test for requester promotion from member to maintainer in tests/integration/create-tenant-model-workflow.test.js
-- [ ] T041 [P] [US3] Add integration test for durable registry write failure yielding partial/blocking result in tests/integration/create-tenant-model-workflow.test.js
+- [X] T037 [P] [US3] Add integration test for full happy-path bootstrap (create teams, link child, requester maintainer, registry created) in tests/integration/create-tenant-model-workflow.test.js
+- [X] T038 [P] [US3] Add integration test for idempotent no-op rerun with existing converged state in tests/integration/create-tenant-model-workflow.test.js
+- [X] T039 [P] [US3] Add integration test for re-parent blocked scenario in tests/integration/create-tenant-model-workflow.test.js
+- [X] T040 [P] [US3] Add integration test for requester promotion from member to maintainer in tests/integration/create-tenant-model-workflow.test.js
+- [X] T041 [P] [US3] Add integration test for durable registry write failure yielding partial/blocking result in tests/integration/create-tenant-model-workflow.test.js
 - [ ] T042 [P] [US3] Add integration test for bounded retry and partial-failure reporting under simulated rate-limit conditions in tests/integration/create-tenant-model-workflow.test.js
 
 ### Implementation for User Story 3
@@ -120,8 +120,8 @@ Use the constitution section `Repository Structure Conventions` as the default a
 - [ ] T047 [US3] Implement registry fallback artifact evidence and blocked/partial final-state semantics in src/scripts/run-approved-execution.js and src/workflow-support/build-execution-outcome.js
 - [ ] T048 [US3] Wire tenant execution flow into create-tenant-model workflow shim in .github/workflows/create-tenant-model.yml
 - [ ] T049 [US3] Emit per-step mutation/no-op/persistence outcomes and remediation guidance in src/workflow-support/build-audit-artifact.js and src/scripts/emit-audit-summary.js
-- [ ] T055 [US3] Implement preferred automated commit-or-PR registry persistence path for tenant records in src/workflow-support/persist-tenant-registry-record.js and src/scripts/run-approved-execution.js
-- [ ] T056 [P] [US3] Add integration coverage for preferred commit-or-PR registry persistence path in tests/integration/create-tenant-model-workflow.test.js
+- [X] T055 [US3] Implement preferred automated commit-or-PR registry persistence path for tenant records in src/workflow-support/persist-tenant-registry-record.js and src/scripts/run-approved-execution.js
+- [X] T056 [P] [US3] Add integration coverage for preferred commit-or-PR registry persistence path in tests/integration/create-tenant-model-workflow.test.js
 
 **Checkpoint**: All user stories are independently functional and testable.
 
@@ -131,10 +131,10 @@ Use the constitution section `Repository Structure Conventions` as the default a
 
 **Purpose**: Final hardening and cross-story consistency for docs, contracts, and regression confidence.
 
-- [ ] T050 [P] Update workflow contract to match implemented fields, transitions, and persistence outcomes in specs/014-create-tenant-model/contracts/create-tenant-model-workflow.yaml
-- [ ] T051 [P] Update quickstart runbook with validated happy-path, no-op rerun, and failure remediations in specs/014-create-tenant-model/quickstart.md
-- [ ] T052 [P] Add cross-story regression assertions for unauthorized mutation prevention and dry-run no-mutation in tests/integration/create-tenant-model-request.test.js and tests/integration/create-tenant-model-workflow.test.js
-- [ ] T053 Run end-to-end feature test suite for tenant creation in tests/contract/create-tenant-model-parser-fixture.test.js, tests/contract/create-tenant-model-validation.test.js, tests/integration/create-tenant-model-request.test.js, and tests/integration/create-tenant-model-workflow.test.js
+- [X] T050 [P] Update workflow contract to match implemented fields, transitions, and persistence outcomes in specs/014-create-tenant-model/contracts/create-tenant-model-workflow.yaml
+- [X] T051 [P] Update quickstart runbook with validated happy-path, no-op rerun, and failure remediations in specs/014-create-tenant-model/quickstart.md
+- [X] T052 [P] Add cross-story regression assertions for unauthorized mutation prevention and dry-run no-mutation in tests/integration/create-tenant-model-request.test.js and tests/integration/create-tenant-model-workflow.test.js
+- [X] T053 Run end-to-end feature test suite for tenant creation in tests/contract/create-tenant-model-parser-fixture.test.js, tests/contract/create-tenant-model-validation.test.js, tests/integration/create-tenant-model-request.test.js, and tests/integration/create-tenant-model-workflow.test.js
 
 ---
 

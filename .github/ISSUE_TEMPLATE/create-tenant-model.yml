@@ -5,13 +5,6 @@ labels:
   - issueops
   - create-tenant-model
 body:
-  - type: markdown
-    attributes:
-      value: |
-        Use this request to validate and, after approval, bootstrap tenant team structure.
-        Submit exactly one tenant for exactly one organization per issue.
-        Assignment is routing-only and does not grant approval.
-
   - type: input
     id: organization
     attributes:

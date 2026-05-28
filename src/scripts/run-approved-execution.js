@@ -16,6 +16,7 @@ const { createGitHubTeamRepoApi } = require('../workflow-support/github-team-rep
 const { executeWithBoundedRetry } = require('../workflow-support/handle-rate-limit');
 const { buildTenantBootstrapRateLimitContext } = require('../workflow-support/handle-rate-limit');
 const { persistTenantRegistryRecord } = require('../workflow-support/persist-tenant-registry-record');
+const { commitRegistryRecord } = require('../workflow-support/commit-registry-record');
 const { reconcileTenantCreation } = require('../workflow-support/reconcile-tenant-creation');
 const { reconcileTeamHierarchy } = require('../workflow-support/reconcile-team-hierarchy');
 const { reconcileTeamCreation } = require('../workflow-support/reconcile-team-creation');
@@ -397,6 +398,20 @@ async function runApprovedExecution(options = {}) {
         organization: auditArtifact.request.organization,
       })
     : null;
+  let tenantRequesterMembership = null;
+  if (
+    isTenantCreation &&
+    typeof api.getMembershipForUser === 'function' &&
+    auditArtifact.request &&
+    auditArtifact.request.tenant_team_slug &&
+    auditArtifact.request.requester_login
+  ) {
+    tenantRequesterMembership = await api.getMembershipForUser({
+      organization: auditArtifact.request.organization,
+      teamSlug: auditArtifact.request.tenant_team_slug,
+      username: auditArtifact.request.requester_login,
+    });
+  }
   let latestRateLimitSnapshot = auditArtifact.reconciliation && auditArtifact.reconciliation.rate_limit_snapshot || null;
   let currentMembers = [];
   if (!isTenantCreation && !isTeamCreation && !isTeamHierarchy && !isTeamRepoAccess) {
@@ -432,6 +447,7 @@ async function runApprovedExecution(options = {}) {
         request: auditArtifact.request,
         validatedTeams: buildValidatedTeams(auditArtifact),
         currentTeams,
+        requesterMembership: tenantRequesterMembership,
         organization_exists: auditArtifact.validation.organization_visible,
         dry_run: auditArtifact.request.dry_run,
       })
@@ -673,25 +689,45 @@ async function runApprovedExecution(options = {}) {
               tokenInfo: mutationDecision.tokenInfo,
             });
 
-            const membershipResult = await executeWithBoundedRetry(
-              () => api.addOrUpdateTeamMembership({
-                organization: auditArtifact.request.organization,
-                teamSlug: parentTeam.slug,
-                username: auditArtifact.request.requester_login,
-                role: 'maintainer',
-              }),
-              {
-                maxRetries: options.maxRetries || 2,
-                sleep: options.sleep,
-              }
-            );
+            const requesterMembership = typeof api.getMembershipForUser === 'function'
+              ? await api.getMembershipForUser({
+                  organization: auditArtifact.request.organization,
+                  teamSlug: parentTeam.slug,
+                  username: auditArtifact.request.requester_login,
+                })
+              : tenantRequesterMembership;
 
-            latestRateLimitSnapshot = membershipResult.retry_plan.rate_limit_snapshot || latestRateLimitSnapshot;
-            executionResults.push({
-              username: auditArtifact.request.requester_login,
-              execution_result: membershipResult.ok ? 'added' : 'failed',
-              failure_reason: membershipResult.ok ? null : classifyFailureReason(membershipResult.error),
-            });
+            const requesterRole = requesterMembership && requesterMembership.membership
+              ? String(requesterMembership.membership.role || '').toLowerCase()
+              : '';
+
+            if (requesterMembership && requesterMembership.state === 'active' && requesterRole === 'maintainer') {
+              executionResults.push({
+                username: auditArtifact.request.requester_login,
+                execution_result: 'noop',
+                failure_reason: null,
+              });
+            } else {
+              const membershipResult = await executeWithBoundedRetry(
+                () => api.addOrUpdateTeamMembership({
+                  organization: auditArtifact.request.organization,
+                  teamSlug: parentTeam.slug,
+                  username: auditArtifact.request.requester_login,
+                  role: 'maintainer',
+                }),
+                {
+                  maxRetries: options.maxRetries || 2,
+                  sleep: options.sleep,
+                }
+              );
+
+              latestRateLimitSnapshot = membershipResult.retry_plan.rate_limit_snapshot || latestRateLimitSnapshot;
+              executionResults.push({
+                username: auditArtifact.request.requester_login,
+                execution_result: membershipResult.ok ? 'added' : 'failed',
+                failure_reason: membershipResult.ok ? null : classifyFailureReason(membershipResult.error),
+              });
+            }
           }
         } catch (error) {
           const rateContext = buildTenantBootstrapRateLimitContext(error, {
@@ -727,6 +763,50 @@ async function runApprovedExecution(options = {}) {
             execution_result: 'failed',
             failure_reason: 'registry_durable_write_failed',
           });
+        } else if (registryResult.status === 'created' || registryResult.status === 'updated') {
+          // Attempt to commit and push the registry record to the repository
+          const commitResult = commitRegistryRecord({
+            registryFilePath: registryResult.registry_path,
+            tenantKey: auditArtifact.request.tenant_key,
+            issueNumber: auditArtifact.request.issue_number,
+            repoRoot: process.cwd(),
+          }, {
+            env,
+          });
+          reconciliationPlan.registry_commit_result = commitResult;
+          
+          // Log commit result to workflow summary
+          if (env.GITHUB_STEP_SUMMARY) {
+            const summaryMsg = commitResult.status === 'committed'
+              ? `✅ **Registry Persistence**: Tenant registry committed to repository (${commitResult.commit_message})`
+              : commitResult.status === 'noop'
+                ? `ℹ️ **Registry Persistence**: No registry changes to commit (file unchanged)`
+                : `⚠️ **Registry Persistence**: Failed to commit registry record (${commitResult.message})`;
+            
+            fs.appendFileSync(env.GITHUB_STEP_SUMMARY, `\n${summaryMsg}\n`, 'utf8');
+          }
+          
+          if (commitResult.status === 'failed' && commitResult.error) {
+            // Log the commit failure but don't block execution
+            // (registry file was written to runner workspace, which is acceptable fallback)
+            console.warn(`Registry commit failed: ${commitResult.message}`);
+          }
+        } else if (registryResult.status === 'unchanged') {
+          const commitResult = {
+            status: 'noop',
+            message: 'No registry changes to commit (file unchanged)',
+            committed: false,
+            pushed: false,
+          };
+          reconciliationPlan.registry_commit_result = commitResult;
+
+          if (env.GITHUB_STEP_SUMMARY) {
+            fs.appendFileSync(
+              env.GITHUB_STEP_SUMMARY,
+              '\nℹ️ **Registry Persistence**: No registry changes to commit (file unchanged)\n',
+              'utf8'
+            );
+          }
         }
       }
     } else if (isTeamHierarchy) {

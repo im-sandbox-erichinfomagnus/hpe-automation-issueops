@@ -277,6 +277,7 @@ function buildAuditArtifact(input = {}) {
       requester_bootstrap_action: reconciliationPlan.requester_bootstrap_action || null,
       registry_persistence_action: reconciliationPlan.registry_persistence_action || null,
       registry_persistence_result: reconciliationPlan.registry_persistence_result || null,
+      registry_commit_result: reconciliationPlan.registry_commit_result || null,
       dry_run: reconciliationPlan.dry_run,
       rate_limit_snapshot: reconciliationPlan.rate_limit_snapshot || null,
       state: reconciliationPlan.state || '',
