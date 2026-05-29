@@ -23,11 +23,19 @@ body:
     validations:
       required: true
 
+  - type: markdown
+    attributes:
+      value: |
+        ## Cost center assignments
+        Attach a UTF-8 `.csv` file with the header `cost_center,login,action`. Action is `add` or `remove` and defaults to `add`. To move someone, add a remove row for the old cost center and an add row for the new one.
+
+        Drag the `.csv` file into a comment on this issue after you open it (or into the issue body above). When a `.csv` file is attached, it is used and the optional textarea below is ignored. If you cannot attach a file, paste the CSV into the textarea instead.
+
   - type: textarea
     id: assignments_csv
     attributes:
-      label: Cost center assignments (CSV)
-      description: Paste UTF-8 CSV with the header `cost_center,login,action`. Action is `add` or `remove` and defaults to `add`. To move someone, add a remove row for the old cost center and an add row for the new one.
+      label: Cost center assignments (CSV) - optional fallback
+      description: Optional. Used only when no `.csv` file is attached to the issue or a comment. Paste UTF-8 CSV with the header `cost_center,login,action`.
       placeholder: |
         cost_center,login,action
         Platform Engineering,octocat,add
@@ -35,7 +43,7 @@ body:
         AI Enablement,hubot,add
       render: text
     validations:
-      required: true
+      required: false
 
   - type: textarea
     id: business_justification

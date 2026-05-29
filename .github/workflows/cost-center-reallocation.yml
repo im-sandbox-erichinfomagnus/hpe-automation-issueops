@@ -96,11 +96,18 @@ jobs:
         env:
           PARSED_ENTERPRISE: ${{ steps.parse_request.outputs.parsed_enterprise }}
           PARSED_ASSIGNMENTS_CSV: ${{ steps.parse_request.outputs.parsed_assignments_csv }}
+          COMMENT_BODY: ${{ github.event.comment.body || '' }}
+          ISSUE_BODY: ${{ steps.issue_context.outputs.issue_body }}
         run: |
           set -euo pipefail
 
+          has_csv_attachment=false
+          if printf '%s\n%s' "${COMMENT_BODY:-}" "${ISSUE_BODY:-}" | grep -qiE '\.csv'; then
+            has_csv_attachment=true
+          fi
+
           matches_request=false
-          if [ -n "${PARSED_ENTERPRISE:-}" ] && [ -n "${PARSED_ASSIGNMENTS_CSV:-}" ]; then
+          if [ -n "${PARSED_ENTERPRISE:-}" ] && { [ -n "${PARSED_ASSIGNMENTS_CSV:-}" ] || [ "$has_csv_attachment" = "true" ]; }; then
             matches_request=true
           fi
 
@@ -125,6 +132,8 @@ jobs:
           PARSED_ASSIGNMENTS_CSV: ${{ steps.parse_request.outputs.parsed_assignments_csv }}
           PARSED_BUSINESS_JUSTIFICATION: ${{ steps.parse_request.outputs.parsed_business_justification }}
           PARSED_DRY_RUN: ${{ steps.parse_request.outputs.parsed_dry_run }}
+          COMMENT_BODY: ${{ github.event.comment.body || '' }}
+          ISSUE_BODY: ${{ steps.issue_context.outputs.issue_body }}
           AUDIT_ARTIFACT_PATH: ${{ env.AUDIT_ARTIFACT_PATH }}
         run: node src/scripts/run-cost-center-validation.js
 

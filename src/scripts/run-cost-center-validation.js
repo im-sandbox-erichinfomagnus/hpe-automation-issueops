@@ -9,6 +9,10 @@ const { formatCostCenterSummary } = require('../workflow-support/format-cost-cen
 const { loadWorkflowToken } = require('../workflow-support/load-workflow-token');
 const { parseCostCenterRequest } = require('../workflow-support/parse-cost-center-request');
 const { reconcileCostCenter } = require('../workflow-support/reconcile-cost-center');
+const {
+  downloadCostCenterCsvAttachment,
+  resolveCostCenterCsvAttachment,
+} = require('../workflow-support/resolve-cost-center-csv-attachment');
 const { validateCostCenterRequest } = require('../workflow-support/validate-cost-center-request');
 
 function parseParsedRequestJson(rawValue) {
@@ -53,11 +57,41 @@ function writeStepSummary(summary, summaryPath = process.env.GITHUB_STEP_SUMMARY
   }
 }
 
+async function resolveAttachmentCsv(options, env, tokenInfo) {
+  const attachment = resolveCostCenterCsvAttachment({
+    commentBody: env.COMMENT_BODY || '',
+    issueBody: env.ISSUE_BODY || '',
+  });
+
+  if (!attachment) {
+    return null;
+  }
+
+  const downloaded = await downloadCostCenterCsvAttachment({
+    attachmentUrl: attachment.attachment_url,
+    token: tokenInfo.token,
+    downloadImpl: options.downloadCsvAttachment,
+    fetchImpl: options.fetchImpl,
+    maxBytes: options.maxAttachmentBytes,
+    maxRetries: options.maxRetries,
+    sleep: options.sleep,
+  });
+
+  return downloaded && typeof downloaded.text === 'string' ? downloaded.text : null;
+}
+
 async function runCostCenterValidation(options = {}) {
   const env = options.env || process.env;
   const parsedRequest = readParsedRequestFromEnv(env);
+  const tokenInfo = loadWorkflowToken({ env, required: false });
+
+  const attachmentCsv = await resolveAttachmentCsv(options, env, tokenInfo);
+  const effectiveParsedRequest = attachmentCsv != null
+    ? { ...parsedRequest, assignments_csv: attachmentCsv }
+    : parsedRequest;
+
   const request = parseCostCenterRequest({
-    parsedRequest,
+    parsedRequest: effectiveParsedRequest,
     issue: {
       number: env.ISSUE_NUMBER,
       user: { login: env.REQUESTER_LOGIN || '' },
@@ -70,7 +104,6 @@ async function runCostCenterValidation(options = {}) {
     },
   });
 
-  const tokenInfo = loadWorkflowToken({ env, required: false });
   const hooks = {};
   if (tokenInfo.token) {
     const api = options.api || createGitHubCostCenterApi({ token: tokenInfo.token });
