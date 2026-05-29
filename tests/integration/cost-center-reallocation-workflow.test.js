@@ -173,6 +173,45 @@ test('approval is denied when the approver is not the named intended approver', 
   assert.equal(approved.approval.approval_status, 'denied');
 });
 
+test('idempotent rerun: assignments already satisfied make no API writes', async () => {
+  const artifactPath = tempArtifactPath();
+  const csv = [
+    'cost_center,login,action',
+    'Platform Engineering,octocat,add',
+    'Platform Engineering,ghost,remove',
+  ].join('\n');
+  const env = buildEnv({
+    ISSUEOPS_GITHUB_TOKEN: 'pat_billing_token',
+    PARSED_REQUEST_JSON: parsedRequest({ assignments_csv: csv, dry_run: 'false' }),
+    AUDIT_ARTIFACT_PATH: artifactPath,
+  });
+
+  const costCenterApi = makeFakeCostCenterApi([
+    { id: 'cc-pe', name: 'Platform Engineering', state: 'active', resources: [{ type: 'User', name: 'octocat' }] },
+  ]);
+
+  const validation = await runCostCenterValidation({ env, api: costCenterApi, setProcessExitCode: false });
+  assert.equal(validation.validation.live_state_verified, true);
+  assert.equal(validation.reconciliationPlan.assignments_to_add.length, 0);
+  assert.equal(validation.reconciliationPlan.assignments_to_remove.length, 0);
+  assert.equal(validation.reconciliationPlan.assignments_already_satisfied.length, 2);
+
+  const approvalApi = makeFakeTeamApi(approvalComment('approver1'));
+  await runCostCenterApproval({ env, api: approvalApi, setProcessExitCode: false });
+
+  const executed = await runCostCenterExecution({
+    env,
+    api: costCenterApi,
+    tokenInfo: { token: 'pat_billing_token', is_pat_backed: true },
+    setProcessExitCode: false,
+  });
+
+  assert.equal(costCenterApi.calls.create.length, 0);
+  assert.equal(costCenterApi.calls.add.length, 0);
+  assert.equal(costCenterApi.calls.remove.length, 0);
+  assert.equal(executed.execution.failure_count, 0);
+});
+
 test('validation fails when the CSV is missing a required column', async () => {
   const artifactPath = tempArtifactPath();
   const badCsv = ['cost_center,action', 'Platform Engineering,add'].join('\n');

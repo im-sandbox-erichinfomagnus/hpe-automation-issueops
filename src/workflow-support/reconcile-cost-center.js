@@ -57,7 +57,7 @@ function reconcileCostCenter(input = {}) {
           assignmentsAlreadySatisfied.push({ ...assignment, reason: 'cost_center_absent' });
           continue;
         }
-        if (!existing.members.has(assignment.login)) {
+        if (!existing.members.has(login)) {
           assignmentsAlreadySatisfied.push({ ...assignment, reason: 'user_absent' });
           continue;
         }
