@@ -1,0 +1,42 @@
+# This workflow synchronizes the source branch of a repository to a destination feature branch in a remote repository.
+# On destination repo, the destination_branch must exist and allow baseless merges
+# WARNING: this is a one-way sync from source to destination only!
+
+name: Sync this repo and source branch to remote repo destination feature branch
+# Workflow triggers:
+# - On push to main branch only (typically from develop branch merges)
+# - Scheduled daily at midnight UTC
+# - Manual trigger via workflow_dispatch
+on:
+  push:
+    branches:
+      - main  # Run only on push to main branch
+  schedule:
+    - cron:  "0 0 * * *"
+  workflow_dispatch:
+
+jobs:
+  repo-sync:
+    # Use the latest Ubuntu runner for this job
+    # runs-on: ubuntu-latest
+    runs-on: ubuntu-latest
+    if: github.repository == 'hpe-infomagnus-issueops-automation'
+    steps:
+      # Step: Synchronize source repo/branch to destination repo/branch using git-sync action
+      - name: git-sync
+        uses: im-infomagnus/git-sync@master
+        with:
+          # Source repository and branch (requires SYNC_SOURCE_PAT secret)
+          source_repo: "https://x-access-token:${{ secrets.SYNC_SOURCE_PAT }}@github.com/hpe-infomagnus-issueops-automation.git"
+          source_branch: "main" 
+          # Destination repository and branch (requires SYNC_DESTINATION_PAT secret)
+          destination_repo: "https://x-access-token:${{ secrets.SYNC_DESTINATION_PAT }}@github.com/HPE-SANDBOX-EMU/hpe-infomagnus-issueops-automation.git"
+          destination_branch: "infomagnus_delivery"
+        env:
+          # Set additional environment variables for authentication
+          GIT_ASKPASS: echo
+          GIT_TERMINAL_PROMPT: 0
+          # Additional git configuration to help with authentication
+          GIT_CONFIG_GLOBAL_HTTP_EXTRAHEADER: "Authorization: token ${{ secrets.SYNC_DESTINATION_PAT }}" 
+
+          
