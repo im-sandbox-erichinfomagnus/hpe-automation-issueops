@@ -67,10 +67,12 @@ function formatCostCenterSummary(artifact = {}) {
     : validation.is_valid
       ? approval.approval_status === 'approved'
         ? request.dry_run === false
-          ? 'Request is approved and ready for live execution.'
+          ? 'Request is approved. The plan above has been applied.'
           : 'Request is approved. Dry-run is on, so the plan above will be applied once dry-run is turned off.'
-        : `Request is validated and awaiting an approval comment of exactly "approved" from ${request.intended_approver_login || 'the named approver'}.`
-      : 'Request validation failed. No cost center changes were attempted.');
+        : approval.approval_status === 'denied'
+          ? 'The approval comment was not from the named approver, so no changes were made.'
+          : `Request is validated and awaiting an approval comment of exactly "approved" from ${request.intended_approver_login || 'the named approver'}.`
+      : 'Validation failed. No cost center changes were attempted.');
 
   return lines.join('\n');
 }
