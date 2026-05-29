@@ -20,7 +20,7 @@ jobs:
     # Use the latest Ubuntu runner for this job
     # runs-on: ubuntu-latest
     runs-on: ubuntu-latest
-    if: github.repository == 'hpe-infomagnus-issueops-automation'
+   
     steps:
       # Step: Synchronize source repo/branch to destination repo/branch using git-sync action
       - name: git-sync
