@@ -158,6 +158,32 @@ function createGitHubTeamRepoApi(options = {}) {
       };
     },
 
+    async createOrganizationRepository({ organization, name, privateVisibility = true, description = '' }) {
+      const result = await request(`/orgs/${organization}/repos`, {
+        method: 'POST',
+        body: {
+          name,
+          private: Boolean(privateVisibility),
+          description: String(description || ''),
+          auto_init: false,
+          has_issues: true,
+          has_projects: false,
+          has_wiki: false,
+        },
+      });
+
+      if (!result.ok) {
+        throw Object.assign(new Error('Failed to create organization repository'), result, {
+          retry_after: getHeader(result.headers, 'retry-after'),
+        });
+      }
+
+      return {
+        exists: true,
+        repository: mapRepositoryState(result.payload || {}),
+      };
+    },
+
     async getTeamRepositoryPermission({ organization, teamSlug, owner, repo }) {
       const result = await request(`/orgs/${organization}/teams/${teamSlug}/repos/${owner}/${repo}`, {
         headers: {
@@ -208,6 +234,18 @@ function createGitHubTeamRepoApi(options = {}) {
         repository_full_name: `${owner}/${repo}`.toLowerCase(),
         permission,
       };
+    },
+
+    async addIssueLabels({ repository, issueNumber, labels }) {
+      const [owner, repo] = String(repository || '').split('/');
+      const result = await request(`/repos/${owner}/${repo}/issues/${issueNumber}/labels`, {
+        method: 'POST',
+        body: { labels },
+      });
+      if (!result.ok) {
+        throw Object.assign(new Error('Failed to add issue labels'), result);
+      }
+      return (result.payload || []).map((label) => String(label.name || '').toLowerCase()).filter(Boolean);
     },
   };
 }
