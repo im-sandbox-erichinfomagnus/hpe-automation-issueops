@@ -4,6 +4,7 @@ const { resolveApproverRole } = require('./resolve-approver-role');
 const { resolveTeamCreationApprover } = require('./resolve-team-creation-approver');
 const { resolveTeamHierarchyApprover } = require('./resolve-team-hierarchy-approver');
 const { resolveTeamRepoAccessApprover } = require('./resolve-team-repo-access-approver');
+const { resolveTenantRepoApprover } = require('./resolve-tenant-repo-approver');
 const { resolveTenantCreationApprover } = require('./resolve-tenant-creation-approver');
 
 const APPROVAL_COMMAND = 'approved';
@@ -47,6 +48,10 @@ function buildPendingApprovalNote(approvalMode, approvalCommand) {
     return `Add an issue comment containing exactly '${approvalCommand}' from the designated active target organization owner to authorize execution.`;
   }
 
+  if (approvalMode === 'tenant_repo_creation') {
+    return `Add an issue comment containing exactly '${approvalCommand}' from the designated active target organization owner to authorize repository creation execution.`;
+  }
+
   return `Add an issue comment containing exactly '${approvalCommand}' as an organization owner to authorize execution.`;
 }
 
@@ -67,7 +72,23 @@ function buildPendingAttachmentApprovalNote(approvalMode, approvalCommand) {
     return `Add an issue comment containing exactly '${approvalCommand}' from the designated active target organization owner after the accepted CSV attachment comment to authorize execution.`;
   }
 
+  if (approvalMode === 'tenant_repo_creation') {
+    return `Add an issue comment containing exactly '${approvalCommand}' from the designated active target organization owner after the accepted CSV attachment comment to authorize repository creation execution.`;
+  }
+
   return `Add an issue comment containing exactly '${approvalCommand}' as an organization owner after the accepted CSV attachment comment to authorize execution.`;
+}
+
+function hasContextMismatch(approvalMode, latestContextMarker, priorApprovedContextMarker) {
+  if (approvalMode !== 'tenant_repo_creation') {
+    return false;
+  }
+
+  if (!latestContextMarker || !priorApprovedContextMarker) {
+    return false;
+  }
+
+  return String(latestContextMarker) !== String(priorApprovedContextMarker);
 }
 
 async function evaluateApprovalGate(input = {}, options = {}) {
@@ -81,6 +102,8 @@ async function evaluateApprovalGate(input = {}, options = {}) {
     null;
   const issueComments = input.issueComments || [];
   const priorApprovalStatus = input.priorApprovalStatus || 'pending';
+  const latestContextMarker = input.latestContextMarker || input.latest_context_marker || '';
+  const priorApprovedContextMarker = input.priorApprovedContextMarker || input.prior_approved_context_marker || '';
   const resolveRole = options.resolveRole || ((args) => {
     if (approvalMode === 'team_creation') {
       return resolveTeamCreationApprover(args, options);
@@ -98,11 +121,15 @@ async function evaluateApprovalGate(input = {}, options = {}) {
       return resolveTenantCreationApprover(args, options);
     }
 
+    if (approvalMode === 'tenant_repo_creation') {
+      return resolveTenantRepoApprover(args, options);
+    }
+
     return resolveApproverRole(args, options);
   });
 
   if (
-    (approvalMode === 'team_membership' || approvalMode === 'team_creation' || approvalMode === 'team_hierarchy' || approvalMode === 'team_repo_access' || approvalMode === 'tenant_creation') &&
+    (approvalMode === 'team_membership' || approvalMode === 'team_creation' || approvalMode === 'team_hierarchy' || approvalMode === 'team_repo_access' || approvalMode === 'tenant_creation' || approvalMode === 'tenant_repo_creation') &&
     intakeMode === 'csv_attachment' &&
     requestStatus === 'waiting_for_attachment'
   ) {
@@ -116,23 +143,31 @@ async function evaluateApprovalGate(input = {}, options = {}) {
   }
 
   const approvalComment = findLatestApprovalComment(issueComments, approvalCommand, {
-    notBefore: (approvalMode === 'team_membership' || approvalMode === 'team_creation' || approvalMode === 'team_hierarchy' || approvalMode === 'team_repo_access' || approvalMode === 'tenant_creation') && intakeMode === 'csv_attachment'
+    notBefore: (approvalMode === 'team_membership' || approvalMode === 'team_creation' || approvalMode === 'team_hierarchy' || approvalMode === 'team_repo_access' || approvalMode === 'tenant_creation' || approvalMode === 'tenant_repo_creation') && intakeMode === 'csv_attachment'
       ? acceptedAttachmentCommentCreatedAt
       : null,
   });
 
   if (!approvalComment) {
     const requiresFreshAttachmentApproval =
-      (approvalMode === 'team_membership' || approvalMode === 'team_creation' || approvalMode === 'team_hierarchy' || approvalMode === 'team_repo_access' || approvalMode === 'tenant_creation') &&
+      (approvalMode === 'team_membership' || approvalMode === 'team_creation' || approvalMode === 'team_hierarchy' || approvalMode === 'team_repo_access' || approvalMode === 'tenant_creation' || approvalMode === 'tenant_repo_creation') &&
       intakeMode === 'csv_attachment' &&
       acceptedAttachmentCommentCreatedAt;
+
+    const staleContextInvalidation =
+      priorApprovalStatus === 'approved' &&
+      hasContextMismatch(approvalMode, latestContextMarker, priorApprovedContextMarker);
 
     return {
       approval_status: priorApprovalStatus === 'approved' ? 'invalidated' : 'pending',
       approver_login: '',
       approver_role: 'other',
+      latest_context_marker: latestContextMarker || null,
+      approved_context_marker: priorApprovedContextMarker || null,
       decision_source: 'comment',
-      decision_note: priorApprovalStatus === 'approved'
+      decision_note: staleContextInvalidation
+        ? `Approval was invalidated because the latest validated context marker changed from '${priorApprovedContextMarker}' to '${latestContextMarker}' and a fresh approval comment is required.`
+        : priorApprovalStatus === 'approved'
         ? `The approval comment '${approvalCommand}' is no longer present and execution must remain blocked.`
         : requiresFreshAttachmentApproval
           ? buildPendingAttachmentApprovalNote(approvalMode, approvalCommand)
@@ -247,6 +282,36 @@ async function evaluateApprovalGate(input = {}, options = {}) {
       approved_at: approvalComment.created_at || null,
       decision_source: 'comment',
       decision_note: `The approval comment '${approvalCommand}' was added by the authorized designated target organization owner for this tenant bootstrap request.`,
+    };
+  }
+
+  if (approvalMode === 'tenant_repo_creation') {
+    if (approver.approver_role !== 'target_org_owner') {
+      return {
+        approval_status: 'denied',
+        approver_login: approverLogin,
+        approver_role: approver.approver_role,
+        approver_authorization_state: approver.approver_authorization_state || 'unknown',
+        approver_membership_state: approver.approver_membership_state || 'unknown',
+        latest_context_marker: latestContextMarker || null,
+        approved_context_marker: priorApprovedContextMarker || null,
+        approved_at: approvalComment.created_at || null,
+        decision_source: 'comment',
+        decision_note: `The approval comment '${approvalCommand}' was not added by the authorized designated target organization owner and does not authorize tenant repository creation mutation.`,
+      };
+    }
+
+    return {
+      approval_status: 'approved',
+      approver_login: approverLogin,
+      approver_role: approver.approver_role,
+      approver_authorization_state: approver.approver_authorization_state || 'authorized',
+      approver_membership_state: approver.approver_membership_state || 'active',
+      latest_context_marker: latestContextMarker || null,
+      approved_context_marker: latestContextMarker || null,
+      approved_at: approvalComment.created_at || null,
+      decision_source: 'comment',
+      decision_note: `The approval comment '${approvalCommand}' was added by the authorized designated target organization owner for this tenant repository creation request.`,
     };
   }
 

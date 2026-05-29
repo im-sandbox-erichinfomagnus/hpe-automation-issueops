@@ -16,6 +16,15 @@ function determineOperation(request = {}, runContext = {}) {
     return explicitOperation;
   }
 
+  const isTenantRepoCreation = Boolean(
+    request.repository_name_input ||
+      request.repository_name_normalized
+  );
+
+  if (isTenantRepoCreation) {
+    return 'tenant_repo_creation';
+  }
+
   const isTenantCreation = Boolean(
     request.tenant_key ||
       request.tenant_display_name ||
@@ -159,6 +168,11 @@ function buildAuditArtifact(input = {}) {
       repository: request.repository,
       requester_login: request.requester_login,
       organization: request.organization,
+      tenant_name_input: request.tenant_name_input || '',
+      tenant_name_normalized: request.tenant_name_normalized || '',
+      repository_name_input: request.repository_name_input || '',
+      repository_name_normalized: request.repository_name_normalized || '',
+      context_marker: request.context_marker || '',
       tenant_display_name: request.tenant_display_name,
       tenant_key: request.tenant_key,
       tenant_team_name: request.tenant_team_name,
@@ -221,6 +235,10 @@ function buildAuditArtifact(input = {}) {
       requested_people: validation.requested_people || [],
       organization_visible: validation.organization_visible,
       designated_approver_authorization: validation.designated_approver_authorization || null,
+      canonical_tenant_context: validation.canonical_tenant_context || null,
+      tenant_resolution: validation.tenant_resolution || null,
+      repository_exists: validation.repository_exists,
+      current_repo_admin_permission: validation.current_repo_admin_permission || null,
       requester_eligibility: validation.requester_eligibility || null,
       validation_findings: validation.validation_findings || null,
       no_mutation_planned:
@@ -247,6 +265,8 @@ function buildAuditArtifact(input = {}) {
       approver_role: approval.approver_role || 'other',
       approver_membership_state: approval.approver_membership_state || 'unknown',
       approver_authorization_state: approval.approver_authorization_state || 'unknown',
+      approved_context_marker: approval.approved_context_marker || null,
+      latest_context_marker: approval.latest_context_marker || null,
       approved_at: approval.approved_at || null,
       decision_source: approval.decision_source || '',
       decision_note: approval.decision_note || '',
@@ -261,6 +281,16 @@ function buildAuditArtifact(input = {}) {
       people_already_present: reconciliationPlan.people_already_present || [],
       people_rejected: reconciliationPlan.people_rejected || [],
       organization_exists: reconciliationPlan.organization_exists,
+      organization_visible: reconciliationPlan.organization_visible,
+      repository_exists: reconciliationPlan.repository_exists,
+      repository_full_name: reconciliationPlan.repository_full_name || '',
+      current_repo_admin_permission: reconciliationPlan.current_repo_admin_permission || null,
+      desired_repo_admin_permission: reconciliationPlan.desired_repo_admin_permission || null,
+      creation_action: reconciliationPlan.creation_action || null,
+      permission_action: reconciliationPlan.permission_action || null,
+      direct_admin_avoidance: reconciliationPlan.direct_admin_avoidance || null,
+      blocked_reason: reconciliationPlan.blocked_reason || null,
+      boundary_revalidation_status: reconciliationPlan.boundary_revalidation_status || null,
       team_exists: reconciliationPlan.team_exists,
       repositories_to_grant: reconciliationPlan.repositories_to_grant || [],
       repositories_already_satisfied: reconciliationPlan.repositories_already_satisfied || [],
@@ -288,6 +318,10 @@ function buildAuditArtifact(input = {}) {
       run_attempt: runContext.run_attempt || process.env.GITHUB_RUN_ATTEMPT || null,
       generated_at: new Date().toISOString(),
       operation,
+      artifact_name: runContext.artifact_name || process.env.AUDIT_ARTIFACT_NAME || null,
+      artifact_retention_days: Number.isFinite(Number(runContext.artifact_retention_days || process.env.AUDIT_ARTIFACT_RETENTION_DAYS))
+        ? Number(runContext.artifact_retention_days || process.env.AUDIT_ARTIFACT_RETENTION_DAYS)
+        : null,
     },
   };
 }
