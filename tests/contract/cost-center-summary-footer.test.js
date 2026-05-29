@@ -43,3 +43,16 @@ test('approved live footer says the plan has been applied', () => {
   const footer = summaryFor('approved', { request: { dry_run: false } }).split('\n').pop();
   assert.equal(footer, 'Request is approved. The plan above has been applied.');
 });
+
+test('failed validation footer does not invite approval', () => {
+  const out = formatCostCenterSummary({
+    request: { dry_run: true, intended_approver_login: 'octocat', request_status: 'validation_failed', enterprise: 'acme', requester_login: 'r', request_id: 'x' },
+    validation: { is_valid: false, errors: ['No usable assignment rows were found in the CSV.'] },
+    approval: { approval_status: 'pending' },
+    reconciliation: {},
+  });
+  const footer = out.split('\n').pop();
+  assert.match(footer, /Validation failed/);
+  assert.equal(footer.includes('awaiting an approval comment'), false);
+  assert.equal(footer.includes('Request is approved'), false);
+});
