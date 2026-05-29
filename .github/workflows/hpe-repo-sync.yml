@@ -27,7 +27,7 @@ jobs:
         uses: im-infomagnus/git-sync@master
         with:
           # Source repository and branch (requires SYNC_SOURCE_PAT secret)
-          source_repo: "https://x-access-token:${{ secrets.SYNC_SOURCE_PAT }}@github.com/hpe-infomagnus-issueops-automation.git"
+          source_repo: "https://x-access-token:${{ secrets.SYNC_SOURCE_PAT }}@github.com/im-sandbox-erichinfomagnus/hpe-infomagnus-issueops-automation.git"
           source_branch: "main" 
           # Destination repository and branch (requires SYNC_DESTINATION_PAT secret)
           destination_repo: "https://x-access-token:${{ secrets.SYNC_DESTINATION_PAT }}@github.com/HPE-SANDBOX-EMU/hpe-infomagnus-issueops-automation.git"
