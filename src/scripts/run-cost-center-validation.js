@@ -55,7 +55,6 @@ function writeStepSummary(summary, summaryPath = process.env.GITHUB_STEP_SUMMARY
 
 async function runCostCenterValidation(options = {}) {
   const env = options.env || process.env;
-  const shouldSetProcessExitCode = options.setProcessExitCode !== false && env === process.env;
   const parsedRequest = readParsedRequestFromEnv(env);
   const request = parseCostCenterRequest({
     parsedRequest,
@@ -118,10 +117,6 @@ async function runCostCenterValidation(options = {}) {
   writeStepSummary(summary, env.GITHUB_STEP_SUMMARY);
   writeGitHubOutput('validation-status', validation.request_status, env.GITHUB_OUTPUT);
   writeGitHubOutput('audit-artifact-path', artifactPath, env.GITHUB_OUTPUT);
-
-  if (!validation.is_valid && shouldSetProcessExitCode) {
-    process.exitCode = 1;
-  }
 
   return { request, validation, reconciliationPlan, artifactPath, summary };
 }

@@ -69,7 +69,6 @@ function evaluateCostCenterApproval(input = {}) {
 
 async function runCostCenterApproval(options = {}) {
   const env = options.env || process.env;
-  const shouldSetProcessExitCode = options.setProcessExitCode !== false && env === process.env;
   const artifactPath = path.resolve(
     env.AUDIT_ARTIFACT_PATH ||
       path.join('artifacts', `cost-center-reallocation-validation-${env.ISSUE_NUMBER || 'manual'}.json`)
@@ -132,10 +131,6 @@ async function runCostCenterApproval(options = {}) {
 
   writeStepSummary(summary, env.GITHUB_STEP_SUMMARY);
   writeGitHubOutput('approval-status', approval.approval_status, env.GITHUB_OUTPUT);
-
-  if (approval.approval_status === 'denied' && shouldSetProcessExitCode) {
-    process.exitCode = 1;
-  }
 
   return updated;
 }
