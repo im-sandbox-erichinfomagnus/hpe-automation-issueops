@@ -4,8 +4,9 @@ on:
   push:
     branches:
       - main
-      - 014-tenant-creation-model
   pull_request:
+  schedule:
+    - cron: '0 3 * * 1'
   workflow_dispatch:
 
 permissions:
