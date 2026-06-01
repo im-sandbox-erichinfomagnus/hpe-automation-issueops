@@ -126,6 +126,10 @@ This list should be updated as new IssueOps workflows are added.
 - `add-team-repo-access`: Request, validate, approve, and reconcile granting
 	one existing GitHub team access to one or more existing repositories in a
 	target organization.
+- `cost-center-reallocation`: Request, validate, approve, and reconcile creating
+	enterprise cost centers and adding or removing user assignments from a
+	spreadsheet, with dry-run by default. See
+	[`docs/cost-center-reallocation.md`](docs/cost-center-reallocation.md).
 
 Detailed design and operator guidance for the current operation live in:
 
