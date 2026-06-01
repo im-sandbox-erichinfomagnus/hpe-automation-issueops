@@ -5,9 +5,10 @@ const path = require('path');
 
 const { findLatestApprovalComment } = require('../workflow-support/approval-gate');
 const { buildCostCenterArtifact, toCostCenterArtifactJson } = require('../workflow-support/cost-center-artifact');
-const { createGitHubTeamApi } = require('../workflow-support/github-team-api');
+const { createGitHubCostCenterApi } = require('../workflow-support/github-cost-center-api');
 const { formatCostCenterSummary } = require('../workflow-support/format-cost-center-summary');
 const { loadWorkflowToken } = require('../workflow-support/load-workflow-token');
+const { runCostCenterValidation } = require('./run-cost-center-validation');
 
 function readAuditArtifact(filePath) {
   return JSON.parse(fs.readFileSync(path.resolve(filePath), 'utf8'));
@@ -67,13 +68,57 @@ function evaluateCostCenterApproval(input = {}) {
   };
 }
 
+function buildNoSpreadsheetArtifact(env, summaryInput = {}) {
+  const message =
+    'No cost center spreadsheet was found to approve. Add a comment with a `.csv` file attached, then comment `approved` again.';
+  const artifact = buildCostCenterArtifact({
+    request: summaryInput.request || {
+      issue_number: env.ISSUE_NUMBER == null ? null : Number(env.ISSUE_NUMBER),
+      repository: env.GITHUB_REPOSITORY || '',
+      request_status: 'awaiting_spreadsheet',
+    },
+    validation: { is_valid: false },
+    approval: {
+      approval_status: 'not_requested',
+      decision_source: 'comment',
+      decision_note: message,
+    },
+    audit_summary_markdown: message,
+  });
+  return artifact;
+}
+
+async function rebuildArtifactFromComments(options, env, artifactPath) {
+  const rebuilt = await runCostCenterValidation(options);
+
+  if (rebuilt && rebuilt.applicable === false) {
+    const artifact = buildNoSpreadsheetArtifact(env, { request: rebuilt.request });
+    fs.mkdirSync(path.dirname(artifactPath), { recursive: true });
+    fs.writeFileSync(artifactPath, toCostCenterArtifactJson({
+      request: artifact.request,
+      validation: artifact.validation,
+      approval: artifact.approval,
+      reconciliationPlan: artifact.reconciliation,
+      executionOutcome: artifact.execution,
+      runContext: artifact.metadata,
+      audit_summary_markdown: artifact.audit_summary_markdown,
+    }), 'utf8');
+    return artifact;
+  }
+
+  return readAuditArtifact(artifactPath);
+}
+
 async function runCostCenterApproval(options = {}) {
   const env = options.env || process.env;
   const artifactPath = path.resolve(
     env.AUDIT_ARTIFACT_PATH ||
       path.join('artifacts', `cost-center-reallocation-validation-${env.ISSUE_NUMBER || 'manual'}.json`)
   );
-  const artifact = readAuditArtifact(artifactPath);
+
+  const artifact = fs.existsSync(artifactPath)
+    ? readAuditArtifact(artifactPath)
+    : await rebuildArtifactFromComments(options, env, artifactPath);
 
   if (!artifact.validation || artifact.validation.is_valid !== true) {
     writeGitHubOutput('approval-status', artifact.approval && artifact.approval.approval_status || 'not_requested', env.GITHUB_OUTPUT);
@@ -92,7 +137,7 @@ async function runCostCenterApproval(options = {}) {
       decision_note: 'Approval could not be evaluated because the workflow token secret is missing.',
     };
   } else {
-    const api = options.api || createGitHubTeamApi({ token: tokenInfo.token });
+    const api = options.api || createGitHubCostCenterApi({ token: tokenInfo.token });
     const issueComments = await api.listIssueComments({
       repository: artifact.request.repository,
       issueNumber: artifact.request.issue_number,

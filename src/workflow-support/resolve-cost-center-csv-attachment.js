@@ -119,6 +119,21 @@ function resolveCostCenterCsvAttachment(options = {}) {
   return null;
 }
 
+function findLatestCsvAttachmentInComments(comments = []) {
+  const ordered = [...comments].sort((left, right) => {
+    return String(right.created_at || '').localeCompare(String(left.created_at || ''));
+  });
+
+  for (const comment of ordered) {
+    const attachment = resolveCostCenterCsvAttachment({ commentBody: comment.body || '' });
+    if (attachment) {
+      return { ...attachment, comment };
+    }
+  }
+
+  return null;
+}
+
 async function downloadCostCenterCsvAttachment(options = {}) {
   const downloader = options.downloadImpl || downloadCsvAttachment;
   const result = await downloader({
@@ -136,6 +151,7 @@ async function downloadCostCenterCsvAttachment(options = {}) {
 module.exports = {
   downloadCostCenterCsvAttachment,
   extractAttachmentLinks,
+  findLatestCsvAttachmentInComments,
   inferFilenameFromLink,
   inferFilenameFromUrl,
   isCsvLink,

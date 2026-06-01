@@ -11,6 +11,7 @@ const { parseCostCenterRequest } = require('../workflow-support/parse-cost-cente
 const { reconcileCostCenter } = require('../workflow-support/reconcile-cost-center');
 const {
   downloadCostCenterCsvAttachment,
+  findLatestCsvAttachmentInComments,
   resolveCostCenterCsvAttachment,
 } = require('../workflow-support/resolve-cost-center-csv-attachment');
 const { validateCostCenterRequest } = require('../workflow-support/validate-cost-center-request');
@@ -57,14 +58,39 @@ function writeStepSummary(summary, summaryPath = process.env.GITHUB_STEP_SUMMARY
   }
 }
 
-async function resolveAttachmentCsv(options, env, tokenInfo) {
-  const attachment = resolveCostCenterCsvAttachment({
+async function resolveCommentsAttachment(options, env, tokenInfo, costCenterApi) {
+  if (!tokenInfo.token || !costCenterApi || typeof costCenterApi.listIssueComments !== 'function') {
+    return null;
+  }
+
+  const repository = env.GITHUB_REPOSITORY || '';
+  const issueNumber = env.ISSUE_NUMBER;
+  if (!repository || issueNumber == null || issueNumber === '') {
+    return null;
+  }
+
+  let comments;
+  try {
+    comments = await costCenterApi.listIssueComments({ repository, issueNumber });
+  } catch {
+    return null;
+  }
+
+  return findLatestCsvAttachmentInComments(comments || []);
+}
+
+async function resolveAttachmentCsv(options, env, tokenInfo, costCenterApi) {
+  let attachment = resolveCostCenterCsvAttachment({
     commentBody: env.COMMENT_BODY || '',
     issueBody: env.ISSUE_BODY || '',
   });
 
   if (!attachment) {
-    return { text: null, warning: null };
+    attachment = await resolveCommentsAttachment(options, env, tokenInfo, costCenterApi);
+  }
+
+  if (!attachment) {
+    return { text: null, warning: null, attachment: null };
   }
 
   try {
@@ -79,11 +105,12 @@ async function resolveAttachmentCsv(options, env, tokenInfo) {
     });
 
     const text = downloaded && typeof downloaded.text === 'string' ? downloaded.text : null;
-    return { text, warning: null };
+    return { text, warning: null, attachment };
   } catch (error) {
     return {
       text: null,
-      warning: `The attached file ${attachment.filename || attachment.attachment_url} could not be downloaded (${error.message}). Validation continued against the typed CSV field, if any.`,
+      warning: `The attached file ${attachment.filename || attachment.attachment_url} could not be downloaded (${error.message}).`,
+      attachment,
     };
   }
 }
@@ -93,7 +120,11 @@ async function runCostCenterValidation(options = {}) {
   const parsedRequest = readParsedRequestFromEnv(env);
   const tokenInfo = loadWorkflowToken({ env, required: false });
 
-  const attachmentResult = await resolveAttachmentCsv(options, env, tokenInfo);
+  const api = tokenInfo.token
+    ? (options.api || createGitHubCostCenterApi({ token: tokenInfo.token }))
+    : (options.api || null);
+
+  const attachmentResult = await resolveAttachmentCsv(options, env, tokenInfo, api);
   const effectiveParsedRequest = attachmentResult.text != null
     ? { ...parsedRequest, assignments_csv: attachmentResult.text }
     : parsedRequest;
@@ -112,9 +143,19 @@ async function runCostCenterValidation(options = {}) {
     },
   });
 
+  if (!request.intake_mode && !attachmentResult.warning) {
+    return {
+      request,
+      validation: null,
+      reconciliationPlan: null,
+      artifactPath: null,
+      summary: null,
+      applicable: false,
+    };
+  }
+
   const hooks = {};
-  if (tokenInfo.token) {
-    const api = options.api || createGitHubCostCenterApi({ token: tokenInfo.token });
+  if (api && typeof api.listCostCenters === 'function') {
     hooks.listCostCenters = ({ enterprise }) => api.listCostCenters({ enterprise });
   }
 
@@ -163,7 +204,7 @@ async function runCostCenterValidation(options = {}) {
   writeGitHubOutput('validation-status', validation.request_status, env.GITHUB_OUTPUT);
   writeGitHubOutput('audit-artifact-path', artifactPath, env.GITHUB_OUTPUT);
 
-  return { request, validation, reconciliationPlan, artifactPath, summary };
+  return { request, validation, reconciliationPlan, artifactPath, summary, applicable: true };
 }
 
 if (require.main === module) {

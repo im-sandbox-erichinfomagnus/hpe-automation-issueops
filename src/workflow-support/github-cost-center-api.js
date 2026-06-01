@@ -101,6 +101,15 @@ function createGitHubCostCenterApi(options = {}) {
   }
 
   return {
+    async listIssueComments({ repository, issueNumber }) {
+      const [owner, repo] = String(repository || '').split('/');
+      const result = await request(`/repos/${owner}/${repo}/issues/${issueNumber}/comments?per_page=100`);
+      if (!result.ok) {
+        throw Object.assign(new Error('Failed to list issue comments'), result);
+      }
+      return result.payload || [];
+    },
+
     async listCostCenters({ enterprise, state }) {
       const query = state ? `?state=${state}` : '';
       const result = await request(`${basePath(enterprise)}${query}`);

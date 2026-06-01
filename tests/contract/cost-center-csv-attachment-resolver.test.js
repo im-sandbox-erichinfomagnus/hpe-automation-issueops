@@ -6,6 +6,7 @@ const assert = require('node:assert/strict');
 const {
   isCsvLink,
   extractAttachmentLinks,
+  findLatestCsvAttachmentInComments,
   resolveCostCenterCsvAttachment,
 } = require('../../src/workflow-support/resolve-cost-center-csv-attachment');
 
@@ -58,6 +59,37 @@ test('ignores non-csv attachments', () => {
 test('returns null when no attachment is present in either source', () => {
   assert.equal(resolveCostCenterCsvAttachment({ commentBody: 'just text', issueBody: 'more text' }), null);
   assert.equal(resolveCostCenterCsvAttachment({}), null);
+});
+
+test('findLatestCsvAttachmentInComments picks the newest comment carrying a .csv', () => {
+  const comments = [
+    { body: 'just discussing', created_at: '2026-05-20T10:00:00Z' },
+    {
+      body: '[old.csv](https://github.com/user-attachments/files/1/old.csv)',
+      created_at: '2026-05-21T10:00:00Z',
+    },
+    {
+      body: '[new.csv](https://github.com/user-attachments/files/2/new.csv)',
+      created_at: '2026-05-23T10:00:00Z',
+    },
+    { body: 'approved', created_at: '2026-05-24T10:00:00Z' },
+  ];
+
+  const result = findLatestCsvAttachmentInComments(comments);
+
+  assert.ok(result);
+  assert.equal(result.attachment_url, 'https://github.com/user-attachments/files/2/new.csv');
+  assert.equal(result.filename, 'new.csv');
+});
+
+test('findLatestCsvAttachmentInComments returns null when no comment has a .csv', () => {
+  const comments = [
+    { body: 'no files here', created_at: '2026-05-20T10:00:00Z' },
+    { body: 'approved', created_at: '2026-05-21T10:00:00Z' },
+  ];
+
+  assert.equal(findLatestCsvAttachmentInComments(comments), null);
+  assert.equal(findLatestCsvAttachmentInComments([]), null);
 });
 
 test('isCsvLink and extractAttachmentLinks classify links by extension', () => {

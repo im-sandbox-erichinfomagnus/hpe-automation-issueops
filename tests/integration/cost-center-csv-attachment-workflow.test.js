@@ -169,6 +169,63 @@ test('a failed attachment download falls back to the typed CSV and warns instead
   assert.ok(run.validation.warnings.some((warning) => warning.includes('could not be downloaded')));
 });
 
+test('opening the issue with no .csv anywhere is not applicable and writes no validation_failed artifact', async () => {
+  const artifactPath = tempArtifactPath();
+  let downloadCalled = false;
+
+  const env = buildEnv({
+    GITHUB_TOKEN: 'ghs_repo_token',
+    PARSED_REQUEST_JSON: parsedRequest({ assignments_csv: '' }),
+    ISSUE_BODY: '### Enterprise slug\n\nocto-ent\n\nNo file attached yet.',
+    COMMENT_BODY: '',
+    AUDIT_ARTIFACT_PATH: artifactPath,
+  });
+
+  const run = await runCostCenterValidation({
+    env,
+    api: {
+      async listIssueComments() {
+        return [];
+      },
+      async listCostCenters() {
+        throw Object.assign(new Error('Not Found'), { status: 404 });
+      },
+    },
+    setProcessExitCode: false,
+    downloadCsvAttachment: async () => {
+      downloadCalled = true;
+      return { text: '' };
+    },
+  });
+
+  assert.equal(downloadCalled, false);
+  assert.equal(run.applicable, false);
+  assert.equal(run.validation, null);
+  assert.equal(fs.existsSync(artifactPath), false);
+});
+
+test('an attached CSV in a comment produces the correct plan', async () => {
+  const attachmentUrl = 'https://github.com/user-attachments/files/321/plan.csv';
+  const env = buildEnv({
+    GITHUB_TOKEN: 'ghs_repo_token',
+    PARSED_REQUEST_JSON: parsedRequest({ assignments_csv: '' }),
+    COMMENT_BODY: `Plan attached.\n[plan.csv](${attachmentUrl})`,
+    AUDIT_ARTIFACT_PATH: tempArtifactPath(),
+  });
+
+  const run = await runCostCenterValidation({
+    env,
+    api: throwingCostCenterApi,
+    setProcessExitCode: false,
+    downloadCsvAttachment: async () => ({ text: SAMPLE_CSV }),
+  });
+
+  assert.equal(run.validation.is_valid, true);
+  assert.deepEqual(run.reconciliationPlan.cost_centers_to_create.sort(), ['AI Enablement', 'Platform Engineering']);
+  assert.equal(run.reconciliationPlan.assignments_to_add.length, 2);
+  assert.equal(run.reconciliationPlan.assignments_to_remove.length, 1);
+});
+
 test('a failed attachment download with no typed CSV fails validation gracefully', async () => {
   const attachmentUrl = 'https://github.com/user-attachments/files/1000/blocked.csv';
 

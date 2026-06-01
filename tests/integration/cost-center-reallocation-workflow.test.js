@@ -212,6 +212,109 @@ test('idempotent rerun: assignments already satisfied make no API writes', async
   assert.equal(executed.execution.failure_count, 0);
 });
 
+function makeFakeRederiveApi(comments, costCenters = []) {
+  return {
+    async listIssueComments() {
+      return comments;
+    },
+    async listCostCenters() {
+      if (costCenters.length === 0) {
+        throw Object.assign(new Error('Not Found'), { status: 404 });
+      }
+      return costCenters;
+    },
+  };
+}
+
+test('approval re-derives the plan from comments when no artifact is on disk', async () => {
+  const attachmentUrl = 'https://github.com/user-attachments/files/501/reorg.csv';
+  const env = buildEnv({
+    GITHUB_TOKEN: 'ghs_repo_token',
+    PARSED_REQUEST_JSON: parsedRequest({ assignments_csv: '' }),
+    COMMENT_BODY: 'approved',
+    AUDIT_ARTIFACT_PATH: tempArtifactPath(),
+  });
+
+  const comments = [
+    {
+      user: { login: 'requester' },
+      body: `Plan attached.\n[reorg.csv](${attachmentUrl})`,
+      created_at: '2026-05-27T09:00:00Z',
+    },
+    { user: { login: 'approver1' }, body: 'approved', created_at: '2026-05-28T12:00:00Z' },
+  ];
+
+  const api = makeFakeRederiveApi(comments);
+
+  const approved = await runCostCenterApproval({
+    env,
+    api,
+    setProcessExitCode: false,
+    downloadCsvAttachment: async () => ({ text: SAMPLE_CSV }),
+  });
+
+  assert.equal(approved.approval.approval_status, 'approved');
+  assert.equal(approved.validation.is_valid, true);
+  assert.equal(approved.reconciliation.assignments_to_add.length, 2);
+  assert.equal(approved.reconciliation.assignments_to_remove.length, 1);
+});
+
+test('re-derived approval is denied when the approved comment is from a non-approver', async () => {
+  const attachmentUrl = 'https://github.com/user-attachments/files/502/reorg.csv';
+  const env = buildEnv({
+    GITHUB_TOKEN: 'ghs_repo_token',
+    PARSED_REQUEST_JSON: parsedRequest({ assignments_csv: '' }),
+    COMMENT_BODY: 'approved',
+    AUDIT_ARTIFACT_PATH: tempArtifactPath(),
+  });
+
+  const comments = [
+    {
+      user: { login: 'requester' },
+      body: `[reorg.csv](${attachmentUrl})`,
+      created_at: '2026-05-27T09:00:00Z',
+    },
+    { user: { login: 'someone-else' }, body: 'approved', created_at: '2026-05-28T12:00:00Z' },
+  ];
+
+  const approved = await runCostCenterApproval({
+    env,
+    api: makeFakeRederiveApi(comments),
+    setProcessExitCode: false,
+    downloadCsvAttachment: async () => ({ text: SAMPLE_CSV }),
+  });
+
+  assert.equal(approved.approval.approval_status, 'denied');
+});
+
+test('re-derived approval reports no spreadsheet found when no comment has a .csv', async () => {
+  const env = buildEnv({
+    GITHUB_TOKEN: 'ghs_repo_token',
+    PARSED_REQUEST_JSON: parsedRequest({ assignments_csv: '' }),
+    COMMENT_BODY: 'approved',
+    AUDIT_ARTIFACT_PATH: tempArtifactPath(),
+  });
+
+  const comments = [
+    { user: { login: 'approver1' }, body: 'approved', created_at: '2026-05-28T12:00:00Z' },
+  ];
+
+  let downloadCalled = false;
+  const result = await runCostCenterApproval({
+    env,
+    api: makeFakeRederiveApi(comments),
+    setProcessExitCode: false,
+    downloadCsvAttachment: async () => {
+      downloadCalled = true;
+      return { text: SAMPLE_CSV };
+    },
+  });
+
+  assert.equal(downloadCalled, false);
+  assert.equal(result.approval.approval_status, 'not_requested');
+  assert.match(result.audit_summary_markdown, /No cost center spreadsheet was found/);
+});
+
 test('validation fails when the CSV is missing a required column', async () => {
   const artifactPath = tempArtifactPath();
   const badCsv = ['cost_center,action', 'Platform Engineering,add'].join('\n');

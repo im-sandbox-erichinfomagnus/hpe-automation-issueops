@@ -27,23 +27,9 @@ body:
     attributes:
       value: |
         ## Cost center assignments
-        Attach a UTF-8 `.csv` file with the header `cost_center,login,action`. Action is `add` or `remove` and defaults to `add`. To move someone, add a remove row for the old cost center and an add row for the new one.
+        After you open this issue, add a comment and drag a UTF-8 `.csv` file into that comment. The file must use the header `cost_center,login,action`. Action is `add` or `remove` and defaults to `add`. To move someone, add a remove row for the old cost center and an add row for the new one.
 
-        Drag the `.csv` file into a comment on this issue after you open it (or into the issue body above). When a `.csv` file is attached, it is used and the optional textarea below is ignored. If you cannot attach a file, paste the CSV into the textarea instead.
-
-  - type: textarea
-    id: assignments_csv
-    attributes:
-      label: Cost center assignments (CSV) - optional fallback
-      description: Optional. Used only when no `.csv` file is attached to the issue or a comment. Paste UTF-8 CSV with the header `cost_center,login,action`.
-      placeholder: |
-        cost_center,login,action
-        Platform Engineering,octocat,add
-        Platform Engineering,hubot,remove
-        AI Enablement,hubot,add
-      render: text
-    validations:
-      required: false
+        Opening the issue alone does nothing. The workflow only runs once a comment with a `.csv` file attached is posted. To approve, the intended approver comments exactly `approved` after the plan is posted.
 
   - type: textarea
     id: business_justification

@@ -95,7 +95,6 @@ jobs:
         id: request_scope
         env:
           PARSED_ENTERPRISE: ${{ steps.parse_request.outputs.parsed_enterprise }}
-          PARSED_ASSIGNMENTS_CSV: ${{ steps.parse_request.outputs.parsed_assignments_csv }}
           COMMENT_BODY: ${{ github.event.comment.body || '' }}
           ISSUE_BODY: ${{ steps.issue_context.outputs.issue_body }}
         run: |
@@ -106,8 +105,13 @@ jobs:
             has_csv_attachment=true
           fi
 
+          is_approval_comment=false
+          if [ "$(printf '%s' "${COMMENT_BODY:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')" = "approved" ]; then
+            is_approval_comment=true
+          fi
+
           matches_request=false
-          if [ -n "${PARSED_ENTERPRISE:-}" ] && { [ -n "${PARSED_ASSIGNMENTS_CSV:-}" ] || [ "$has_csv_attachment" = "true" ]; }; then
+          if [ -n "${PARSED_ENTERPRISE:-}" ] && { [ "$has_csv_attachment" = "true" ] || [ "$is_approval_comment" = "true" ]; }; then
             matches_request=true
           fi
 
@@ -129,7 +133,6 @@ jobs:
           PARSED_REQUEST_JSON: ${{ steps.parse_request.outputs.json }}
           PARSED_ENTERPRISE: ${{ steps.parse_request.outputs.parsed_enterprise }}
           PARSED_INTENDED_APPROVER: ${{ steps.parse_request.outputs.parsed_intended_approver }}
-          PARSED_ASSIGNMENTS_CSV: ${{ steps.parse_request.outputs.parsed_assignments_csv }}
           PARSED_BUSINESS_JUSTIFICATION: ${{ steps.parse_request.outputs.parsed_business_justification }}
           PARSED_DRY_RUN: ${{ steps.parse_request.outputs.parsed_dry_run }}
           COMMENT_BODY: ${{ github.event.comment.body || '' }}
@@ -144,6 +147,14 @@ jobs:
           ISSUEOPS_GITHUB_TOKEN: ${{ secrets.ISSUEOPS_GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ github.token }}
           ISSUE_NUMBER: ${{ env.ISSUE_NUMBER }}
+          REQUESTER_LOGIN: ${{ steps.issue_context.outputs.requester_login }}
+          PARSED_REQUEST_JSON: ${{ steps.parse_request.outputs.json }}
+          PARSED_ENTERPRISE: ${{ steps.parse_request.outputs.parsed_enterprise }}
+          PARSED_INTENDED_APPROVER: ${{ steps.parse_request.outputs.parsed_intended_approver }}
+          PARSED_BUSINESS_JUSTIFICATION: ${{ steps.parse_request.outputs.parsed_business_justification }}
+          PARSED_DRY_RUN: ${{ steps.parse_request.outputs.parsed_dry_run }}
+          COMMENT_BODY: ${{ github.event.comment.body || '' }}
+          ISSUE_BODY: ${{ steps.issue_context.outputs.issue_body }}
           AUDIT_ARTIFACT_PATH: ${{ env.AUDIT_ARTIFACT_PATH }}
         run: node src/scripts/run-cost-center-approval.js
 
