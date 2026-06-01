@@ -64,20 +64,28 @@ async function resolveAttachmentCsv(options, env, tokenInfo) {
   });
 
   if (!attachment) {
-    return null;
+    return { text: null, warning: null };
   }
 
-  const downloaded = await downloadCostCenterCsvAttachment({
-    attachmentUrl: attachment.attachment_url,
-    token: tokenInfo.token,
-    downloadImpl: options.downloadCsvAttachment,
-    fetchImpl: options.fetchImpl,
-    maxBytes: options.maxAttachmentBytes,
-    maxRetries: options.maxRetries,
-    sleep: options.sleep,
-  });
+  try {
+    const downloaded = await downloadCostCenterCsvAttachment({
+      attachmentUrl: attachment.attachment_url,
+      token: tokenInfo.token,
+      downloadImpl: options.downloadCsvAttachment,
+      fetchImpl: options.fetchImpl,
+      maxBytes: options.maxAttachmentBytes,
+      maxRetries: options.maxRetries,
+      sleep: options.sleep,
+    });
 
-  return downloaded && typeof downloaded.text === 'string' ? downloaded.text : null;
+    const text = downloaded && typeof downloaded.text === 'string' ? downloaded.text : null;
+    return { text, warning: null };
+  } catch (error) {
+    return {
+      text: null,
+      warning: `The attached file ${attachment.filename || attachment.attachment_url} could not be downloaded (${error.message}). Validation continued against the typed CSV field, if any.`,
+    };
+  }
 }
 
 async function runCostCenterValidation(options = {}) {
@@ -85,9 +93,9 @@ async function runCostCenterValidation(options = {}) {
   const parsedRequest = readParsedRequestFromEnv(env);
   const tokenInfo = loadWorkflowToken({ env, required: false });
 
-  const attachmentCsv = await resolveAttachmentCsv(options, env, tokenInfo);
-  const effectiveParsedRequest = attachmentCsv != null
-    ? { ...parsedRequest, assignments_csv: attachmentCsv }
+  const attachmentResult = await resolveAttachmentCsv(options, env, tokenInfo);
+  const effectiveParsedRequest = attachmentResult.text != null
+    ? { ...parsedRequest, assignments_csv: attachmentResult.text }
     : parsedRequest;
 
   const request = parseCostCenterRequest({
@@ -111,6 +119,10 @@ async function runCostCenterValidation(options = {}) {
   }
 
   const validation = await validateCostCenterRequest(request, hooks);
+
+  if (attachmentResult.warning) {
+    validation.warnings = [attachmentResult.warning, ...(validation.warnings || [])];
+  }
 
   const reconciliationPlan = reconcileCostCenter({
     request: validation.request,

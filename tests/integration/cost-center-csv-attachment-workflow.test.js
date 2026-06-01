@@ -144,3 +144,51 @@ test('falls back to the typed textarea when no attachment is present', async () 
   assert.equal(run.validation.is_valid, true);
   assert.equal(run.validation.requested_assignments.length, 3);
 });
+
+test('a failed attachment download falls back to the typed CSV and warns instead of crashing', async () => {
+  const attachmentUrl = 'https://github.com/user-attachments/files/999/blocked.csv';
+
+  const env = buildEnv({
+    GITHUB_TOKEN: 'ghs_repo_token',
+    PARSED_REQUEST_JSON: parsedRequest(),
+    COMMENT_BODY: `[blocked.csv](${attachmentUrl})`,
+    AUDIT_ARTIFACT_PATH: tempArtifactPath(),
+  });
+
+  const run = await runCostCenterValidation({
+    env,
+    api: throwingCostCenterApi,
+    setProcessExitCode: false,
+    downloadCsvAttachment: async () => {
+      throw Object.assign(new Error('Failed to download CSV attachment.'), { status: 404 });
+    },
+  });
+
+  assert.equal(run.validation.is_valid, true);
+  assert.equal(run.validation.requested_assignments.length, 3);
+  assert.ok(run.validation.warnings.some((warning) => warning.includes('could not be downloaded')));
+});
+
+test('a failed attachment download with no typed CSV fails validation gracefully', async () => {
+  const attachmentUrl = 'https://github.com/user-attachments/files/1000/blocked.csv';
+
+  const env = buildEnv({
+    GITHUB_TOKEN: 'ghs_repo_token',
+    PARSED_REQUEST_JSON: parsedRequest({ assignments_csv: '' }),
+    COMMENT_BODY: `[blocked.csv](${attachmentUrl})`,
+    AUDIT_ARTIFACT_PATH: tempArtifactPath(),
+  });
+
+  const run = await runCostCenterValidation({
+    env,
+    api: throwingCostCenterApi,
+    setProcessExitCode: false,
+    downloadCsvAttachment: async () => {
+      throw Object.assign(new Error('Failed to download CSV attachment.'), { status: 404 });
+    },
+  });
+
+  assert.equal(run.validation.is_valid, false);
+  assert.equal(run.validation.request_status, 'validation_failed');
+  assert.ok(run.validation.warnings.some((warning) => warning.includes('could not be downloaded')));
+});
