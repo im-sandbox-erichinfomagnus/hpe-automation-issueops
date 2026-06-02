@@ -1,14 +1,25 @@
 version: 2
 updates:
-  - package-ecosystem: github-actions
-    directory: /
-    target-branch: 013-setup-feature-branch
+  - package-ecosystem: "github-actions"
+    directory: "/"
     schedule:
-      interval: weekly
+      interval: "weekly"
+      day: "monday"
+      time: "05:00"
+      timezone: "UTC"
+    target-branch: "013-setup-feature-branch"
     open-pull-requests-limit: 10
-  - package-ecosystem: npm
-    directory: /
-    target-branch: 013-setup-feature-branch
+    labels:
+      - "dependencies"
+      - "github-actions"
+  - package-ecosystem: "npm"
+    directory: "/"
     schedule:
-      interval: weekly
+      interval: "weekly"
+      day: "monday"
+      time: "05:00"
+      timezone: "UTC"
+    target-branch: "013-setup-feature-branch"
     open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
