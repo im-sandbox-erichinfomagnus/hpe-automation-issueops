@@ -56,6 +56,9 @@ test('workflow scaffolding keeps add-team-repo-access runtime and lint assumptio
   const workflow = fs.readFileSync(workflowPath, 'utf8');
   const lintWorkflow = fs.readFileSync(lintWorkflowPath, 'utf8');
 
+  assert.match(workflow, /on:\s+issues:\s+types:\s+- opened\s+- edited\s+- reopened\s+- labeled/m);
+  assert.match(workflow, /issue_comment:\s+types:\s+- created\s+- edited\s+- deleted/m);
+  assert.doesNotMatch(workflow, /issue_comment:\s+if \[/m);
   assert.match(workflow, /uses:\s+actions\/setup-node@v6/);
   assert.match(workflow, /node-version:\s+24/);
   assert.match(lintWorkflow, /uses:\s+rhysd\/actionlint@v1/);
@@ -122,6 +125,20 @@ test('runRequestValidation records an approval-ready add-team-repo-access reques
   assert.match(fs.readFileSync(summaryPath, 'utf8'), /Intake mode: bulk_csv/i);
   assert.match(fs.readFileSync(summaryPath, 'utf8'), /CSV row findings: 2/i);
   assert.match(fs.readFileSync(outputPath, 'utf8'), /validation-status=awaiting_approval/);
+});
+
+test('workflow applicability keeps empty-intake add-team-repo-access requests in validation scope', () => {
+  const workflowPath = path.join(__dirname, '..', '..', '.github', 'workflows', 'add-team-repo-access.yml');
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
+  const requestScopeBlock = workflow.match(/- name: Check request applicability[\s\S]*?echo "matches-request=\$matches_request" >> "\$GITHUB_OUTPUT"/);
+
+  assert.ok(requestScopeBlock);
+  assert.match(requestScopeBlock[0], /PARSED_TARGET_TEAM:/);
+  assert.match(requestScopeBlock[0], /PARSED_DESIGNATED_APPROVER:/);
+  assert.match(requestScopeBlock[0], /PARSED_PERMISSION_LEVEL:/);
+  assert.doesNotMatch(requestScopeBlock[0], /PARSED_REQUESTED_REPOSITORIES:/);
+  assert.doesNotMatch(requestScopeBlock[0], /PARSED_BULK_CSV_REQUESTED_REPOSITORIES:/);
+  assert.match(requestScopeBlock[0], /if \[ -n "\$\{PARSED_TARGET_TEAM:-\}" \] && \[ -n "\$\{PARSED_DESIGNATED_APPROVER:-\}" \] && \[ -n "\$\{PARSED_PERMISSION_LEVEL:-\}" \]; then/);
 });
 
 test('approved bulk CSV requests preserve intake mode and source row provenance through the final artifact', async () => {
