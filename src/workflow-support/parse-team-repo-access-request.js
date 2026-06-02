@@ -1,8 +1,18 @@
 'use strict';
 
 const { slugifyTeamName } = require('./normalize-requested-child-teams');
+const {
+  CSV_ROW_NUMBERING_CONVENTION,
+  createEmptyBulkCsvNormalization,
+  normalizeBulkCsvRequestedRepositories,
+} = require('./normalize-bulk-csv-requested-repositories');
 const { normalizeRequestedPermission } = require('./normalize-requested-permission');
-const { normalizeRequestedRepositories, normalizeLogin } = require('./normalize-requested-repositories');
+const {
+  normalizeRequestedRepositories,
+  normalizeLogin,
+  toLines,
+  unwrapCodeFence,
+} = require('./normalize-requested-repositories');
 
 function readField(source, keys) {
   for (const key of keys) {
@@ -41,6 +51,37 @@ function buildRequestId(repository, issueNumber, runId, runAttempt) {
   return `${repository || 'unknown-repo'}#${issuePart}/${runPart}.${attemptPart}`;
 }
 
+function normalizeRequestedRepositoriesInput(value) {
+  return toLines(value)
+    .map((line) => String(line || '').trim())
+    .filter((line) => line !== '')
+    .join('\n');
+}
+
+function hasPopulatedRequestInput(value) {
+  if (Array.isArray(value)) {
+    return value.some((entry) => hasPopulatedRequestInput(entry));
+  }
+
+  if (value == null) {
+    return false;
+  }
+
+  if (typeof value === 'object') {
+    if (Array.isArray(value.values)) {
+      return hasPopulatedRequestInput(value.values);
+    }
+
+    if (typeof value.value === 'string') {
+      return hasPopulatedRequestInput(value.value);
+    }
+
+    return false;
+  }
+
+  return unwrapCodeFence(value).trim() !== '';
+}
+
 function parseTeamRepoAccessRequest(input = {}) {
   const parsed = input.parsedRequest || input.parsed_request || {};
   const issue = input.issue || {};
@@ -66,10 +107,44 @@ function parseTeamRepoAccessRequest(input = {}) {
   );
   const requestedRepositoriesInput =
     readField(parsed, ['requested_repositories', 'parsed_requested_repositories']) ||
-    input.requestedRepositories;
-  const repositoryNormalization = normalizeRequestedRepositories(requestedRepositoriesInput, {
-    defaultOwner: organization,
-  });
+    input.requestedRepositories || '';
+  const requestedRepositoriesRawInput = normalizeRequestedRepositoriesInput(requestedRepositoriesInput);
+  const bulkCsvInput =
+    readField(parsed, [
+      'bulk_csv_requested_repositories',
+      'parsed_bulk_csv_requested_repositories',
+    ]) || input.bulkCsvRequestedRepositories || '';
+  const manualInputPopulated = hasPopulatedRequestInput(requestedRepositoriesInput);
+  const bulkCsvInputPopulated = hasPopulatedRequestInput(bulkCsvInput);
+  const intakeMode = manualInputPopulated && !bulkCsvInputPopulated
+    ? 'manual'
+    : bulkCsvInputPopulated && !manualInputPopulated
+      ? 'bulk_csv'
+      : null;
+  const repositoryNormalization = intakeMode === 'bulk_csv'
+    ? normalizeBulkCsvRequestedRepositories(bulkCsvInput, {
+      defaultOwner: organization,
+    })
+    : normalizeRequestedRepositories(requestedRepositoriesInput, {
+      defaultOwner: organization,
+    });
+  const bulkCsvSubmission = intakeMode === 'bulk_csv'
+    ? {
+      encoding: repositoryNormalization.encoding,
+      header_columns: repositoryNormalization.header_columns,
+      required_columns: repositoryNormalization.required_columns,
+      unsupported_columns: repositoryNormalization.unsupported_columns,
+      row_count: repositoryNormalization.row_count,
+      valid_row_count: repositoryNormalization.valid_row_count,
+      invalid_row_count: repositoryNormalization.invalid_row_count,
+      duplicate_row_count: repositoryNormalization.duplicate_row_count,
+      schema_status: repositoryNormalization.schema_status,
+      schema_errors: repositoryNormalization.schema_errors,
+      raw_input: repositoryNormalization.raw_input,
+      csv_row_findings: repositoryNormalization.csv_row_findings,
+      csv_row_numbering_convention: repositoryNormalization.csv_row_numbering_convention,
+    }
+    : createEmptyBulkCsvNormalization(bulkCsvInput);
   const requestedPermissionInput =
     readField(parsed, ['permission_level', 'parsed_permission_level']) || input.permissionLevel;
   const permissionNormalization = normalizeRequestedPermission(requestedPermissionInput);
@@ -102,11 +177,17 @@ function parseTeamRepoAccessRequest(input = {}) {
     requested_permission_label: permissionNormalization.requested_permission_label,
     requested_permission_api_value: permissionNormalization.requested_permission_api_value,
     requested_permission_rank: permissionNormalization.requested_permission_rank,
+    intake_mode: intakeMode,
+    requested_repositories_input: requestedRepositoriesRawInput,
+    bulk_csv_input: bulkCsvInput,
+    bulk_csv_submission: bulkCsvSubmission,
     requested_repository_grants: repositoryNormalization.normalizedRepositories,
     requested_repository_grant_detail: repositoryNormalization.requestedRepositoryDetail,
     duplicate_repositories: repositoryNormalization.duplicateRepositories,
     conflicting_repositories: repositoryNormalization.conflictingRepositories,
     invalid_repositories: repositoryNormalization.invalidRepositories,
+    csv_row_findings: bulkCsvSubmission.csv_row_findings || [],
+    csv_row_numbering_convention: bulkCsvSubmission.csv_row_numbering_convention || CSV_ROW_NUMBERING_CONVENTION,
     request_status: 'submitted',
     business_justification: justification || '',
     dry_run: dryRun,
@@ -115,6 +196,7 @@ function parseTeamRepoAccessRequest(input = {}) {
       duplicate_repositories: repositoryNormalization.duplicateRepositories,
       conflicting_repositories: repositoryNormalization.conflictingRepositories,
       invalid_repositories: repositoryNormalization.invalidRepositories,
+      bulk_csv_submission: bulkCsvSubmission,
       unsupported_permission: !permissionNormalization.is_supported,
     },
     unsupported_inputs: {

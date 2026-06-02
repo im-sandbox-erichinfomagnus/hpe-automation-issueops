@@ -43,6 +43,11 @@ function loadBaseFixture() {
   return parseFixtureMarkdown(markdown);
 }
 
+function loadIssueTemplate() {
+  const templatePath = path.join(__dirname, '..', '..', '.github', 'ISSUE_TEMPLATE', 'add-team-repo-access.yml');
+  return fs.readFileSync(templatePath, 'utf8');
+}
+
 function createValidationDependencies(overrides = {}) {
   return {
     getOrganization: async () => ({ exists: true }),
@@ -86,11 +91,76 @@ test('parses a valid add-team-repo-access fixture into a normalized request', ()
   assert.equal(request.designated_approver_login, 'octocat');
   assert.equal(request.requested_permission_label, 'write');
   assert.equal(request.requested_permission_api_value, 'push');
+  assert.equal(
+    request.requested_repositories_input,
+    parsedRequest.requested_repositories.replace(/\r\n/g, '\n')
+  );
   assert.deepEqual(
     request.requested_repository_grants.map((grant) => grant.repository_full_name),
     ['octo-org/service-catalog', 'octo-org/developer-portal']
   );
+  assert.equal(request.intake_mode, 'manual');
+  assert.equal(request.bulk_csv_input, '');
+  assert.equal(request.bulk_csv_submission.schema_status, 'not_provided');
+  assert.deepEqual(request.csv_row_findings, []);
+  assert.equal(
+    request.csv_row_numbering_convention,
+    '1-based data-row numbers that exclude the header row'
+  );
   assert.equal(request.dry_run, true);
+});
+
+test('issue form preserves requested_repositories as the manual input path', () => {
+  const template = loadIssueTemplate();
+
+  assert.match(template, /id:\s+requested_repositories/);
+  assert.match(template, /Existing manual input path for one existing repository per line/i);
+  assert.match(template, /id:\s+permission_level/);
+  assert.doesNotMatch(template, /custom-role/i);
+});
+
+test('manual request shaping preserves line-oriented repositories when parsed input arrives as an array', () => {
+  const request = parseTeamRepoAccessRequest({
+    parsedRequest: {
+      organization: 'octo-org',
+      target_team: 'Platform Engineering',
+      designated_approver: 'octocat',
+      requested_repositories: ['service-catalog', 'developer-portal'],
+      permission_level: 'write',
+      business_justification: 'Need repository access',
+      dry_run: 'true',
+    },
+    issue: { number: 709, user: { login: 'requester' } },
+    repository: 'octo-org/issueops-speckit',
+  });
+
+  assert.equal(request.intake_mode, 'manual');
+  assert.equal(request.requested_repositories_input, 'service-catalog\ndeveloper-portal');
+  assert.deepEqual(
+    request.requested_repository_grants.map((grant) => grant.repository_full_name),
+    ['octo-org/service-catalog', 'octo-org/developer-portal']
+  );
+});
+
+test('manual validation accepts every supported built-in repository role', async () => {
+  for (const permissionLevel of ['read', 'triage', 'write', 'maintain', 'admin']) {
+    const validation = await validateTeamRepoAccessRequest({
+      parsedRequest: {
+        organization: 'octo-org',
+        target_team: 'Platform Engineering',
+        designated_approver: 'octocat',
+        requested_repositories: 'service-catalog',
+        permission_level: permissionLevel,
+        business_justification: 'Need repository access',
+        dry_run: 'true',
+      },
+      issue: { number: 710, user: { login: 'requester' } },
+      repository: 'octo-org/issueops-speckit',
+    }, createValidationDependencies());
+
+    assert.equal(validation.is_valid, true, `${permissionLevel} should be accepted`);
+    assert.equal(validation.request.requested_permission_label, permissionLevel);
+  }
 });
 
 test('rejects duplicate repositories from a fixture-derived submission', async () => {
@@ -188,4 +258,20 @@ test('rejects team-creation and hierarchy inputs in repository-access submission
   assert.equal(validation.is_valid, false);
   assert.match(validation.errors.join('\n'), /team-creation input is out of scope/i);
   assert.match(validation.errors.join('\n'), /team-hierarchy input is out of scope/i);
+});
+
+test('manual validation preserves explicit non-CSV intake metadata', async () => {
+  const parsedRequest = loadBaseFixture();
+
+  const validation = await validateTeamRepoAccessRequest({
+    parsedRequest,
+    issue: { number: 707, user: { login: 'requester' } },
+    repository: 'octo-org/issueops-speckit',
+  }, createValidationDependencies());
+
+  assert.equal(validation.is_valid, true);
+  assert.equal(validation.request.intake_mode, 'manual');
+  assert.equal(validation.request.bulk_csv_input, '');
+  assert.equal(validation.request.bulk_csv_submission.schema_status, 'not_provided');
+  assert.deepEqual(validation.request.csv_row_findings, []);
 });
