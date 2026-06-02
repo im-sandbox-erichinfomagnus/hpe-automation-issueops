@@ -80,3 +80,53 @@ test('buildAuditArtifact infers bulk CSV mode for legacy artifacts from raw CSV 
 
   assert.equal(artifact.request.intake_mode, 'bulk_csv');
 });
+
+test('buildAuditArtifact infers manual mode from normalized request data when legacy raw inputs are empty', () => {
+  const cases = [
+    {
+      name: 'team creation',
+      runContext: { operation: 'team_creation' },
+      request: {
+        requested_team_names_input: '',
+        requested_teams: [{ requested_name: 'Platform Engineering' }],
+      },
+    },
+    {
+      name: 'team membership',
+      runContext: { operation: 'team_membership' },
+      request: {
+        requested_people_input: '',
+        requested_people: ['octocat'],
+      },
+    },
+    {
+      name: 'team hierarchy',
+      runContext: { operation: 'team_hierarchy' },
+      request: {
+        requested_child_teams_input: '',
+        requested_child_links: [{ child_team_slug: 'application-platform' }],
+      },
+    },
+    {
+      name: 'team repo access',
+      runContext: { operation: 'team_repo_access' },
+      request: {
+        requested_repositories_input: '',
+        requested_permission_api_value: 'push',
+        requested_repository_grants: [{ repository_name: 'platform-service' }],
+      },
+    },
+  ];
+
+  for (const testCase of cases) {
+    const artifact = buildAuditArtifact({
+      request: {
+        organization: 'octo-org',
+        ...testCase.request,
+      },
+      runContext: testCase.runContext,
+    });
+
+    assert.equal(artifact.request.intake_mode, 'manual', testCase.name);
+  }
+});

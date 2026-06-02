@@ -10,6 +10,18 @@ function hasPopulatedString(value) {
   return typeof value === 'string' && unwrapCodeFence(value).trim() !== '';
 }
 
+function hasManualNormalizedEntries(value) {
+  if (!Array.isArray(value) || value.length === 0) {
+    return false;
+  }
+
+  return value.some((entry) => (
+    !entry ||
+    typeof entry !== 'object' ||
+    (entry.source_row_number == null && entry.source_comment_id == null)
+  ));
+}
+
 function determineOperation(request = {}, runContext = {}) {
   const explicitOperation = runContext.operation || request.operation;
   if (explicitOperation) {
@@ -94,19 +106,26 @@ function inferRequestIntakeMode(request = {}, operation = determineOperation(req
   );
   const hasManualSignals = (
     operation === 'team_creation' && (
-      hasPopulatedString(request.requested_team_names_input)
+      hasPopulatedString(request.requested_team_names_input) ||
+      hasManualNormalizedEntries(request.requested_teams) ||
+      hasManualNormalizedEntries(request.requested_team_detail)
     )
   ) || (
     operation === 'team_membership' && (
-      hasPopulatedString(request.requested_people_input)
+      hasPopulatedString(request.requested_people_input) ||
+      hasManualNormalizedEntries(request.requested_people_detail) ||
+      hasManualNormalizedEntries(request.requested_people)
     )
   ) || (
     operation === 'team_hierarchy' && (
-      hasPopulatedString(request.requested_child_teams_input)
+      hasPopulatedString(request.requested_child_teams_input) ||
+      hasManualNormalizedEntries(request.requested_child_links) ||
+      hasManualNormalizedEntries(request.requested_child_link_detail)
     )
   ) || (
     operation === 'team_repo_access' && (
-      hasPopulatedString(request.requested_repositories_input)
+      hasPopulatedString(request.requested_repositories_input) ||
+      hasManualNormalizedEntries(request.requested_repository_grants)
     )
   );
 
