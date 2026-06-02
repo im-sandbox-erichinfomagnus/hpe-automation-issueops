@@ -173,13 +173,15 @@ jobs:
       - name: Validation and approval snapshot
         if: always()
         run: |
-          echo "Validation status: ${{ steps.request_validation.outputs['validation-status'] || 'unknown' }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "Approval status: ${{ steps.approval_gate.outputs['approval-status'] || 'unknown' }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "Execution status: ${{ steps.approved_execution.outputs['execution-status'] || 'not_requested' }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "Audit artifact path: ${{ steps.approved_execution.outputs['audit-artifact-path'] || steps.approval_gate.outputs['audit-artifact-path'] || steps.request_validation.outputs['audit-artifact-path'] || steps.request_validation.outputs.artifact_path || 'n/a' }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "Parsed organization: ${{ steps.parse_request.outputs.parsed_organization || '' }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "Parsed tenant name: ${{ steps.parse_request.outputs.parsed_tenant_name || '' }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "Parsed repository name: ${{ steps.parse_request.outputs.parsed_repository_name || '' }}" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "Validation status: ${{ steps.request_validation.outputs['validation-status'] || 'unknown' }}"
+            echo "Approval status: ${{ steps.approval_gate.outputs['approval-status'] || 'unknown' }}"
+            echo "Execution status: ${{ steps.approved_execution.outputs['execution-status'] || 'not_requested' }}"
+            echo "Audit artifact path: ${{ steps.approved_execution.outputs['audit-artifact-path'] || steps.approval_gate.outputs['audit-artifact-path'] || steps.request_validation.outputs['audit-artifact-path'] || steps.request_validation.outputs.artifact_path || 'n/a' }}"
+            echo "Parsed organization: ${{ steps.parse_request.outputs.parsed_organization || '' }}"
+            echo "Parsed tenant name: ${{ steps.parse_request.outputs.parsed_tenant_name || '' }}"
+            echo "Parsed repository name: ${{ steps.parse_request.outputs.parsed_repository_name || '' }}"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Guarded execution gate
         if: ${{ steps.approval_gate.outputs['approval-status'] == 'approved' }}

@@ -80,9 +80,9 @@ jobs:
             issue_labels_json=$(printf '%s' "$issue_json" | jq -c '.labels // []')
           fi
 
-          echo "requester_login=$requester_login" >> "$GITHUB_OUTPUT"
-          echo "issue_labels_json=$issue_labels_json" >> "$GITHUB_OUTPUT"
           {
+            echo "requester_login=$requester_login"
+            echo "issue_labels_json=$issue_labels_json"
             echo 'issue_body<<EOF'
             printf '%s\n' "$issue_body"
             echo EOF
