@@ -221,12 +221,15 @@ async function restoreRequestAuditArtifact(options = {}) {
   const repository = options.repository || env.GITHUB_REPOSITORY || '';
   const issueNumber = options.issueNumber || env.ISSUE_NUMBER || '';
   const token = options.token || env.GITHUB_TOKEN || env.ISSUEOPS_GITHUB_TOKEN || '';
+  const operation = options.operation || env.OPERATION || '';
   const artifactPath = path.resolve(
     options.artifactPath || env.AUDIT_ARTIFACT_PATH || path.join('artifacts', `add-team-members-validation-${issueNumber || 'manual'}.json`)
   );
   const currentRunId = options.currentRunId || env.GITHUB_RUN_ID || null;
   const fetchImpl = options.fetchImpl || global.fetch;
-  const defaultArtifactName = `add-team-members-validation-${issueNumber}`;
+  const defaultArtifactName = operation === 'team_repo_access_removal'
+    ? `remove-team-repo-access-validation-${issueNumber}`
+    : `add-team-members-validation-${issueNumber}`;
   const artifactName = options.artifactName
     || env.ARTIFACT_NAME
     || (artifactPath ? path.basename(artifactPath, '.json') : defaultArtifactName);

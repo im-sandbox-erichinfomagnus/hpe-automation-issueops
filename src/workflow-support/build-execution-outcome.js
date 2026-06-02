@@ -30,7 +30,7 @@ function summarizeResults(results, options = {}) {
   };
 
   for (const result of results.map(normalizeExecutionResult)) {
-    if (['added', 'created', 'mutated', 'linked'].includes(result.result)) {
+    if (['added', 'created', 'mutated', 'linked', 'removed'].includes(result.result)) {
       summary.mutated.push(result);
     } else if (result.result === 'granted') {
       summary.mutated.push(result);
@@ -108,6 +108,7 @@ function buildExecutionOutcome(input = {}) {
     pending_count: summary.pending.length,
     failure_count: summary.failed.length,
     granted_count: summary.mutated.length,
+    removed_count: summary.mutated.length,
     duplicate_row_count: input.duplicate_row_count ?? bulkCsvSubmission?.duplicate_row_count ?? 0,
     invalid_row_count: input.invalid_row_count ?? bulkCsvSubmission?.invalid_row_count ?? 0,
     attachment_rate_limit_snapshot: input.attachment_rate_limit_snapshot || null,
@@ -117,6 +118,10 @@ function buildExecutionOutcome(input = {}) {
     rollback_status: rollbackStatus,
     failed_subset: summary.failed,
     rejected_subset: summary.rejected,
+    mutated_repositories: summary.mutated.map((entry) => entry.repository_full_name).filter(Boolean),
+    noop_repositories: summary.noop.map((entry) => entry.repository_full_name).filter(Boolean),
+    rejected_repositories: summary.rejected.map((entry) => entry.repository_full_name).filter(Boolean),
+    failed_repositories: summary.failed.map((entry) => entry.repository_full_name).filter(Boolean),
     remediation_instructions: remediationInstructions,
     summary: waitingSummary || awaitingApprovalSummary || [
       `Processed ${summary.mutated.length} ${processedLabel},`,

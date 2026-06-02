@@ -42,6 +42,10 @@ function buildPendingApprovalNote(approvalMode, approvalCommand) {
     return `Add an issue comment containing exactly '${approvalCommand}' from the designated target organization owner to authorize execution.`;
   }
 
+  if (approvalMode === 'team_repo_access_removal') {
+    return `Add an issue comment containing exactly '${approvalCommand}' from the designated target organization owner to authorize repository-access removal execution.`;
+  }
+
   return `Add an issue comment containing exactly '${approvalCommand}' as an organization owner to authorize execution.`;
 }
 
@@ -56,6 +60,10 @@ function buildPendingAttachmentApprovalNote(approvalMode, approvalCommand) {
 
   if (approvalMode === 'team_repo_access') {
     return `Add an issue comment containing exactly '${approvalCommand}' from the designated target organization owner after the accepted CSV attachment comment to authorize execution.`;
+  }
+
+  if (approvalMode === 'team_repo_access_removal') {
+    return `Add an issue comment containing exactly '${approvalCommand}' from the designated target organization owner after the accepted CSV attachment comment to authorize repository-access removal execution.`;
   }
 
   return `Add an issue comment containing exactly '${approvalCommand}' as an organization owner after the accepted CSV attachment comment to authorize execution.`;
@@ -81,7 +89,7 @@ async function evaluateApprovalGate(input = {}, options = {}) {
       return resolveTeamHierarchyApprover(args, options);
     }
 
-    if (approvalMode === 'team_repo_access') {
+    if (approvalMode === 'team_repo_access' || approvalMode === 'team_repo_access_removal') {
       return resolveTeamRepoAccessApprover(args, options);
     }
 
@@ -89,7 +97,7 @@ async function evaluateApprovalGate(input = {}, options = {}) {
   });
 
   if (
-    (approvalMode === 'team_membership' || approvalMode === 'team_creation' || approvalMode === 'team_hierarchy' || approvalMode === 'team_repo_access') &&
+    (approvalMode === 'team_membership' || approvalMode === 'team_creation' || approvalMode === 'team_hierarchy' || approvalMode === 'team_repo_access' || approvalMode === 'team_repo_access_removal') &&
     intakeMode === 'csv_attachment' &&
     requestStatus === 'waiting_for_attachment'
   ) {
@@ -103,14 +111,14 @@ async function evaluateApprovalGate(input = {}, options = {}) {
   }
 
   const approvalComment = findLatestApprovalComment(issueComments, approvalCommand, {
-    notBefore: (approvalMode === 'team_membership' || approvalMode === 'team_creation' || approvalMode === 'team_hierarchy' || approvalMode === 'team_repo_access') && intakeMode === 'csv_attachment'
+    notBefore: (approvalMode === 'team_membership' || approvalMode === 'team_creation' || approvalMode === 'team_hierarchy' || approvalMode === 'team_repo_access' || approvalMode === 'team_repo_access_removal') && intakeMode === 'csv_attachment'
       ? acceptedAttachmentCommentCreatedAt
       : null,
   });
 
   if (!approvalComment) {
     const requiresFreshAttachmentApproval =
-      (approvalMode === 'team_membership' || approvalMode === 'team_creation' || approvalMode === 'team_hierarchy' || approvalMode === 'team_repo_access') &&
+      (approvalMode === 'team_membership' || approvalMode === 'team_creation' || approvalMode === 'team_hierarchy' || approvalMode === 'team_repo_access' || approvalMode === 'team_repo_access_removal') &&
       intakeMode === 'csv_attachment' &&
       acceptedAttachmentCommentCreatedAt;
 
@@ -185,7 +193,7 @@ async function evaluateApprovalGate(input = {}, options = {}) {
     };
   }
 
-  if (approvalMode === 'team_repo_access') {
+  if (approvalMode === 'team_repo_access' || approvalMode === 'team_repo_access_removal') {
     if (approver.approver_role !== 'target_org_owner') {
       return {
         approval_status: 'denied',
