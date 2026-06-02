@@ -108,7 +108,11 @@ jobs:
           set -euo pipefail
 
           matches_request=false
-          if [ -n "${PARSED_TEAM_SLUG:-}" ] && [ -n "${PARSED_INTAKE_MODE:-}" -o -n "${PARSED_REQUESTED_PEOPLE:-}" -o -n "${PARSED_BULK_CSV_REQUESTED_PEOPLE:-}" ]; then
+          if [ -n "${PARSED_TEAM_SLUG:-}" ] && {
+            [ -n "${PARSED_INTAKE_MODE:-}" ] ||
+            [ -n "${PARSED_REQUESTED_PEOPLE:-}" ] ||
+            [ -n "${PARSED_BULK_CSV_REQUESTED_PEOPLE:-}" ];
+          }; then
             matches_request=true
           fi
 
