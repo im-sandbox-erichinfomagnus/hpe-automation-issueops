@@ -103,6 +103,35 @@ test('approval policy remains pending when no approval signal exists', async () 
   assert.match(decision.decision_note, new RegExp(APPROVAL_COMMAND));
 });
 
+test('approval policy keeps the same designated-approver rule for manual and csv-compatible repo-access requests', async () => {
+  const fixture = loadFixture().approved;
+
+  for (const intakeMode of ['manual', 'bulk_csv']) {
+    const decision = await evaluateApprovalGate(
+      {
+        organization: 'octo-org',
+        designatedApproverLogin: 'octocat',
+        approvalMode: 'team_repo_access',
+        intake_mode: intakeMode,
+        issueComments: fixture.comments,
+      },
+      {
+        resolveRole: ({ organization, approverLogin, designatedApproverLogin }) =>
+          resolveTeamRepoAccessApprover(
+            { organization, approverLogin, designatedApproverLogin },
+            {
+              getOrganizationMembership: async ({ username }) =>
+                fixture.membership[username] || { exists: false, membership: null },
+            }
+          ),
+      }
+    );
+
+    assert.equal(decision.approval_status, 'approved');
+    assert.equal(decision.approver_role, 'target_org_owner');
+  }
+});
+
 test('team repo access policy requires approver, designated approver, and authorized owner state to match', () => {
   assert.equal(
     isEligibleTeamRepoAccessApprover({

@@ -25,6 +25,12 @@ function writeAuditArtifact(directory, overrides = {}) {
       parent_team_slug: 'platform-engineering',
       parent_team_name: 'Platform Engineering',
       designated_approver_login: 'himanshu-im',
+      intake_mode: 'manual',
+      requested_child_teams_input: 'Application Platform',
+      bulk_csv_input: '',
+      bulk_csv_submission: null,
+      csv_row_findings: [],
+      csv_row_numbering_convention: null,
       requested_child_links: [
         {
           requested_name: 'Application Platform',
@@ -133,8 +139,10 @@ test('runApprovalGate approves a validated hierarchy request when the designated
   assert.equal(result.approval.approval_status, 'approved');
   assert.equal(result.approval.approver_login, 'himanshu-im');
   assert.equal(result.request.request_status, 'approved');
+  assert.equal(result.request.intake_mode, 'manual');
   assert.equal(result.assignment.assigned_login, 'central-owner');
   assert.match(result.assignment.assignment_note, /team hierarchy mutation/i);
+  assert.match(fs.readFileSync(summaryPath, 'utf8'), /Intake mode: manual/);
   assert.match(fs.readFileSync(summaryPath, 'utf8'), /Approval: approved/);
   assert.match(fs.readFileSync(outputPath, 'utf8'), /approval-status=approved/);
 });

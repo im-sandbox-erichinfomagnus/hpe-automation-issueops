@@ -62,6 +62,14 @@ test('runRequestValidation records an approval-ready add-team-repo-access reques
   assert.equal(result.validation.is_valid, true);
   assert.equal(result.validation.request_status, 'awaiting_approval');
   assert.equal(result.auditArtifact.metadata.operation, 'team_repo_access');
+  assert.equal(result.auditArtifact.request.intake_mode, 'manual');
+  assert.equal(
+    result.auditArtifact.request.requested_repositories_input,
+    'service-catalog\ndeveloper-portal'
+  );
+  assert.equal(result.auditArtifact.request.bulk_csv_input, '');
+  assert.equal(result.auditArtifact.request.bulk_csv_submission.schema_status, 'not_provided');
+  assert.equal(result.auditArtifact.execution.intake_mode, 'manual');
   assert.deepEqual(
     result.auditArtifact.reconciliation.repositories_to_grant.map((entry) => entry.repository_full_name),
     ['octo-org/service-catalog']
@@ -71,8 +79,41 @@ test('runRequestValidation records an approval-ready add-team-repo-access reques
     ['octo-org/developer-portal']
   );
   assert.match(fs.readFileSync(summaryPath, 'utf8'), /Add Team Repository Access Workflow Summary/);
+  assert.match(fs.readFileSync(summaryPath, 'utf8'), /Intake mode: manual/i);
   assert.match(fs.readFileSync(summaryPath, 'utf8'), /No-op repositories: 1/);
   assert.match(fs.readFileSync(outputPath, 'utf8'), /validation-status=awaiting_approval/);
+});
+
+test('runRequestValidation preserves manual-mode built-in permission roles without requiring CSV fields', async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'add-team-repo-access-manual-roles-'));
+  const auditPath = path.join(workspace, 'audit.json');
+  const validationFixture = loadJsonFixture('team-repo-access-validation.json').visible_org;
+
+  for (const permissionLevel of ['read', 'triage', 'write', 'maintain', 'admin']) {
+    const result = await runRequestValidation({
+      env: {
+        ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+        GITHUB_REPOSITORY: 'octo-org/issueops-speckit',
+        ISSUE_NUMBER: '805',
+        REQUESTER_LOGIN: 'requester',
+        PARSED_REQUEST_JSON: JSON.stringify({
+          organization: 'octo-org',
+          target_team: 'Platform Engineering',
+          designated_approver: 'octocat',
+          requested_repositories: ['service-catalog'],
+          permission_level: permissionLevel,
+          business_justification: 'Need repository access',
+          dry_run: true
+        }),
+        AUDIT_ARTIFACT_PATH: auditPath
+      },
+      api: createRepoAccessApi(validationFixture),
+    });
+
+    assert.equal(result.validation.is_valid, true, `${permissionLevel} should validate`);
+    assert.equal(result.auditArtifact.request.intake_mode, 'manual');
+    assert.equal(result.auditArtifact.request.bulk_csv_submission.schema_status, 'not_provided');
+  }
 });
 
 test('runRequestValidation fails when the target organization is not visible', async () => {
@@ -165,4 +206,78 @@ test('runRequestValidation rejects weaker existing permission conflicts and pres
   assert.equal(result.validation.is_valid, false);
   assert.match(result.validation.errors.join('\n'), /permission upgrades are out of scope/i);
   assert.equal(result.auditArtifact.reconciliation.dry_run, true);
+});
+
+test('runRequestValidation rejects ambiguous intake when both manual and CSV repository inputs are populated', async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'add-team-repo-access-ambiguous-intake-'));
+  const auditPath = path.join(workspace, 'audit.json');
+  const summaryPath = path.join(workspace, 'summary.md');
+  const validationFixture = loadJsonFixture('team-repo-access-validation.json').visible_org;
+
+  const result = await runRequestValidation({
+    env: {
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      GITHUB_REPOSITORY: 'octo-org/issueops-speckit',
+      ISSUE_NUMBER: '806',
+      REQUESTER_LOGIN: 'requester',
+      PARSED_REQUEST_JSON: JSON.stringify({
+        organization: 'octo-org',
+        target_team: 'Platform Engineering',
+        designated_approver: 'octocat',
+        requested_repositories: ['service-catalog'],
+        bulk_csv_requested_repositories: '```csv\nrepository\ndeveloper-portal\n```',
+        permission_level: 'write',
+        business_justification: 'Need repository access',
+        dry_run: true
+      }),
+      AUDIT_ARTIFACT_PATH: auditPath,
+      GITHUB_STEP_SUMMARY: summaryPath
+    },
+    api: createRepoAccessApi(validationFixture),
+    setProcessExitCode: false,
+  });
+
+  const summary = fs.readFileSync(summaryPath, 'utf8');
+
+  assert.equal(result.validation.is_valid, false);
+  assert.equal(result.validation.request_status, 'validation_failed');
+  assert.match(result.validation.errors.join('\n'), /Exactly one intake source must be populated/i);
+  assert.match(summary, /Validation errors: .*Exactly one intake source must be populated/i);
+  assert.match(summary, /Intake mode: n\/a/i);
+});
+
+test('runRequestValidation preserves manual intake when the optional CSV field is an empty fenced block', async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'add-team-repo-access-manual-empty-csv-fence-'));
+  const auditPath = path.join(workspace, 'audit.json');
+  const summaryPath = path.join(workspace, 'summary.md');
+  const validationFixture = loadJsonFixture('team-repo-access-validation.json').visible_org;
+
+  const result = await runRequestValidation({
+    env: {
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      GITHUB_REPOSITORY: 'octo-org/issueops-speckit',
+      ISSUE_NUMBER: '807',
+      REQUESTER_LOGIN: 'requester',
+      PARSED_REQUEST_JSON: JSON.stringify({
+        organization: 'octo-org',
+        target_team: 'Platform Engineering',
+        designated_approver: 'octocat',
+        requested_repositories: ['service-catalog'],
+        bulk_csv_requested_repositories: '```csv\n\n```',
+        permission_level: 'maintain',
+        business_justification: 'Need repository access',
+        dry_run: true
+      }),
+      AUDIT_ARTIFACT_PATH: auditPath,
+      GITHUB_STEP_SUMMARY: summaryPath
+    },
+    api: createRepoAccessApi(validationFixture),
+  });
+
+  const summary = fs.readFileSync(summaryPath, 'utf8');
+
+  assert.equal(result.validation.is_valid, true);
+  assert.equal(result.validation.request.intake_mode, 'manual');
+  assert.equal(result.auditArtifact.request.intake_mode, 'manual');
+  assert.match(summary, /Intake mode: manual/i);
 });

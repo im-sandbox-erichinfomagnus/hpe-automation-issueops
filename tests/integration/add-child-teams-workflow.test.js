@@ -251,3 +251,320 @@ test('execution persists hierarchy audit fields and requester-facing summary con
   assert.match(summary, /No-op: 1/i);
   assert.match(summary, /Approval: approved \(authorized\)/i);
 });
+
+test('CSV-derived approved hierarchy reruns remain no-op and preserve row provenance in the final artifact', async () => {
+  const fixture = loadFixture('team-hierarchy-update-success.json');
+  const artifact = structuredClone(fixture.approved_artifact);
+  artifact.request.intake_mode = 'bulk_csv';
+  artifact.request.bulk_csv_input = 'child_team\nRelease Engineering';
+  artifact.request.bulk_csv_submission = {
+    encoding: 'utf-8',
+    header_columns: ['child_team'],
+    required_columns: ['child_team'],
+    unsupported_columns: [],
+    row_count: 1,
+    valid_row_count: 1,
+    invalid_row_count: 0,
+    duplicate_row_count: 0,
+    schema_status: 'valid',
+    schema_errors: [],
+  };
+  artifact.request.csv_row_numbering_convention = '1-based data-row numbers that exclude the header row';
+  artifact.request.csv_row_findings = [
+    {
+      row_number: 1,
+      original_row: 'Release Engineering',
+      child_team_name: 'Release Engineering',
+      normalized_slug: 'release-engineering',
+      validation_status: 'valid',
+      failure_reason: null,
+    },
+  ];
+  artifact.request.requested_child_links = [
+    {
+      requested_child_name: 'Release Engineering',
+      requested_name: 'Release Engineering',
+      child_team_slug: 'release-engineering',
+      source_row_number: 1,
+      desired_action: 'link_child',
+      validation_status: 'valid',
+    },
+  ];
+  artifact.validation.requested_child_links = [...artifact.request.requested_child_links];
+  artifact.validation.existing_child_links = [];
+  artifact.reconciliation.child_links_to_apply = [];
+  artifact.reconciliation.child_links_already_present = [];
+  const artifactPath = writeArtifact(artifact);
+
+  const result = await runApprovedExecution({
+    env: {
+      AUDIT_ARTIFACT_PATH: artifactPath,
+    },
+    tokenInfo: {
+      token: 'test-token',
+      source: 'ISSUEOPS_GITHUB_TOKEN',
+      is_pat_backed: true,
+      token_kind: 'pat',
+      supports_team_hierarchy_mutation: true,
+    },
+    createApi: () => ({
+      listOrgTeams: async () => fixture.current_teams,
+      updateTeamParent: async () => {
+        throw new Error('mutation should not run for satisfied child links');
+      },
+    }),
+  });
+
+  assert.equal(result.request.request_status, 'executed');
+  assert.equal(result.reconciliation.intake_mode, 'bulk_csv');
+  assert.equal(result.execution.intake_mode, 'bulk_csv');
+  assert.equal(result.execution.linked_count, 0);
+  assert.equal(result.execution.noop_count, 1);
+  assert.deepEqual(
+    result.reconciliation.child_links_already_present.map((entry) => entry.source_row_number),
+    [1]
+  );
+  assert.deepEqual(
+    result.execution.noop_teams.map((entry) => entry.source_row_number),
+    [1]
+  );
+});
+
+test('CSV-derived partial hierarchy failures preserve row provenance and compensating guidance', async () => {
+  const fixture = loadFixture('team-hierarchy-update-success.json');
+  const artifact = structuredClone(fixture.approved_artifact);
+  artifact.request.intake_mode = 'bulk_csv';
+  artifact.request.bulk_csv_input = 'child_team\nApplication Platform\nRelease Engineering';
+  artifact.request.bulk_csv_submission = {
+    encoding: 'utf-8',
+    header_columns: ['child_team'],
+    required_columns: ['child_team'],
+    unsupported_columns: [],
+    row_count: 2,
+    valid_row_count: 2,
+    invalid_row_count: 0,
+    duplicate_row_count: 0,
+    schema_status: 'valid',
+    schema_errors: [],
+  };
+  artifact.request.csv_row_numbering_convention = '1-based data-row numbers that exclude the header row';
+  artifact.request.requested_child_links = [
+    {
+      requested_child_name: 'Application Platform',
+      requested_name: 'Application Platform',
+      child_team_slug: 'application-platform',
+      source_row_number: 1,
+      desired_action: 'link_child',
+      validation_status: 'valid',
+    },
+    {
+      requested_child_name: 'Release Engineering',
+      requested_name: 'Release Engineering',
+      child_team_slug: 'release-engineering',
+      source_row_number: 2,
+      desired_action: 'link_child',
+      validation_status: 'valid',
+    },
+  ];
+  artifact.validation.requested_child_links = [...artifact.request.requested_child_links];
+  artifact.validation.existing_child_links = [];
+  artifact.reconciliation.child_links_to_apply = [];
+  artifact.reconciliation.child_links_already_present = [];
+  const currentTeams = [
+    fixture.current_teams[0],
+    { ...fixture.current_teams[1], parent: null },
+    { ...fixture.current_teams[2], parent: null },
+  ];
+  const artifactPath = writeArtifact(artifact);
+  let firstCall = true;
+
+  const result = await runApprovedExecution({
+    env: {
+      AUDIT_ARTIFACT_PATH: artifactPath,
+    },
+    tokenInfo: {
+      token: 'test-token',
+      source: 'ISSUEOPS_GITHUB_TOKEN',
+      is_pat_backed: true,
+      token_kind: 'pat',
+      supports_team_hierarchy_mutation: true,
+    },
+    createApi: () => ({
+      listOrgTeams: async () => currentTeams,
+      updateTeamParent: async ({ teamSlug, parentTeamId }) => {
+        if (firstCall) {
+          firstCall = false;
+          return { id: 2, name: 'Application Platform', slug: teamSlug, parent: { id: parentTeamId, slug: 'platform-engineering' } };
+        }
+
+        const error = new Error('Failed to update team parent');
+        error.status = 422;
+        error.payload = { message: 'Validation failed' };
+        error.headers = {};
+        throw error;
+      },
+    }),
+    sleep: async () => {
+      throw new Error('sleep should not be called for non-retryable failures');
+    },
+  });
+
+  assert.equal(result.request.request_status, 'partially_executed');
+  assert.equal(result.execution.rollback_status, 'compensating_action_required');
+  assert.equal(result.execution.linked_count, 1);
+  assert.deepEqual(
+    result.execution.failed_teams.map((entry) => ({ entity_id: entry.entity_id, source_row_number: entry.source_row_number })),
+    [{ entity_id: 'release-engineering', source_row_number: 2 }]
+  );
+  assert.match(result.execution.remediation_instructions[0], /failed subset only: release-engineering/i);
+});
+
+test('CSV-derived hierarchy rate-limit retries preserve retry metadata and row provenance', async () => {
+  const fixture = loadFixture('team-hierarchy-update-success.json');
+  const rateLimitError = loadFixture('team-hierarchy-rate-limit.json').secondary_limit_error;
+  const artifact = structuredClone(fixture.approved_artifact);
+  artifact.request.intake_mode = 'bulk_csv';
+  artifact.request.bulk_csv_input = 'child_team\nApplication Platform\nRelease Engineering';
+  artifact.request.bulk_csv_submission = {
+    encoding: 'utf-8',
+    header_columns: ['child_team'],
+    required_columns: ['child_team'],
+    unsupported_columns: [],
+    row_count: 2,
+    valid_row_count: 2,
+    invalid_row_count: 0,
+    duplicate_row_count: 0,
+    schema_status: 'valid',
+    schema_errors: [],
+  };
+  artifact.request.csv_row_numbering_convention = '1-based data-row numbers that exclude the header row';
+  artifact.request.requested_child_links[0].source_row_number = 1;
+  artifact.request.requested_child_links[1].source_row_number = 2;
+  artifact.validation.requested_child_links = structuredClone(artifact.request.requested_child_links);
+  artifact.validation.existing_child_links = [structuredClone(artifact.request.requested_child_links[1])];
+  artifact.reconciliation.child_links_to_apply = [];
+  artifact.reconciliation.child_links_already_present = [];
+  const artifactPath = writeArtifact(artifact);
+  let attempts = 0;
+  const delays = [];
+
+  const result = await runApprovedExecution({
+    env: {
+      AUDIT_ARTIFACT_PATH: artifactPath,
+    },
+    tokenInfo: {
+      token: 'test-token',
+      source: 'ISSUEOPS_GITHUB_TOKEN',
+      is_pat_backed: true,
+      token_kind: 'pat',
+      supports_team_hierarchy_mutation: true,
+    },
+    createApi: () => ({
+      listOrgTeams: async () => fixture.current_teams.map((team) => team.slug === 'application-platform' ? { ...team, parent: null } : team),
+      updateTeamParent: async ({ teamSlug, parentTeamId }) => {
+        attempts += 1;
+        if (attempts === 1) {
+          const error = new Error('secondary rate limit');
+          error.status = rateLimitError.status;
+          error.payload = rateLimitError.payload;
+          error.headers = rateLimitError.headers;
+          throw error;
+        }
+        return { id: 2, name: 'Application Platform', slug: teamSlug, parent: { id: parentTeamId, slug: 'platform-engineering' } };
+      },
+    }),
+    sleep: async (delayMs) => {
+      delays.push(delayMs);
+    },
+  });
+
+  assert.equal(result.request.request_status, 'executed');
+  assert.equal(result.reconciliation.rate_limit_snapshot.retry_after_seconds, 2);
+  assert.deepEqual(delays, [2000]);
+  assert.deepEqual(
+    result.execution.noop_teams.map((entry) => entry.source_row_number),
+    [2]
+  );
+});
+
+test('CSV-derived rejected hierarchy links remain rejected with row provenance and no mutation', async () => {
+  const fixture = loadFixture('team-hierarchy-update-success.json');
+  const artifact = structuredClone(fixture.approved_artifact);
+  artifact.request.intake_mode = 'bulk_csv';
+  artifact.request.bulk_csv_input = 'child_team\nSecurity Engineering\nApplication Infrastructure';
+  artifact.request.bulk_csv_submission = {
+    encoding: 'utf-8',
+    header_columns: ['child_team'],
+    required_columns: ['child_team'],
+    unsupported_columns: [],
+    row_count: 2,
+    valid_row_count: 2,
+    invalid_row_count: 0,
+    duplicate_row_count: 0,
+    schema_status: 'valid',
+    schema_errors: [],
+  };
+  artifact.request.requested_child_links = [
+    {
+      requested_child_name: 'Security Engineering',
+      requested_name: 'Security Engineering',
+      child_team_slug: 'security-engineering',
+      source_row_number: 1,
+      desired_action: 'reject',
+      validation_status: 'reparent_blocked',
+      failure_reason: 'reparent_blocked',
+    },
+    {
+      requested_child_name: 'Application Infrastructure',
+      requested_name: 'Application Infrastructure',
+      child_team_slug: 'application-infrastructure',
+      source_row_number: 2,
+      desired_action: 'reject',
+      validation_status: 'cycle_blocked',
+      failure_reason: 'cycle_blocked',
+    },
+  ];
+  artifact.validation.requested_child_links = structuredClone(artifact.request.requested_child_links);
+  artifact.validation.existing_child_links = [];
+  artifact.reconciliation.child_links_to_apply = [];
+  artifact.reconciliation.child_links_already_present = [];
+  artifact.reconciliation.child_links_rejected = [];
+  const artifactPath = writeArtifact(artifact);
+
+  const result = await runApprovedExecution({
+    env: {
+      AUDIT_ARTIFACT_PATH: artifactPath,
+    },
+    tokenInfo: {
+      token: 'test-token',
+      source: 'ISSUEOPS_GITHUB_TOKEN',
+      is_pat_backed: true,
+      token_kind: 'pat',
+      supports_team_hierarchy_mutation: true,
+    },
+    createApi: () => ({
+      listOrgTeams: async () => fixture.current_teams,
+      updateTeamParent: async () => {
+        throw new Error('mutation should not run for rejected child links');
+      },
+    }),
+  });
+
+  assert.equal(result.request.request_status, 'failed');
+  assert.equal(result.execution.linked_count, 0);
+  assert.equal(result.execution.failure_count, 2);
+  assert.deepEqual(
+    result.reconciliation.child_links_rejected.map((entry) => ({ failure_reason: entry.failure_reason, source_row_number: entry.source_row_number })),
+    [
+      { failure_reason: 'reparent_blocked', source_row_number: 1 },
+      { failure_reason: 'cycle_blocked', source_row_number: 2 },
+    ]
+  );
+  assert.deepEqual(
+    result.execution.failed_teams.map((entry) => ({ entity_id: entry.entity_id, source_row_number: entry.source_row_number })),
+    [
+      { entity_id: 'security-engineering', source_row_number: 1 },
+      { entity_id: 'application-infrastructure', source_row_number: 2 },
+    ]
+  );
+});

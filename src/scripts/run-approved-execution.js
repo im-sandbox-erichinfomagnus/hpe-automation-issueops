@@ -346,6 +346,7 @@ async function runApprovedExecution(options = {}) {
       executionResults.push({
         team_slug: childLink.child_team_slug,
         requested_name: childLink.requested_name || childLink.requested_child_name,
+        source_row_number: childLink.source_row_number || null,
         execution_result: 'noop',
         failure_reason: null,
       });
@@ -355,6 +356,7 @@ async function runApprovedExecution(options = {}) {
       executionResults.push({
         team_slug: childLink.child_team_slug,
         requested_name: childLink.requested_name || childLink.requested_child_name,
+        source_row_number: childLink.source_row_number || null,
         execution_result: 'failed',
         failure_reason: childLink.failure_reason || 'rejected',
       });
@@ -363,6 +365,7 @@ async function runApprovedExecution(options = {}) {
     for (const repository of reconciliationPlan.repositories_already_satisfied) {
       executionResults.push({
         repository_full_name: repository.repository_full_name,
+        source_row_number: repository.source_row_number || null,
         execution_result: 'noop',
         failure_reason: null,
       });
@@ -371,6 +374,7 @@ async function runApprovedExecution(options = {}) {
     for (const repository of reconciliationPlan.repositories_rejected) {
       executionResults.push({
         repository_full_name: repository.repository_full_name,
+        source_row_number: repository.source_row_number || null,
         execution_result: 'rejected',
         failure_reason: repository.failure_reason || 'rejected',
       });
@@ -449,6 +453,7 @@ async function runApprovedExecution(options = {}) {
           executionResults.push({
             team_slug: childLink.child_team_slug,
             requested_name: childLink.requested_name || childLink.requested_child_name,
+            source_row_number: childLink.source_row_number || null,
             execution_result: 'linked',
             failure_reason: null,
           });
@@ -458,6 +463,7 @@ async function runApprovedExecution(options = {}) {
         executionResults.push({
           team_slug: childLink.child_team_slug,
           requested_name: childLink.requested_name || childLink.requested_child_name,
+          source_row_number: childLink.source_row_number || null,
           execution_result: 'failed',
           failure_reason: classifyFailureReason(attemptResult.error),
         });
@@ -483,6 +489,7 @@ async function runApprovedExecution(options = {}) {
         if (attemptResult.ok) {
           executionResults.push({
             repository_full_name: repository.repository_full_name,
+            source_row_number: repository.source_row_number || null,
             execution_result: 'granted',
             failure_reason: null,
           });
@@ -491,6 +498,7 @@ async function runApprovedExecution(options = {}) {
 
         executionResults.push({
           repository_full_name: repository.repository_full_name,
+          source_row_number: repository.source_row_number || null,
           execution_result: 'failed',
           failure_reason: classifyFailureReason(attemptResult.error),
         });

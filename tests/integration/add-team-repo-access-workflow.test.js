@@ -324,3 +324,121 @@ test('approved execution re-reads current repository state and converts stale gr
   assert.equal(result.execution.rejected_count, 1);
   assert.match(result.execution.summary, /1 no-op repository\(ies\).*1 rejected repository\(ies\)/i);
 });
+
+test('csv-derived approved execution preserves source row numbers across rerun no-op and rejected outcomes', async () => {
+  const fixture = loadFixture('team-repo-access-update-success.json');
+  const artifact = structuredClone(fixture.approved_artifact);
+  artifact.request.intake_mode = 'bulk_csv';
+  artifact.request.bulk_csv_input = '```csv\nrepository\nservice-catalog\ndeveloper-portal\nlegacy-portal\n```';
+  artifact.request.bulk_csv_submission = {
+    encoding: 'utf-8',
+    header_columns: ['repository'],
+    required_columns: ['repository'],
+    unsupported_columns: [],
+    row_count: 3,
+    valid_row_count: 3,
+    invalid_row_count: 0,
+    duplicate_row_count: 0,
+    schema_status: 'valid',
+    schema_errors: [],
+    raw_input: '```csv\nrepository\nservice-catalog\ndeveloper-portal\nlegacy-portal\n```',
+    csv_row_findings: [
+      { row_number: 1, validation_status: 'valid', repository_value: 'service-catalog', normalized_repository_full_name: 'octo-org/service-catalog' },
+      { row_number: 2, validation_status: 'valid', repository_value: 'developer-portal', normalized_repository_full_name: 'octo-org/developer-portal' },
+      { row_number: 3, validation_status: 'valid', repository_value: 'legacy-portal', normalized_repository_full_name: 'octo-org/legacy-portal' },
+    ],
+    csv_row_numbering_convention: '1-based data-row numbers that exclude the header row',
+  };
+  artifact.request.csv_row_findings = structuredClone(artifact.request.bulk_csv_submission.csv_row_findings);
+  artifact.request.csv_row_numbering_convention = artifact.request.bulk_csv_submission.csv_row_numbering_convention;
+  artifact.request.requested_repository_grants = [
+    {
+      requested_repository_name: 'service-catalog',
+      repository_owner: 'octo-org',
+      repository_name: 'service-catalog',
+      repository_full_name: 'octo-org/service-catalog',
+      desired_action: 'grant_access',
+      validation_status: 'valid',
+      current_permission_api_value: 'none',
+      source_row_number: 1,
+    },
+    {
+      requested_repository_name: 'developer-portal',
+      repository_owner: 'octo-org',
+      repository_name: 'developer-portal',
+      repository_full_name: 'octo-org/developer-portal',
+      desired_action: 'grant_access',
+      validation_status: 'valid',
+      current_permission_api_value: 'none',
+      source_row_number: 2,
+    },
+    {
+      requested_repository_name: 'legacy-portal',
+      repository_owner: 'octo-org',
+      repository_name: 'legacy-portal',
+      repository_full_name: 'octo-org/legacy-portal',
+      desired_action: 'grant_access',
+      validation_status: 'valid',
+      current_permission_api_value: 'none',
+      source_row_number: 3,
+    }
+  ];
+  artifact.validation.requested_repository_grants = structuredClone(artifact.request.requested_repository_grants);
+  artifact.validation.already_satisfied_repository_grants = [];
+  artifact.reconciliation.repositories_to_grant = structuredClone(artifact.request.requested_repository_grants);
+  artifact.reconciliation.repositories_already_satisfied = [];
+  artifact.reconciliation.intake_mode = 'bulk_csv';
+  const artifactPath = writeArtifact(artifact);
+
+  const result = await runApprovedExecution({
+    env: {
+      AUDIT_ARTIFACT_PATH: artifactPath,
+    },
+    tokenInfo: {
+      token: 'pat-token',
+      source: 'ISSUEOPS_GITHUB_TOKEN',
+      token_kind: 'pat',
+      is_pat_backed: true,
+      supports_team_repo_access_mutation: true,
+    },
+    createApi: () => ({
+      getOrganization: async () => ({ exists: true, organization: { login: 'octo-org' } }),
+      getTeamBySlug: async () => ({ exists: true, team: { id: 1, slug: 'platform-engineering' } }),
+      getOrganizationMembership: async () => ({ exists: true, membership: { role: 'admin', state: 'active' } }),
+      getRepository: async ({ owner, repo }) => ({
+        exists: true,
+        repository: { id: `${owner}/${repo}`, name: repo, full_name: `${owner}/${repo}`, owner, archived: false, private: true },
+      }),
+      getTeamRepositoryPermission: async ({ repo }) =>
+        repo === 'service-catalog'
+          ? { exists: true, current_permission_api_value: 'maintain' }
+          : repo === 'developer-portal'
+            ? { exists: false, current_permission_api_value: 'none' }
+            : { exists: true, current_permission_api_value: 'pull' },
+      addOrUpdateTeamRepositoryPermission: async ({ owner, repo, permission }) => ({
+        repository_full_name: `${owner}/${repo}`,
+        permission,
+      }),
+    }),
+  });
+
+  const persisted = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
+
+  assert.equal(result.request.intake_mode, 'bulk_csv');
+  assert.equal(result.reconciliation.intake_mode, 'bulk_csv');
+  assert.equal(result.execution.intake_mode, 'bulk_csv');
+  assert.equal(result.execution.rejected_count, 1);
+  assert.match(result.execution.summary, /1 rejected repository\(ies\)/i);
+  assert.deepEqual(
+    persisted.execution.noop_teams.map((entry) => entry.source_row_number),
+    [1]
+  );
+  assert.deepEqual(
+    persisted.execution.created_teams.map((entry) => entry.source_row_number),
+    [2]
+  );
+  assert.deepEqual(
+    persisted.execution.rejected_subset.map((entry) => entry.source_row_number),
+    [3]
+  );
+});

@@ -96,12 +96,11 @@ jobs:
         env:
           PARSED_PARENT_TEAM: ${{ steps.parse_request.outputs.parsed_parent_team }}
           PARSED_DESIGNATED_APPROVER: ${{ steps.parse_request.outputs.parsed_designated_approver }}
-          PARSED_REQUESTED_CHILD_TEAMS: ${{ steps.parse_request.outputs.parsed_requested_child_teams }}
         run: |
           set -euo pipefail
 
           matches_request=false
-          if [ -n "${PARSED_PARENT_TEAM:-}" ] && [ -n "${PARSED_DESIGNATED_APPROVER:-}" ] && [ -n "${PARSED_REQUESTED_CHILD_TEAMS:-}" ]; then
+          if [ -n "${PARSED_PARENT_TEAM:-}" ] && [ -n "${PARSED_DESIGNATED_APPROVER:-}" ]; then
             matches_request=true
           fi
 
@@ -125,6 +124,7 @@ jobs:
           PARSED_PARENT_TEAM: ${{ steps.parse_request.outputs.parsed_parent_team }}
           PARSED_DESIGNATED_APPROVER: ${{ steps.parse_request.outputs.parsed_designated_approver }}
           PARSED_REQUESTED_CHILD_TEAMS: ${{ steps.parse_request.outputs.parsed_requested_child_teams }}
+          PARSED_BULK_CSV_REQUESTED_CHILD_TEAMS: ${{ steps.parse_request.outputs.parsed_bulk_csv_requested_child_teams }}
           PARSED_BUSINESS_JUSTIFICATION: ${{ steps.parse_request.outputs.parsed_business_justification }}
           PARSED_DRY_RUN: ${{ steps.parse_request.outputs.parsed_dry_run }}
           AUDIT_ARTIFACT_PATH: ${{ env.AUDIT_ARTIFACT_PATH }}

@@ -48,6 +48,77 @@ test('approval policy accepts the designated hierarchy approver adding the appro
   assert.equal(decision.approver_role, 'designated_hierarchy_approver');
 });
 
+test('approval policy keeps the designated hierarchy approver model stable for manual-compatible request batches', async () => {
+  const fixture = loadFixture().approved;
+  const decision = await evaluateApprovalGate(
+    {
+      organization: 'im-sandbox-himanshu',
+      designatedApproverLogin: 'himanshu-im',
+      parentTeamSlug: 'platform-engineering',
+      requestedChildLinks: [
+        { child_team_slug: 'application-platform' },
+        { child_team_slug: 'platform-engineering-operations' },
+      ],
+      approvalMode: 'team_hierarchy',
+      issueComments: fixture.comments,
+      intakeMode: 'manual',
+      requestedChildTeamsInput: 'Application Platform\nPlatform Engineering Operations',
+      bulkCsvInput: '',
+    },
+    {
+      resolveRole: ({ organization, approverLogin, designatedApproverLogin, parentTeamSlug, requestedChildLinks }) =>
+        resolveTeamHierarchyApprover(
+          { organization, approverLogin, designatedApproverLogin, parentTeamSlug, requestedChildLinks },
+          {
+            getTeamMembership: async ({ teamSlug, username }) =>
+              fixture.memberships[teamSlug] && fixture.memberships[teamSlug][username]
+                ? fixture.memberships[teamSlug][username]
+                : { membership: { role: 'maintainer', state: 'active' } },
+          }
+        ),
+    }
+  );
+
+  assert.equal(decision.approval_status, 'approved');
+  assert.equal(decision.approver_login, 'himanshu-im');
+  assert.equal(decision.approver_role, 'designated_hierarchy_approver');
+});
+
+test('approval policy keeps the designated hierarchy approver model stable for CSV-derived request batches', async () => {
+  const fixture = loadFixture().approved;
+  const decision = await evaluateApprovalGate(
+    {
+      organization: 'im-sandbox-himanshu',
+      designatedApproverLogin: 'himanshu-im',
+      parentTeamSlug: 'platform-engineering',
+      requestedChildLinks: [
+        { child_team_slug: 'application-platform', source_row_number: 1 },
+        { child_team_slug: 'platform-engineering-operations', source_row_number: 2 },
+      ],
+      approvalMode: 'team_hierarchy',
+      issueComments: fixture.comments,
+      intakeMode: 'bulk_csv',
+      bulkCsvInput: 'child_team\nApplication Platform\nPlatform Engineering Operations',
+    },
+    {
+      resolveRole: ({ organization, approverLogin, designatedApproverLogin, parentTeamSlug, requestedChildLinks }) =>
+        resolveTeamHierarchyApprover(
+          { organization, approverLogin, designatedApproverLogin, parentTeamSlug, requestedChildLinks },
+          {
+            getTeamMembership: async ({ teamSlug, username }) =>
+              fixture.memberships[teamSlug] && fixture.memberships[teamSlug][username]
+                ? fixture.memberships[teamSlug][username]
+                : { membership: { role: 'maintainer', state: 'active' } },
+          }
+        ),
+    }
+  );
+
+  assert.equal(decision.approval_status, 'approved');
+  assert.equal(decision.approver_login, 'himanshu-im');
+  assert.equal(decision.approver_role, 'designated_hierarchy_approver');
+});
+
 test('approval policy rejects approval by a user other than the designated hierarchy approver', async () => {
   const fixture = loadFixture().denied_wrong_user;
   const decision = await evaluateApprovalGate(
