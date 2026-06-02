@@ -111,10 +111,14 @@ function persistTenantRegistryRecord(input = {}) {
   }
 
   try {
-    const existedBeforeWrite = fs.existsSync(registryFilePath);
-    const existingRecord = existedBeforeWrite
-      ? JSON.parse(fs.readFileSync(registryFilePath, 'utf8'))
-      : null;
+    let existingRecord = null;
+    try {
+      existingRecord = JSON.parse(fs.readFileSync(registryFilePath, 'utf8'));
+    } catch (readError) {
+      if (!readError || readError.code !== 'ENOENT') {
+        throw readError;
+      }
+    }
     const createdAt = existingRecord && existingRecord.created_at
       ? existingRecord.created_at
       : record.created_at;
@@ -140,7 +144,7 @@ function persistTenantRegistryRecord(input = {}) {
     fs.writeFileSync(registryFilePath, ensureJson(persistedRecord), 'utf8');
 
     return {
-      status: existedBeforeWrite ? 'updated' : 'created',
+      status: existingRecord ? 'updated' : 'created',
       mode,
       registry_path: registryFilePath,
       record: persistedRecord,

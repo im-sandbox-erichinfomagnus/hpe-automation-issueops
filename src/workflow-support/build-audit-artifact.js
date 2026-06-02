@@ -102,9 +102,7 @@ function inferRequestIntakeMode(request = {}, operation = determineOperation(req
     )
   ) || (
     operation === 'team_repo_access' && (
-      hasPopulatedString(request.requested_repositories_input) ||
-      hasNonEmptyArray(request.requested_repository_grants) ||
-      Boolean(request.requested_permission_api_value)
+      hasPopulatedString(request.requested_repositories_input)
     )
   );
 

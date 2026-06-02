@@ -74,7 +74,6 @@ function readParsedRequestFromEnv(env = process.env) {
     requested_child_teams: env.PARSED_REQUESTED_CHILD_TEAMS || '',
     bulk_csv_requested_child_teams: env.PARSED_BULK_CSV_REQUESTED_CHILD_TEAMS || '',
     intended_owner: env.PARSED_INTENDED_OWNER || '',
-    intake_mode: env.PARSED_INTAKE_MODE || '',
     requested_team_names: env.PARSED_REQUESTED_TEAM_NAMES || '',
     bulk_csv_requested_team_names: env.PARSED_BULK_CSV_REQUESTED_TEAM_NAMES || '',
     team_slug: env.PARSED_TEAM_SLUG || '',
