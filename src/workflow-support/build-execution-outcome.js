@@ -102,10 +102,7 @@ function buildExecutionOutcome(input = {}) {
     granted_count: summary.mutated.length,
     duplicate_row_count: input.duplicate_row_count ?? bulkCsvSubmission?.duplicate_row_count ?? 0,
     invalid_row_count: input.invalid_row_count ?? bulkCsvSubmission?.invalid_row_count ?? 0,
-<<<<<<< HEAD
     attachment_rate_limit_snapshot: input.attachment_rate_limit_snapshot || null,
-=======
->>>>>>> origin/main
     created_teams: summary.mutated,
     noop_teams: summary.noop,
     failed_teams: summary.failed,

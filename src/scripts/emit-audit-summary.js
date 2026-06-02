@@ -3,15 +3,10 @@
 const fs = require('fs');
 const path = require('path');
 
-<<<<<<< HEAD
-function readBulkCsvCount(executionValue, submissionValue) {
-  return executionValue ?? submissionValue ?? 0;
-=======
 const { determineOperation } = require('../workflow-support/build-audit-artifact');
 
 function readBulkCsvCount(executionCount, requestCount) {
   return executionCount ?? requestCount ?? 0;
->>>>>>> origin/main
 }
 
 function formatAuditSummary(auditArtifact = {}) {
@@ -25,24 +20,10 @@ function formatAuditSummary(auditArtifact = {}) {
     ? auditArtifact.metadata.operation
     : determineOperation(request);
   const isBulkCsv = request.intake_mode === 'bulk_csv';
-<<<<<<< HEAD
   const isCsvAttachment = request.intake_mode === 'csv_attachment';
-  const isTeamRepoAccess = Array.isArray(request.requested_repository_grants) && (
-    request.requested_repository_grants.length > 0 ||
-    Boolean(request.requested_permission_api_value) ||
-    Boolean(request.team_slug && request.designated_approver_login)
-  );
-  const isTeamHierarchy = !isTeamRepoAccess && Array.isArray(request.requested_child_links) && request.requested_child_links.length > 0;
-  const isTeamCreation = !isTeamRepoAccess && !isTeamHierarchy && (
-    (Array.isArray(request.requested_teams) && request.requested_teams.length > 0) ||
-    Boolean(request.intended_owner_login) ||
-    (auditArtifact.metadata && auditArtifact.metadata.operation === 'team_creation')
-  );
-=======
   const isTeamRepoAccess = operation === 'team_repo_access';
   const isTeamHierarchy = operation === 'team_hierarchy';
   const isTeamCreation = operation === 'team_creation';
->>>>>>> origin/main
 
   const hierarchyApprovalState = approval.approver_authorization_state && approval.approver_authorization_state !== 'unknown'
     ? approval.approver_authorization_state
@@ -199,20 +180,11 @@ function formatAuditSummary(auditArtifact = {}) {
         || isCsvAttachment
         ? `- CSV row findings: ${(validation.csv_row_findings || request.csv_row_findings || []).length}`
         : null,
-<<<<<<< HEAD
       isBulkCsv || isCsvAttachment
-        ? `- CSV valid rows: ${request.bulk_csv_submission && request.bulk_csv_submission.valid_row_count || 0}`
+        ? `- CSV valid rows: ${request.bulk_csv_submission?.valid_row_count ?? 0}`
         : null,
-      isBulkCsv
-        || isCsvAttachment
+      isBulkCsv || isCsvAttachment
         ? `- CSV duplicate rows: ${readBulkCsvCount(execution.duplicate_row_count, request.bulk_csv_submission?.duplicate_row_count)}`
-=======
-      isBulkCsv
-        ? `- CSV duplicate rows: ${readBulkCsvCount(execution.duplicate_row_count, request.bulk_csv_submission?.duplicate_row_count)}`
-        : null,
-      isBulkCsv
-        ? `- CSV invalid rows: ${readBulkCsvCount(execution.invalid_row_count, request.bulk_csv_submission?.invalid_row_count)}`
->>>>>>> origin/main
         : null,
       isBulkCsv || isCsvAttachment
         ? `- CSV invalid rows: ${readBulkCsvCount(execution.invalid_row_count, request.bulk_csv_submission?.invalid_row_count)}`
@@ -281,23 +253,13 @@ function formatAuditSummary(auditArtifact = {}) {
       || isCsvAttachment
       ? `- CSV row findings: ${(validation.csv_row_findings || request.csv_row_findings || []).length}`
       : null,
-<<<<<<< HEAD
     isBulkCsv || isCsvAttachment
-      ? `- CSV valid rows: ${request.bulk_csv_submission && request.bulk_csv_submission.valid_row_count || 0}`
-      : null,
-    isBulkCsv || isCsvAttachment
-      ? `- CSV duplicate rows: ${readBulkCsvCount(execution.duplicate_row_count, request.bulk_csv_submission?.duplicate_row_count)}`
-      : null,
-    isBulkCsv || isCsvAttachment
-=======
-    isBulkCsv
       ? `- CSV valid rows: ${request.bulk_csv_submission?.valid_row_count ?? 0}`
       : null,
-    isBulkCsv
+    isBulkCsv || isCsvAttachment
       ? `- CSV duplicate rows: ${readBulkCsvCount(execution.duplicate_row_count, request.bulk_csv_submission?.duplicate_row_count)}`
       : null,
-    isBulkCsv
->>>>>>> origin/main
+    isBulkCsv || isCsvAttachment
       ? `- CSV invalid rows: ${readBulkCsvCount(execution.invalid_row_count, request.bulk_csv_submission?.invalid_row_count)}`
       : null,
     (isBulkCsv || isCsvAttachment) && request.csv_row_numbering_convention

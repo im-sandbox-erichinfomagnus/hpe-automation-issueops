@@ -97,21 +97,14 @@ jobs:
         env:
           PARSED_ORGANIZATION: ${{ steps.parse_request.outputs.parsed_organization }}
           PARSED_INTENDED_OWNER: ${{ steps.parse_request.outputs.parsed_intended_owner }}
-<<<<<<< HEAD
           PARSED_INTAKE_MODE: ${{ steps.parse_request.outputs.parsed_intake_mode }}
           PARSED_REQUESTED_TEAM_NAMES: ${{ steps.parse_request.outputs.parsed_requested_team_names }}
           PARSED_BULK_CSV_REQUESTED_TEAM_NAMES: ${{ steps.parse_request.outputs.parsed_bulk_csv_requested_team_names }}
-=======
->>>>>>> origin/main
         run: |
           set -euo pipefail
 
           matches_request=false
-<<<<<<< HEAD
           if [ -n "${PARSED_ORGANIZATION:-}" ] && [ -n "${PARSED_INTENDED_OWNER:-}" ] && { [ -n "${PARSED_INTAKE_MODE:-}" ] || [ -n "${PARSED_REQUESTED_TEAM_NAMES:-}" ] || [ -n "${PARSED_BULK_CSV_REQUESTED_TEAM_NAMES:-}" ]; }; then
-=======
-          if [ -n "${PARSED_INTENDED_OWNER:-}" ]; then
->>>>>>> origin/main
             matches_request=true
           fi
 
