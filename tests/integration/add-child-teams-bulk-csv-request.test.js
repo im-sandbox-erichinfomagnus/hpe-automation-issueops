@@ -111,6 +111,19 @@ test('records an approval-ready add-child-teams request from bulk CSV intake', a
   assert.match(fs.readFileSync(outputPath, 'utf8'), /validation-status=awaiting_approval/);
 });
 
+test('workflow applicability keeps empty-intake add-child-teams requests in validation scope', () => {
+  const workflowPath = path.join(__dirname, '..', '..', '.github', 'workflows', 'add-child-teams.yml');
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
+  const requestScopeBlock = workflow.match(/- name: Check request applicability[\s\S]*?echo "matches-request=\$matches_request" >> "\$GITHUB_OUTPUT"/);
+
+  assert.ok(requestScopeBlock);
+  assert.match(requestScopeBlock[0], /PARSED_PARENT_TEAM:/);
+  assert.match(requestScopeBlock[0], /PARSED_DESIGNATED_APPROVER:/);
+  assert.doesNotMatch(requestScopeBlock[0], /PARSED_REQUESTED_CHILD_TEAMS:/);
+  assert.doesNotMatch(requestScopeBlock[0], /PARSED_BULK_CSV_REQUESTED_CHILD_TEAMS:/);
+  assert.match(requestScopeBlock[0], /if \[ -n "\$parsed_parent_team" \] && \[ -n "\$parsed_designated_approver" \]; then/);
+});
+
 test('preserves bulk CSV request metadata through validation and audit scaffolding', async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'add-child-teams-bulk-csv-audit-'));
   const auditPath = path.join(workspace, 'audit.json');
