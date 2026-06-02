@@ -89,8 +89,8 @@ test('validation fixture scaffold includes CSV links for candidate discovery cov
     .map((comment) => comment.body)
     .join('\n');
 
-  assert.match(joinedBodies, /https:\/\/github\.com\/user-attachments\/files\//i);
-  assert.match(joinedBodies, /\.csv\)/i);
+  assert.ok(joinedBodies.includes('https://github.com/user-attachments/files/'));
+  assert.ok(joinedBodies.toLowerCase().includes('.csv)'));
 });
 
 test('validate requester-only acceptance and ambiguous-candidate fail-closed behavior', async () => {
