@@ -100,6 +100,8 @@ test('bulk CSV validation rejects duplicate rows', async () => {
   );
 
   assert.equal(validation.is_valid, false);
+  assert.equal(validation.request.bulk_csv_submission.schema_status, 'invalid');
+  assert.equal(validation.request.bulk_csv_submission.duplicate_row_count, 1);
   assert.match(validation.errors.join('\n'), /duplicates child team application platform/i);
 });
 

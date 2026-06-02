@@ -94,26 +94,19 @@ function inferRequestIntakeMode(request = {}, operation = determineOperation(req
   );
   const hasManualSignals = (
     operation === 'team_creation' && (
-      hasPopulatedString(request.requested_team_names_input) ||
-      hasNonEmptyArray(request.requested_teams) ||
-      hasNonEmptyArray(request.requested_team_detail)
+      hasPopulatedString(request.requested_team_names_input)
     )
   ) || (
     operation === 'team_membership' && (
-      hasPopulatedString(request.requested_people_input) ||
-      hasNonEmptyArray(request.requested_people)
+      hasPopulatedString(request.requested_people_input)
     )
   ) || (
     operation === 'team_hierarchy' && (
-      hasPopulatedString(request.requested_child_teams_input) ||
-      hasNonEmptyArray(request.requested_child_links) ||
-      hasNonEmptyArray(request.requested_child_link_detail)
+      hasPopulatedString(request.requested_child_teams_input)
     )
   ) || (
     operation === 'team_repo_access' && (
-      hasPopulatedString(request.requested_repositories_input) ||
-      hasNonEmptyArray(request.requested_repository_grants) ||
-      Boolean(request.requested_permission_api_value)
+      hasPopulatedString(request.requested_repositories_input)
     )
   );
 
