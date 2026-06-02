@@ -1,7 +1,28 @@
 'use strict';
 
-const { execSync } = require('child_process');
+const { spawnSync } = require('child_process');
 const path = require('path');
+
+function createGitCommandError(args, result) {
+  const stderr = String(result && result.stderr || '').trim();
+  const suffix = stderr ? `: ${stderr}` : '';
+  const error = new Error(`git ${args.join(' ')} failed with exit code ${result.status}${suffix}`);
+  error.exitCode = result.status;
+  error.stdout = String(result && result.stdout || '');
+  error.stderr = String(result && result.stderr || '');
+  return error;
+}
+
+function runGit(args, execOptions) {
+  const result = spawnSync('git', args, execOptions);
+  if (result.error) {
+    throw result.error;
+  }
+  if (result.status !== 0) {
+    throw createGitCommandError(args, result);
+  }
+  return String(result.stdout || '');
+}
 
 /**
  * Commit and push a tenant registry record to the repository.
@@ -14,7 +35,7 @@ const path = require('path');
  * @param {string} input.repoRoot - Repository root directory (for relative path calculation)
  * @param {Object} options - Execution options
  * @param {boolean} options.dryRun - If true, don't actually commit/push
- * @param {string} options.env - Environment object for git commands (default: process.env)
+ * @param {Object} options.env - Environment object for git commands (default: process.env)
  * @returns {Object} Result with status, message, and any errors
  */
 function commitRegistryRecord(input = {}, options = {}) {
@@ -42,7 +63,7 @@ function commitRegistryRecord(input = {}, options = {}) {
     const relativeFilePath = path.relative(repoRoot, registryFilePath);
 
     const execOptions = {
-      stdio: 'pipe',
+      stdio: ['ignore', 'pipe', 'pipe'],
       encoding: 'utf8',
       cwd: repoRoot,
       env,
@@ -51,7 +72,7 @@ function commitRegistryRecord(input = {}, options = {}) {
     // Stage the file
     if (!dryRun) {
       try {
-        execSync(`git add "${relativeFilePath}"`, execOptions);
+        runGit(['add', relativeFilePath], execOptions);
       } catch (addErr) {
         console.error(`[registry-commit] git add failed: ${addErr.message}`);
         throw addErr;
@@ -59,13 +80,17 @@ function commitRegistryRecord(input = {}, options = {}) {
     }
 
     // Check if there are changes to commit
+    const diffResult = spawnSync('git', ['diff', '--cached', '--quiet'], execOptions);
+    if (diffResult.error) {
+      throw diffResult.error;
+    }
     let hasChanges = false;
-    try {
-      execSync('git diff --cached --quiet', execOptions);
+    if (diffResult.status === 0) {
       hasChanges = false;
-    } catch (e) {
-      // Non-zero exit means there are changes
+    } else if (diffResult.status === 1) {
       hasChanges = true;
+    } else {
+      throw createGitCommandError(['diff', '--cached', '--quiet'], diffResult);
     }
 
     if (!hasChanges) {
@@ -80,7 +105,7 @@ function commitRegistryRecord(input = {}, options = {}) {
     // Commit the file
     if (!dryRun) {
       try {
-        execSync(`git commit -m "${commitMessage}"`, execOptions);
+        runGit(['commit', '-m', commitMessage], execOptions);
       } catch (commitErr) {
         console.error(`[registry-commit] git commit failed: ${commitErr.message}`);
         throw commitErr;
@@ -92,15 +117,13 @@ function commitRegistryRecord(input = {}, options = {}) {
       // Get current branch name
       let currentBranch = 'main';
       try {
-        currentBranch = execSync('git rev-parse --abbrev-ref HEAD', execOptions)
-          .toString()
-          .trim();
+        currentBranch = runGit(['rev-parse', '--abbrev-ref', 'HEAD'], execOptions).trim();
       } catch (e) {
         console.warn(`[registry-commit] Could not determine current branch, defaulting to 'main'`);
       }
 
       try {
-        execSync(`git push origin ${currentBranch}`, execOptions);
+        runGit(['push', 'origin', currentBranch], execOptions);
       } catch (pushErr) {
         console.error(`[registry-commit] git push failed: ${pushErr.message}`);
         throw pushErr;

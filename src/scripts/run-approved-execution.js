@@ -16,7 +16,6 @@ const { buildExecutionOutcome } = require('../workflow-support/build-execution-o
 const { createGitHubTeamApi } = require('../workflow-support/github-team-api');
 const { createGitHubTeamRepoApi } = require('../workflow-support/github-team-repo-api');
 const { executeWithBoundedRetry } = require('../workflow-support/handle-rate-limit');
-const { buildTenantRepoCreationRateLimitContext } = require('../workflow-support/handle-rate-limit');
 const { buildTenantBootstrapRateLimitContext } = require('../workflow-support/handle-rate-limit');
 const { persistTenantRegistryRecord } = require('../workflow-support/persist-tenant-registry-record');
 const { commitRegistryRecord } = require('../workflow-support/commit-registry-record');
@@ -200,6 +199,7 @@ function buildPreMutationFailureArtifact(options = {}) {
   const operationLabel = options.operationLabel;
   const rateLimitSnapshot = options.rateLimitSnapshot || null;
   const failureMessage = options.failureMessage;
+  const isTenantRepoCreation = options.isTenantRepoCreation === true;
 
   auditArtifact.request.request_status = 'failed';
   auditArtifact.reconciliation = {
@@ -497,6 +497,7 @@ async function runApprovedExecution(options = {}) {
         auditArtifact,
         artifactPath,
         env,
+        isTenantRepoCreation,
         operationLabel: 'membership',
         rateLimitSnapshot: latestRateLimitSnapshot,
         failureMessage: `Approved execution stopped before membership mutation because the current team state could not be read safely (${failureReason}). Retry the request later or investigate the GitHub API response before resuming.`,
