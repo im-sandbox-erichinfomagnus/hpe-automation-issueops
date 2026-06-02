@@ -113,7 +113,7 @@ test('buildAuditArtifact infers manual mode from normalized request data when le
       request: {
         requested_repositories_input: '',
         requested_permission_api_value: 'push',
-        requested_repository_grants: [{ repository_name: 'platform-service' }],
+        requested_repository_grants: [],
       },
     },
   ];

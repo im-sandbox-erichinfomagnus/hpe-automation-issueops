@@ -16,9 +16,10 @@ function hasManualNormalizedEntries(value) {
   }
 
   return value.some((entry) => (
-    !entry ||
-    typeof entry !== 'object' ||
+    entry != null && (
+      typeof entry !== 'object' ||
     (entry.source_row_number == null && entry.source_comment_id == null)
+    )
   ));
 }
 
@@ -125,7 +126,11 @@ function inferRequestIntakeMode(request = {}, operation = determineOperation(req
   ) || (
     operation === 'team_repo_access' && (
       hasPopulatedString(request.requested_repositories_input) ||
-      hasManualNormalizedEntries(request.requested_repository_grants)
+      hasManualNormalizedEntries(request.requested_repository_grants) ||
+      (
+        Boolean(request.requested_permission_api_value) &&
+        !hasBulkCsvSignals
+      )
     )
   );
 
