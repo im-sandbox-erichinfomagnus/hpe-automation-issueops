@@ -41,7 +41,7 @@ jobs:
       AUDIT_ARTIFACT_PATH: artifacts/add-team-repo-access-validation-${{ github.event.issue.number || inputs.issue-number || 'manual' }}.json
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -80,9 +80,9 @@ jobs:
             issue_labels_json=$(printf '%s' "$issue_json" | jq -c '.labels // []')
           fi
 
-          echo "requester_login=$requester_login" >> "$GITHUB_OUTPUT"
-          echo "issue_labels_json=$issue_labels_json" >> "$GITHUB_OUTPUT"
           {
+            echo "requester_login=$requester_login"
+            echo "issue_labels_json=$issue_labels_json"
             echo 'issue_body<<EOF'
             printf '%s\n' "$issue_body"
             echo EOF

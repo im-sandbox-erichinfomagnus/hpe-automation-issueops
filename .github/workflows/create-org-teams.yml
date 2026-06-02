@@ -41,7 +41,7 @@ jobs:
       AUDIT_ARTIFACT_PATH: artifacts/create-org-teams-validation-${{ github.event.issue.number || inputs.issue-number || 'manual' }}.json
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -78,8 +78,8 @@ jobs:
             requester_login=$(printf '%s' "$issue_json" | jq -r '.user.login // ""')
           fi
 
-          echo "requester_login=$requester_login" >> "$GITHUB_OUTPUT"
           {
+            echo "requester_login=$requester_login"
             echo 'issue_body<<EOF'
             printf '%s\n' "$issue_body"
             echo EOF
