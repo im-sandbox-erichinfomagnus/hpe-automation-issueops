@@ -43,10 +43,10 @@ test('workflow applicability keeps empty-intake add-child-teams requests in scop
 
   assert.ok(requestScopeBlock);
   assert.match(requestScopeBlock[0], /PARSED_PARENT_TEAM/);
-  assert.match(requestScopeBlock[0], /PARSED_DESIGNATED_APPROVER/);
+  assert.match(requestScopeBlock[0], /PARSED_DESIGNATED_HIERARCHY_APPROVER/);
   assert.doesNotMatch(requestScopeBlock[0], /PARSED_REQUESTED_CHILD_TEAMS/);
   assert.doesNotMatch(requestScopeBlock[0], /PARSED_BULK_CSV_REQUESTED_CHILD_TEAMS/);
-  assert.match(requestScopeBlock[0], /if \[ -n "\$\{PARSED_PARENT_TEAM:-\}" \] && \[ -n "\$\{PARSED_DESIGNATED_APPROVER:-\}" \]; then/);
+  assert.match(requestScopeBlock[0], /if \[ -n "\$\{PARSED_PARENT_TEAM:-\}" \] && \[ -n "\$\{PARSED_DESIGNATED_HIERARCHY_APPROVER:-\}" \]; then/);
 });
 
 test('workflow scaffolding keeps add-child-teams runtime and lint assumptions in place', () => {
@@ -61,8 +61,8 @@ test('workflow scaffolding keeps add-child-teams runtime and lint assumptions in
   assert.match(lintWorkflow, /\.github\/ISSUE_TEMPLATE\/\*\.yml/);
 });
 
-test('records an approval-ready add-child-teams request from bulk CSV intake', async () => {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'add-child-teams-bulk-csv-valid-'));
+test('records an approval-ready add-child-teams request from manual intake', async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'add-child-teams-manual-valid-'));
   const auditPath = path.join(workspace, 'audit.json');
   const summaryPath = path.join(workspace, 'summary.md');
   const outputPath = path.join(workspace, 'github-output.txt');
@@ -77,9 +77,9 @@ test('records an approval-ready add-child-teams request from bulk CSV intake', a
       PARSED_REQUEST_JSON: JSON.stringify({
         organization: 'octo-org',
         parent_team: 'Platform Engineering',
-        designated_approver: 'octocat',
-        requested_child_teams: '',
-        bulk_csv_requested_child_teams: '```csv\nchild_team\nApplication Platform\nRelease Engineering\n```',
+        designated_hierarchy_approver: 'octocat',
+        intake_mode: 'manual',
+        requested_child_teams: 'Application Platform\nRelease Engineering',
         business_justification: 'Need hierarchy updates',
         dry_run: true,
       }),
@@ -94,21 +94,26 @@ test('records an approval-ready add-child-teams request from bulk CSV intake', a
 
   assert.equal(result.validation.is_valid, true);
   assert.equal(result.validation.request_status, 'awaiting_approval');
-  assert.equal(result.validation.request.intake_mode, 'bulk_csv');
-  assert.equal(result.validation.request.requested_child_teams_input, '');
+  assert.equal(result.validation.request.intake_mode, 'manual');
   assert.deepEqual(
-    result.validation.requested_child_links.map((childLink) => ({
-      child_team_slug: childLink.child_team_slug,
-      source_row_number: childLink.source_row_number,
-    })),
-    [
-      { child_team_slug: 'application-platform', source_row_number: 1 },
-      { child_team_slug: 'release-engineering', source_row_number: 2 },
-    ]
+    result.validation.requested_child_links.map((childLink) => childLink.child_team_slug),
+    ['application-platform', 'release-engineering']
   );
-  assert.match(fs.readFileSync(summaryPath, 'utf8'), /Intake mode: bulk_csv/i);
-  assert.match(fs.readFileSync(summaryPath, 'utf8'), /CSV row findings: 2/i);
+  assert.match(fs.readFileSync(summaryPath, 'utf8'), /Intake mode: manual/i);
   assert.match(fs.readFileSync(outputPath, 'utf8'), /validation-status=awaiting_approval/);
+});
+
+test('workflow applicability keeps empty-intake add-child-teams requests in validation scope', () => {
+  const workflowPath = path.join(__dirname, '..', '..', '.github', 'workflows', 'add-child-teams.yml');
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
+  const requestScopeBlock = workflow.match(/- name: Check request applicability[\s\S]*?echo "matches-request=\$matches_request" >> "\$GITHUB_OUTPUT"/);
+
+  assert.ok(requestScopeBlock);
+  assert.match(requestScopeBlock[0], /PARSED_PARENT_TEAM:/);
+  assert.match(requestScopeBlock[0], /PARSED_DESIGNATED_HIERARCHY_APPROVER:/);
+  assert.doesNotMatch(requestScopeBlock[0], /PARSED_REQUESTED_CHILD_TEAMS:/);
+  assert.doesNotMatch(requestScopeBlock[0], /PARSED_BULK_CSV_REQUESTED_CHILD_TEAMS:/);
+  assert.match(requestScopeBlock[0], /if \[ -n "\$\{PARSED_PARENT_TEAM:-\}" \] && \[ -n "\$\{PARSED_DESIGNATED_HIERARCHY_APPROVER:-\}" \]; then/);
 });
 
 test('preserves bulk CSV request metadata through validation and audit scaffolding', async () => {
@@ -151,7 +156,7 @@ test('preserves bulk CSV request metadata through validation and audit scaffoldi
   );
 });
 
-test('approved bulk CSV requests preserve approval and execution metadata through the final artifact', async () => {
+test('approved manual requests preserve approval and execution metadata through the final artifact', async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'add-child-teams-bulk-csv-approved-'));
   const auditPath = path.join(workspace, 'audit.json');
   const validationFixture = loadJsonFixture('team-hierarchy-validation.json').visible_org;
@@ -165,9 +170,9 @@ test('approved bulk CSV requests preserve approval and execution metadata throug
       PARSED_REQUEST_JSON: JSON.stringify({
         organization: 'octo-org',
         parent_team: 'Platform Engineering',
-        designated_approver: 'octocat',
-        requested_child_teams: '',
-        bulk_csv_requested_child_teams: '```csv\nchild_team\nApplication Platform\nRelease Engineering\n```',
+        designated_hierarchy_approver: 'octocat',
+        intake_mode: 'manual',
+        requested_child_teams: 'Application Platform\nRelease Engineering',
         business_justification: 'Need hierarchy updates',
         dry_run: false,
       }),
@@ -219,26 +224,25 @@ test('approved bulk CSV requests preserve approval and execution metadata throug
   const persisted = JSON.parse(fs.readFileSync(approvedArtifact, 'utf8'));
   const summary = formatAuditSummary(persisted);
 
-  assert.equal(persisted.request.intake_mode, 'bulk_csv');
+  assert.equal(persisted.request.intake_mode, 'manual');
   assert.equal(persisted.request.request_status, 'executed');
-  assert.equal(persisted.reconciliation.intake_mode, 'bulk_csv');
+  assert.equal(persisted.reconciliation.intake_mode, 'manual');
   assert.equal(persisted.execution.duplicate_row_count, 0);
   assert.equal(persisted.execution.invalid_row_count, 0);
   assert.deepEqual(
-    persisted.reconciliation.child_links_to_apply.map((entry) => entry.source_row_number),
-    [1]
+    persisted.reconciliation.child_links_to_apply.map((entry) => entry.child_team_slug),
+    ['application-platform']
   );
   assert.deepEqual(
-    persisted.reconciliation.child_links_already_present.map((entry) => entry.source_row_number),
-    [2]
+    persisted.reconciliation.child_links_already_present.map((entry) => entry.child_team_slug),
+    ['release-engineering']
   );
-  assert.match(summary, /Intake mode: bulk_csv/i);
-  assert.match(summary, /CSV duplicate rows: 0/i);
+  assert.match(summary, /Intake mode: manual/i);
   assert.match(summary, /Child links applied: 1/i);
   assert.match(summary, /No-op: 1/i);
 });
 
-test('approval gate preserves bulk CSV audit metadata before approved execution', async () => {
+test('approval gate preserves manual intake audit metadata before approved execution', async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'add-child-teams-bulk-csv-gate-'));
   const auditPath = path.join(workspace, 'audit.json');
   const validationFixture = loadJsonFixture('team-hierarchy-validation.json').visible_org;
@@ -252,9 +256,9 @@ test('approval gate preserves bulk CSV audit metadata before approved execution'
       PARSED_REQUEST_JSON: JSON.stringify({
         organization: 'octo-org',
         parent_team: 'Platform Engineering',
-        designated_approver: 'octocat',
-        requested_child_teams: '',
-        bulk_csv_requested_child_teams: '```csv\nchild_team\nApplication Platform\nRelease Engineering\n```',
+        designated_hierarchy_approver: 'octocat',
+        intake_mode: 'manual',
+        requested_child_teams: 'Application Platform\nRelease Engineering',
         business_justification: 'Need hierarchy updates',
         dry_run: false,
       }),
@@ -289,14 +293,10 @@ test('approval gate preserves bulk CSV audit metadata before approved execution'
     },
   });
 
-  assert.equal(gated.request.intake_mode, 'bulk_csv');
+  assert.equal(gated.request.intake_mode, 'manual');
   assert.equal(gated.request.request_status, 'approved');
   assert.equal(gated.approval.approval_status, 'approved');
-  assert.equal(gated.request.bulk_csv_submission.valid_row_count, 2);
   assert.equal(gated.execution.duplicate_row_count, 0);
   assert.equal(gated.execution.invalid_row_count, 0);
-  assert.deepEqual(
-    gated.request.requested_child_links.map((entry) => entry.source_row_number),
-    [1, 2]
-  );
+  assert.equal(gated.request.requested_child_links.length, 2);
 });
