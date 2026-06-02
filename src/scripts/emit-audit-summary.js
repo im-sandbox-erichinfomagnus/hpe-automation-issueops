@@ -222,7 +222,7 @@ function formatAuditSummary(auditArtifact = {}) {
       isBulkCsv || isCsvAttachment
         ? `- CSV valid rows: ${request.bulk_csv_submission?.valid_row_count ?? 0}`
         : null,
-      isBulkCsv
+      isBulkCsv || isCsvAttachment
         ? `- CSV duplicate rows: ${readBulkCsvCount(execution.duplicate_row_count, request.bulk_csv_submission?.duplicate_row_count)}`
         : null,
       isBulkCsv || isCsvAttachment
