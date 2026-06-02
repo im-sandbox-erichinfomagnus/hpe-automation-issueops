@@ -52,7 +52,6 @@ test('buildAuditArtifact preserves an explicit prior operation during artifact r
   assert.equal(artifact.metadata.operation, 'team_creation');
 });
 
-<<<<<<< HEAD
 test('buildAuditArtifact ignores empty fenced bulk CSV input when inferring intake mode', () => {
   const artifact = buildAuditArtifact({
     request: {
@@ -71,31 +70,35 @@ test('buildAuditArtifact ignores empty fenced bulk CSV input when inferring inta
 });
 
 test('buildAuditArtifact preserves an explicitly ambiguous intake mode', () => {
-=======
-test('buildAuditArtifact infers bulk CSV mode for legacy artifacts from raw CSV signals only', () => {
->>>>>>> origin/main
   const artifact = buildAuditArtifact({
     request: {
       organization: 'octo-org',
       intended_owner_login: 'octocat',
-<<<<<<< HEAD
       intake_mode: null,
-=======
-      requested_team_names_input: '',
->>>>>>> origin/main
       bulk_csv_input: '```csv\nteam_name\nPlatform Engineering\n```',
       requested_teams: [
         {
           requested_name: 'Platform Engineering',
           normalized_slug: 'platform-engineering',
-<<<<<<< HEAD
         },
       ],
     },
   });
 
   assert.equal(artifact.request.intake_mode, null);
-=======
+});
+
+test('buildAuditArtifact infers bulk CSV mode for legacy artifacts from raw CSV signals only', () => {
+  const artifact = buildAuditArtifact({
+    request: {
+      organization: 'octo-org',
+      intended_owner_login: 'octocat',
+      requested_team_names_input: '',
+      bulk_csv_input: '```csv\nteam_name\nPlatform Engineering\n```',
+      requested_teams: [
+        {
+          requested_name: 'Platform Engineering',
+          normalized_slug: 'platform-engineering',
           source_row_number: 1,
         },
       ],
@@ -112,5 +115,4 @@ test('buildAuditArtifact infers bulk CSV mode for legacy artifacts from raw CSV 
   });
 
   assert.equal(artifact.request.intake_mode, 'bulk_csv');
->>>>>>> origin/main
 });
