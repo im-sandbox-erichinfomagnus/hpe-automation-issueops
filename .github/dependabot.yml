@@ -4,7 +4,7 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
-      day: "monday"
+      day: monday
     target-branch: "013-setup-feature-branch"
     open-pull-requests-limit: 10
     labels:
@@ -14,7 +14,7 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
-      day: "monday"
+      day: monday
     target-branch: "013-setup-feature-branch"
     open-pull-requests-limit: 5
     labels:
