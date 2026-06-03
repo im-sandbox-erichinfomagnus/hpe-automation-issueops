@@ -72,7 +72,9 @@ test('manual add-child-teams guidance remains visible in the issue form', () => 
   assert.match(template, /id:\s+requested_child_teams/);
   assert.match(template, /manual request path/i);
   assert.match(template, /one existing child team per line/i);
-  assert.match(template, /required:\s+true/i);
+  assert.match(template, /requested_child_teams[\s\S]*required:\s+false/i);
+  assert.match(template, /validation enforces exactly one populated intake mode/i);
+  assert.match(template, /bulk_csv_requested_child_teams[\s\S]*required:\s+false/i);
 });
 
 test('rejects duplicate child teams from a fixture-derived submission', async () => {
