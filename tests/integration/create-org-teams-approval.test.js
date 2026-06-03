@@ -149,6 +149,58 @@ test('runApprovalGate denies approval by a commenter who is not the intended own
   assert.match(result.execution.summary, /No team creation was attempted/);
 });
 
+test('runApprovalGate remains blocked for a waiting-for-attachment request that never reached approval readiness', async () => {
+  const fixture = loadFixture().pending;
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'create-org-teams-waiting-approval-'));
+  const artifactPath = writeAuditArtifact(workspace, {
+    request: {
+      request_id: 'repo#502/run.1',
+      issue_number: 502,
+      repository: 'im-sandbox-himanshu/issueops-speckit',
+      requester_login: 'himanshu-im',
+      organization: 'im-sandbox-himanshu',
+      intended_owner_login: 'himanshu-im',
+      intake_mode: 'csv_attachment',
+      requested_teams: [],
+      accepted_attachment_submission: {
+        acceptance_status: 'waiting',
+      },
+      request_status: 'waiting_for_attachment',
+      dry_run: true,
+    },
+    validation: {
+      is_valid: false,
+      errors: [],
+      warnings: ['Request is waiting for a requester-authored CSV attachment comment.'],
+      request_status: 'waiting_for_attachment',
+      organization_visible: true,
+      intended_owner_membership: {
+        exists: true,
+        state: 'active',
+        role: 'admin',
+      },
+      requested_teams: [],
+      existing_teams: [],
+    },
+  });
+
+  const result = await runApprovalGate({
+    env: {
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      AUDIT_ARTIFACT_PATH: artifactPath,
+    },
+    api: {
+      listIssueComments: async () => fixture.comments,
+      getOrganizationMembership: async ({ username }) => fixture.memberships[username] || { exists: false },
+      addIssueAssignees: async () => ({ status: 'assigned', assignees: fixture.assignees }),
+      getAssignableOwners: async () => fixture.assignees,
+    },
+  });
+
+  assert.equal(result.approval.approval_status, 'pending');
+  assert.notEqual(result.request.request_status, 'approved');
+});
+
 test('runApprovalGate remains pending when no approval comment exists', async () => {
   const fixture = loadFixture().pending;
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'create-org-teams-pending-'));

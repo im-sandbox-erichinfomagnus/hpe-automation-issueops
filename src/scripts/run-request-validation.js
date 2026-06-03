@@ -53,6 +53,7 @@ function readParsedRequestFromEnv(env = process.env) {
     requested_child_teams: env.PARSED_REQUESTED_CHILD_TEAMS || '',
     bulk_csv_requested_child_teams: env.PARSED_BULK_CSV_REQUESTED_CHILD_TEAMS || '',
     intended_owner: env.PARSED_INTENDED_OWNER || '',
+    intake_mode: env.PARSED_INTAKE_MODE || '',
     requested_team_names: env.PARSED_REQUESTED_TEAM_NAMES || '',
     bulk_csv_requested_team_names: env.PARSED_BULK_CSV_REQUESTED_TEAM_NAMES || '',
     team_slug: env.PARSED_TEAM_SLUG || '',
@@ -119,7 +120,14 @@ function isTerminalRequestStatus(status) {
   return ['executed', 'partially_executed', 'failed'].includes(status);
 }
 
-const TERMINAL_STATE_LABEL_PREFIX = 'issueops:add-team-members:';
+function terminalStateLabelPrefix(operation) {
+  const operationPrefixes = {
+    team_creation: 'issueops:create-org-teams:',
+    team_hierarchy: 'issueops:add-child-teams:',
+    team_repo_access: 'issueops:add-team-repo-access:',
+  };
+  return operationPrefixes[operation] || 'issueops:add-team-members:';
+}
 
 function readIssueLabelsFromEnv(env = process.env) {
   if (!env.ISSUE_LABELS_JSON) {
@@ -136,9 +144,10 @@ function readIssueLabelsFromEnv(env = process.env) {
   }
 }
 
-function deriveTerminalStatusFromIssueLabels(labels = []) {
+function deriveTerminalStatusFromIssueLabels(labels = [], operation = null) {
+  const prefix = terminalStateLabelPrefix(operation);
   for (const status of ['executed', 'partially_executed', 'failed']) {
-    if (labels.includes(`${TERMINAL_STATE_LABEL_PREFIX}${status}`)) {
+    if (labels.includes(`${prefix}${status}`)) {
       return status;
     }
   }
@@ -318,7 +327,8 @@ async function runRequestValidation(options = {}) {
   const priorAttachmentRetryState = readPriorAttachmentRetryState(artifactPath);
   const priorArtifact = priorAttachmentRetryState.priorArtifact;
   const issueLabels = readIssueLabelsFromEnv(env);
-  const terminalStatusFromIssueLabels = deriveTerminalStatusFromIssueLabels(issueLabels);
+  const operation = isTeamRepoAccess ? 'team_repo_access' : isTeamCreation ? 'team_creation' : isTeamHierarchy ? 'team_hierarchy' : 'team_membership';
+  const terminalStatusFromIssueLabels = deriveTerminalStatusFromIssueLabels(issueLabels, operation);
   const request = (isTeamRepoAccess
     ? parseTeamRepoAccessRequest
     : isTeamCreation
@@ -347,7 +357,6 @@ async function runRequestValidation(options = {}) {
   try {
     if (
       !isTeamRepoAccess &&
-      !isTeamCreation &&
       !isTeamHierarchy &&
       request.intake_mode === 'csv_attachment' &&
       request.comment_context.comment_id &&
@@ -394,7 +403,6 @@ async function runRequestValidation(options = {}) {
       };
     } else if (
       !isTeamRepoAccess &&
-      !isTeamCreation &&
       !isTeamHierarchy &&
       request.intake_mode === 'csv_attachment' &&
       request.comment_context.comment_id &&
@@ -486,11 +494,39 @@ async function runRequestValidation(options = {}) {
           dry_run: validation.request.dry_run,
         });
       } else if (isTeamCreation) {
+        const issueComments = env.ISSUE_NUMBER
+          ? typeof api.listIssueComments === 'function'
+            ? await executeGitHubReadWithRetry(
+                () => api.listIssueComments({
+                  repository: env.GITHUB_REPOSITORY || '',
+                  issueNumber: env.ISSUE_NUMBER,
+                }),
+                { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+              )
+            : []
+          : [];
         validation = await validateTeamCreationRequest(request, {
-          getOrganization: ({ organization }) => api.getOrganization({ organization }),
+          getOrganization: ({ organization }) => executeGitHubReadWithRetry(
+            () => api.getOrganization({ organization }),
+            { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+          ),
           resolveMembership: ({ organization, username }) =>
-            api.getOrganizationMembership({ organization, username }),
-          listTeams: ({ organization }) => api.listOrgTeams({ organization }),
+            executeGitHubReadWithRetry(
+              () => api.getOrganizationMembership({ organization, username }),
+              { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+            ),
+          listTeams: ({ organization }) => executeGitHubReadWithRetry(
+            () => api.listOrgTeams({ organization }),
+            { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+          ),
+          issueComments,
+          latestFailedValidationAt: priorAttachmentRetryState.latestFailedValidationAt,
+          latestFailedValidationAttemptId: priorAttachmentRetryState.latestFailedValidationAttemptId,
+          token: tokenInfo.token,
+          fetchImpl: options.fetchImpl,
+          maxAttachmentBytes: options.maxAttachmentBytes,
+          maxRetries: options.maxRetries,
+          sleep: options.sleep,
         });
         reconciliationPlan = reconcileTeamCreation({
           request: validation.request,

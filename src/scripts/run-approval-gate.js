@@ -60,7 +60,7 @@ async function runApprovalGate(options = {}) {
   const operation = auditArtifact.metadata && auditArtifact.metadata.operation;
 
   if (
-    operation === 'team_membership' &&
+    (operation === 'team_membership' || operation === 'team_creation') &&
     auditArtifact.request &&
     auditArtifact.request.intake_mode === 'csv_attachment' &&
     ['executed', 'partially_executed', 'failed'].includes(auditArtifact.request.request_status)

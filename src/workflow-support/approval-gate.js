@@ -72,7 +72,7 @@ async function evaluateApprovalGate(input = {}, options = {}) {
     return resolveApproverRole(args, options);
   });
 
-  if (approvalMode === 'team_membership' && intakeMode === 'csv_attachment' && requestStatus === 'waiting_for_attachment') {
+  if ((approvalMode === 'team_membership' || approvalMode === 'team_creation') && intakeMode === 'csv_attachment' && requestStatus === 'waiting_for_attachment') {
     return {
       approval_status: 'not_requested',
       approver_login: '',
@@ -83,14 +83,14 @@ async function evaluateApprovalGate(input = {}, options = {}) {
   }
 
   const approvalComment = findLatestApprovalComment(issueComments, approvalCommand, {
-    notBefore: approvalMode === 'team_membership' && intakeMode === 'csv_attachment'
+    notBefore: (approvalMode === 'team_membership' || approvalMode === 'team_creation') && intakeMode === 'csv_attachment'
       ? acceptedAttachmentCommentCreatedAt
       : null,
   });
 
   if (!approvalComment) {
     const requiresFreshAttachmentApproval =
-      approvalMode === 'team_membership' &&
+      (approvalMode === 'team_membership' || approvalMode === 'team_creation') &&
       intakeMode === 'csv_attachment' &&
       acceptedAttachmentCommentCreatedAt;
 

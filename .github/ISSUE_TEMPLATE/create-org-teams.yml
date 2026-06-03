@@ -23,25 +23,24 @@ body:
     validations:
       required: true
 
+  - type: dropdown
+    id: intake_mode
+    attributes:
+      label: Intake mode
+      description: Choose how you will provide the list of teams to create. Use manual for small batches entered directly below. Use csv_attachment to upload a CSV file as a comment after submitting this issue.
+      options:
+        - manual
+        - csv_attachment
+      default: 0
+    validations:
+      required: true
+
   - type: textarea
     id: requested_team_names
     attributes:
       label: Requested team names
-      description: Manual request path for one or more empty team names. Enter one empty team name per line and do not include member usernames.
+      description: Manual request path for one or more empty team names. Enter one empty team name per line and do not include member usernames. Leave empty when intake mode is csv_attachment.
       placeholder: |
-        Platform Engineering
-        Release Managers
-      render: text
-    validations:
-      required: false
-
-  - type: textarea
-    id: bulk_csv_requested_team_names
-    attributes:
-      label: Bulk CSV requested team names
-      description: Optional bulk CSV intake path. Paste UTF-8 CSV text with a required `team_name` header. Validation enforces exactly one populated intake mode.
-      placeholder: |
-        team_name
         Platform Engineering
         Release Managers
       render: text
