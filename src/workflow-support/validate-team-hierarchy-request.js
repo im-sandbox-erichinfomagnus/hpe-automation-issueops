@@ -372,7 +372,7 @@ async function validateTeamHierarchyRequest(input = {}, options = {}) {
         ? parentMembership.membership.role || 'member'
         : 'absent';
 
-    let allAuthorized = designatedApproverAuthorization.parent_team_role === 'maintainer';
+    let hasMembershipAuthorizationFailure = designatedApproverAuthorization.parent_team_role !== 'maintainer';
     for (const childLink of request.requested_child_links) {
       const childTeam = currentTeamMap.get(childLink.child_team_slug);
       if (!childTeam) {
@@ -380,7 +380,6 @@ async function validateTeamHierarchyRequest(input = {}, options = {}) {
           child_team_slug: childLink.child_team_slug,
           role: 'missing_team',
         });
-        allAuthorized = false;
         continue;
       }
 
@@ -396,12 +395,12 @@ async function validateTeamHierarchyRequest(input = {}, options = {}) {
         role,
       });
       if (role !== 'maintainer') {
-        allAuthorized = false;
+        hasMembershipAuthorizationFailure = true;
       }
     }
 
-    designatedApproverAuthorization.state = allAuthorized ? 'authorized' : 'unauthorized';
-    if (!allAuthorized) {
+    designatedApproverAuthorization.state = hasMembershipAuthorizationFailure ? 'unauthorized' : 'authorized';
+    if (hasMembershipAuthorizationFailure) {
       errors.push('The designated hierarchy approver is not a current maintainer of the requested parent team and every requested child team.');
     }
   }
