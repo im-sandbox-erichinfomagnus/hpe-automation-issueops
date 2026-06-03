@@ -20,6 +20,7 @@ function formatAuditSummary(auditArtifact = {}) {
     ? auditArtifact.metadata.operation
     : determineOperation(request);
   const isBulkCsv = request.intake_mode === 'bulk_csv';
+  const isCsvAttachment = request.intake_mode === 'csv_attachment';
   const isTeamRepoAccess = operation === 'team_repo_access';
   const isTeamHierarchy = operation === 'team_hierarchy';
   const isTeamCreation = operation === 'team_creation';
@@ -206,19 +207,38 @@ function formatAuditSummary(auditArtifact = {}) {
     `- Approval: ${approval.approval_status || 'pending'} (${approval.approver_role || 'n/a'})`,
     approval.approver_login ? `- Approver: ${approval.approver_login}` : null,
     `- Validation: ${validation.is_valid ? 'passed' : 'failed'}`,
+    isCsvAttachment && request.request_status === 'waiting_for_attachment'
+      ? '- Attachment status: waiting for requester CSV attachment comment'
+      : null,
+    isCsvAttachment && request.accepted_attachment_submission && request.accepted_attachment_submission.attachment_url
+      ? `- Attachment URL: ${request.accepted_attachment_submission.attachment_url}`
+      : null,
+    isCsvAttachment && request.accepted_attachment_submission && request.accepted_attachment_submission.comment_id
+      ? `- Attachment comment ID: ${request.accepted_attachment_submission.comment_id}`
+      : null,
+    isCsvAttachment && request.accepted_attachment_submission && request.accepted_attachment_submission.uploader_login
+      ? `- Attachment uploader: ${request.accepted_attachment_submission.uploader_login}`
+      : null,
+    isCsvAttachment && request.accepted_attachment_submission && request.accepted_attachment_submission.filename
+      ? `- Attachment filename: ${request.accepted_attachment_submission.filename}`
+      : null,
+    isCsvAttachment && request.accepted_attachment_submission && request.accepted_attachment_submission.content_hash
+      ? `- Attachment content hash: ${request.accepted_attachment_submission.content_hash}`
+      : null,
     isBulkCsv
+      || isCsvAttachment
       ? `- CSV row findings: ${(validation.csv_row_findings || request.csv_row_findings || []).length}`
       : null,
-    isBulkCsv
-      ? `- CSV valid rows: ${request.bulk_csv_submission?.valid_row_count ?? 0}`
+    isBulkCsv || isCsvAttachment
+      ? `- CSV valid rows: ${request.bulk_csv_submission && request.bulk_csv_submission.valid_row_count || 0}`
       : null,
-    isBulkCsv
+    isBulkCsv || isCsvAttachment
       ? `- CSV duplicate rows: ${readBulkCsvCount(execution.duplicate_row_count, request.bulk_csv_submission?.duplicate_row_count)}`
       : null,
-    isBulkCsv
+    isBulkCsv || isCsvAttachment
       ? `- CSV invalid rows: ${readBulkCsvCount(execution.invalid_row_count, request.bulk_csv_submission?.invalid_row_count)}`
       : null,
-    isBulkCsv && request.csv_row_numbering_convention
+    (isBulkCsv || isCsvAttachment) && request.csv_row_numbering_convention
       ? `- CSV row numbering: ${request.csv_row_numbering_convention}`
       : null,
     `- Added: ${execution.mutation_count || 0}`,
@@ -235,7 +255,9 @@ function formatAuditSummary(auditArtifact = {}) {
     assignment.assignment_note ? `- Assignment note: ${assignment.assignment_note}` : null,
     approval.decision_note ? `- Approval note: ${approval.decision_note}` : null,
     '',
-    execution.summary || (validation.is_valid
+    execution.summary || (request.request_status === 'waiting_for_attachment'
+      ? 'Request metadata is valid, but execution remains blocked until the requester posts a qualifying CSV attachment comment.'
+      : validation.is_valid
       ? approval.approval_status === 'approved'
         ? 'Request is approved and eligible for execution. No membership mutation was attempted in this phase.'
         : approval.approval_status === 'denied'

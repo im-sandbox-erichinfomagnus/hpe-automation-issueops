@@ -20,6 +20,7 @@ on:
         type: string
 
 permissions:
+  actions: read
   contents: read
   issues: write
 
@@ -77,6 +78,12 @@ jobs:
           fi
 
           echo "requester_login=$requester_login" >> "$GITHUB_OUTPUT"
+          if [ "$EVENT_NAME" = "issues" ] || [ "$EVENT_NAME" = "issue_comment" ]; then
+            issue_labels_json=$(jq -c '.issue.labels // []' "$GITHUB_EVENT_PATH")
+          else
+            issue_labels_json=$(printf '%s' "$issue_json" | jq -c '.labels // []')
+          fi
+          echo "issue_labels_json=$issue_labels_json" >> "$GITHUB_OUTPUT"
           {
             echo 'issue_body<<EOF'
             printf '%s\n' "$issue_body"
@@ -94,13 +101,12 @@ jobs:
         id: request_scope
         env:
           PARSED_TEAM_SLUG: ${{ steps.parse_request.outputs.parsed_team_slug }}
-          PARSED_REQUESTED_PEOPLE: ${{ steps.parse_request.outputs.parsed_requested_people }}
-          PARSED_BULK_CSV_REQUESTED_PEOPLE: ${{ steps.parse_request.outputs.parsed_bulk_csv_requested_people }}
+          PARSED_INTAKE_MODE: ${{ steps.parse_request.outputs.parsed_intake_mode }}
         run: |
           set -euo pipefail
 
           matches_request=false
-          if [ -n "${PARSED_TEAM_SLUG:-}" ] && { [ -n "${PARSED_REQUESTED_PEOPLE:-}" ] || [ -n "${PARSED_BULK_CSV_REQUESTED_PEOPLE:-}" ]; }; then
+          if [ -n "${PARSED_TEAM_SLUG:-}" ] && [ -n "${PARSED_INTAKE_MODE:-}" ]; then
             matches_request=true
           fi
 
@@ -110,6 +116,16 @@ jobs:
         if: ${{ steps.request_scope.outputs.matches-request != 'true' }}
         run: |
           echo 'This issue does not match the add-team-members form. Exiting without validation or assignment.' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Restore prior request audit artifact
+        if: ${{ steps.request_scope.outputs.matches-request == 'true' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ env.ISSUE_NUMBER }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          AUDIT_ARTIFACT_PATH: artifacts/add-team-members-validation-${{ env.ISSUE_NUMBER || 'manual' }}.json
+        run: node src/scripts/restore-request-audit-artifact.js
 
       - name: Validate request and record approval-ready state
         id: validate_request
@@ -121,10 +137,15 @@ jobs:
           PARSED_REQUEST_JSON: ${{ steps.parse_request.outputs.json }}
           PARSED_ORGANIZATION: ${{ steps.parse_request.outputs.parsed_organization }}
           PARSED_TEAM_SLUG: ${{ steps.parse_request.outputs.parsed_team_slug }}
+          PARSED_INTAKE_MODE: ${{ steps.parse_request.outputs.parsed_intake_mode }}
           PARSED_REQUESTED_PEOPLE: ${{ steps.parse_request.outputs.parsed_requested_people }}
           PARSED_BULK_CSV_REQUESTED_PEOPLE: ${{ steps.parse_request.outputs.parsed_bulk_csv_requested_people }}
           PARSED_BUSINESS_JUSTIFICATION: ${{ steps.parse_request.outputs.parsed_business_justification }}
           PARSED_DRY_RUN: ${{ steps.parse_request.outputs.parsed_dry_run }}
+          ISSUE_LABELS_JSON: ${{ steps.issue_context.outputs.issue_labels_json }}
+          COMMENT_ID: ${{ github.event.comment.id || '' }}
+          COMMENT_AUTHOR_LOGIN: ${{ github.event.comment.user.login || '' }}
+          COMMENT_BODY: ${{ github.event.comment.body || '' }}
           AUDIT_ARTIFACT_PATH: artifacts/add-team-members-validation-${{ env.ISSUE_NUMBER || 'manual' }}.json
         run: node src/scripts/run-request-validation.js
 

@@ -55,6 +55,46 @@ function buildRequestedPersonDetail(rawValue, extra = {}) {
   };
 }
 
+function classifyRequestedPerson(rawValue, options = {}) {
+  const username = normalizeLogin(
+    Object.prototype.hasOwnProperty.call(options, 'username') ? options.username : rawValue
+  );
+  const isValid = Object.prototype.hasOwnProperty.call(options, 'isValid')
+    ? Boolean(options.isValid)
+    : isPlausibleGitHubLogin(username);
+  const detail = buildRequestedPersonDetail(rawValue, {
+    ...options.detail,
+    username,
+    is_valid: isValid,
+  });
+
+  if (!isValid) {
+    return {
+      status: 'invalid',
+      username,
+      detail,
+    };
+  }
+
+  if (options.seen && options.seen.has(username)) {
+    return {
+      status: 'duplicate',
+      username,
+      detail,
+    };
+  }
+
+  if (options.seen) {
+    options.seen.add(username);
+  }
+
+  return {
+    status: 'valid',
+    username,
+    detail,
+  };
+}
+
 function normalizeRequestedPeople(input) {
   const candidates = toCandidateList(input);
   const seen = new Set();
@@ -64,23 +104,22 @@ function normalizeRequestedPeople(input) {
   const requestedPeopleDetail = [];
 
   for (const rawValue of candidates) {
-    const detail = buildRequestedPersonDetail(rawValue);
-    const username = detail.username;
-    const isValid = detail.is_valid;
+    const classification = classifyRequestedPerson(rawValue, { seen });
+    const detail = classification.detail;
+    const username = classification.username;
 
     requestedPeopleDetail.push(detail);
 
-    if (!isValid) {
+    if (classification.status === 'invalid') {
       invalidPeople.push(username || rawValue);
       continue;
     }
 
-    if (seen.has(username)) {
+    if (classification.status === 'duplicate') {
       duplicatePeople.push(username);
       continue;
     }
 
-    seen.add(username);
     normalizedPeople.push(username);
   }
 
@@ -101,6 +140,7 @@ function normalizeRequestedPeople(input) {
 
 module.exports = {
   buildRequestedPersonDetail,
+  classifyRequestedPerson,
   GITHUB_LOGIN_PATTERN,
   isPlausibleGitHubLogin,
   normalizeLogin,

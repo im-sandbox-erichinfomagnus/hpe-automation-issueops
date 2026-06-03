@@ -171,6 +171,18 @@ function createGitHubTeamApi(options = {}) {
       };
     },
 
+    async addIssueLabels({ repository, issueNumber, labels }) {
+      const [owner, repo] = String(repository || '').split('/');
+      const result = await request(`/repos/${owner}/${repo}/issues/${issueNumber}/labels`, {
+        method: 'POST',
+        body: { labels },
+      });
+      if (!result.ok) {
+        throw Object.assign(new Error('Failed to add issue labels'), result);
+      }
+      return (result.payload || []).map((label) => String(label.name || '').toLowerCase()).filter(Boolean);
+    },
+
     async getTeamBySlug({ organization, teamSlug }) {
       const result = await request(`/orgs/${organization}/teams/${teamSlug}`);
       if (result.status === 404) {

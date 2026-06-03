@@ -10,6 +10,7 @@ const {
   createEmptyBulkCsvNormalization,
   normalizeBulkCsvRequestedPeople,
 } = require('./normalize-bulk-csv-requested-people');
+const { normalizeLogin: normalizeCommentLogin } = require('./normalize-requested-people');
 
 function readField(source, keys) {
   for (const key of keys) {
@@ -41,6 +42,36 @@ function createEmptyManualNormalization() {
     duplicatePeople: [],
     invalidPeople: [],
     requestedPeopleDetail: [],
+  };
+}
+
+function createEmptyAttachmentSubmission() {
+  return {
+    comment_id: null,
+    comment_created_at: null,
+    uploader_login: null,
+    attachment_url: null,
+    filename: null,
+    extension: null,
+    content_hash: null,
+    downloaded_at: null,
+    byte_size: 0,
+    acceptance_status: 'waiting',
+    rejection_reason: null,
+  };
+}
+
+function createEmptyAttachmentValidationAttempt() {
+  return {
+    attempt_id: null,
+    request_id: null,
+    candidate_comment_id: null,
+    attempt_status: 'waiting',
+    selection_rule: 'newest requester attachment comment after the latest failed CSV attachment validation result',
+    evaluated_at: null,
+    errors: [],
+    warnings: [],
+    supersedes_attempt_id: null,
   };
 }
 
@@ -97,27 +128,37 @@ function parseTeamMembershipRequest(input = {}) {
       'people',
       'usernames',
     ]) ?? input.requestedPeople ?? '';
-  const bulkCsvInput =
+  const legacyBulkCsvInput =
     readFieldIncludingEmpty(parsed, [
       'bulk_csv_requested_people',
       'parsed_bulk_csv_requested_people',
-    ]) ?? input.bulkCsvRequestedPeople ?? input.bulkCsvInput ?? '';
+    ]) ?? input.bulkCsvRequestedPeople ?? '';
+  const bulkCsvInput = input.bulkCsvInput ?? '';
+  const requestedIntakeMode = normalizeLogin(
+    readFieldIncludingEmpty(parsed, ['intake_mode', 'parsed_intake_mode']) ?? input.intakeMode ?? ''
+  );
+  const comment = input.comment || input.comment_context || {};
+  const issueComments = input.issueComments || input.issue_comments || [];
+  const commentId = input.commentId || comment.id || null;
+  const commentAuthorLogin = normalizeCommentLogin(
+    input.commentAuthorLogin || comment.author_login || comment.user && comment.user.login || ''
+  );
   const manualPopulated = hasPopulatedInput(requestedPeopleInput);
-  const bulkCsvPopulated = hasPopulatedInput(bulkCsvInput);
-  const intakeMode = manualPopulated === bulkCsvPopulated
-    ? null
-    : manualPopulated
+  const legacyBulkCsvPopulated = hasPopulatedInput(legacyBulkCsvInput);
+  const intakeMode = requestedIntakeMode === 'csv_attachment'
+    ? 'csv_attachment'
+    : requestedIntakeMode === 'manual'
       ? 'manual'
-      : 'bulk_csv';
+      : manualPopulated && !legacyBulkCsvPopulated
+          ? 'manual'
+          : null;
   const manualNormalization = manualPopulated
     ? normalizeRequestedPeople(requestedPeopleInput)
     : createEmptyManualNormalization();
-  const bulkCsvNormalization = bulkCsvPopulated
+  const bulkCsvNormalization = hasPopulatedInput(bulkCsvInput)
     ? normalizeBulkCsvRequestedPeople(bulkCsvInput)
     : createEmptyBulkCsvNormalization(bulkCsvInput);
-  const selectedNormalization = intakeMode === 'bulk_csv'
-    ? bulkCsvNormalization
-    : intakeMode === 'manual'
+  const selectedNormalization = intakeMode === 'manual'
       ? manualNormalization
       : createEmptyManualNormalization();
   const dryRun = normalizeBoolean(
@@ -145,8 +186,17 @@ function parseTeamMembershipRequest(input = {}) {
     organization,
     team_slug: teamSlug,
     intake_mode: intakeMode,
+    comment_context: {
+      comment_id: commentId,
+      comment_author_login: commentAuthorLogin || null,
+      comment_body: comment.body || input.commentBody || '',
+      issue_comment_count: Array.isArray(issueComments) ? issueComments.length : 0,
+    },
     requested_people_input: requestedPeopleInput,
+    legacy_bulk_csv_input: legacyBulkCsvInput,
     bulk_csv_input: bulkCsvInput,
+    accepted_attachment_submission: createEmptyAttachmentSubmission(),
+    attachment_validation_attempt: createEmptyAttachmentValidationAttempt(),
     bulk_csv_submission: {
       encoding: bulkCsvNormalization.encoding,
       header_columns: bulkCsvNormalization.header_columns,
@@ -170,6 +220,7 @@ function parseTeamMembershipRequest(input = {}) {
     dry_run: dryRun,
     submitted_at: submittedAt,
     validation_findings: {
+      legacy_bulk_csv_input_detected: legacyBulkCsvPopulated,
       duplicate_people: selectedNormalization.duplicatePeople,
       invalid_people: selectedNormalization.invalidPeople,
       csv_row_findings: bulkCsvNormalization.csv_row_findings,

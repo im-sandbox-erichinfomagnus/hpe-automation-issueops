@@ -2,7 +2,7 @@
 
 const {
   buildRequestedPersonDetail,
-  isPlausibleGitHubLogin,
+  classifyRequestedPerson,
   normalizeLogin,
   unwrapCodeFence,
 } = require('./normalize-requested-people');
@@ -104,6 +104,19 @@ function buildRowFinding(rowNumber, row, validationStatus, failureReason, userna
   };
 }
 
+function describeBulkCsvRowIssue(finding) {
+  switch (finding.failure_reason) {
+    case 'missing_username':
+      return `CSV row ${finding.row_number} is missing the required username value.`;
+    case 'invalid_username':
+      return `CSV row ${finding.row_number} contains an invalid GitHub username${finding.username ? `: ${finding.username}` : ''}.`;
+    case 'inconsistent_shape':
+      return `CSV row ${finding.row_number} does not match the header column count.`;
+    default:
+      return `CSV row ${finding.row_number} is invalid.`;
+  }
+}
+
 function normalizeBulkCsvRequestedPeople(rawInput) {
   const empty = createEmptyBulkCsvNormalization(rawInput);
   if (!unwrapCodeFence(rawInput).trim()) {
@@ -186,42 +199,43 @@ function normalizeBulkCsvRequestedPeople(rawInput) {
       return;
     }
 
-    if (!isPlausibleGitHubLogin(username)) {
+    const classification = classifyRequestedPerson(row.join(','), {
+      username,
+      seen,
+      detail: {
+        source_row_number: rowNumber,
+      },
+    });
+
+    if (classification.status === 'invalid') {
       invalidPeople.push(username || rawUsername.trim());
       rowFindings.push(buildRowFinding(rowNumber, row, 'invalid', 'invalid_username', username));
-      requestedPeopleDetail.push(buildRequestedPersonDetail(row.join(','), {
-        username,
-        is_valid: false,
-        source_row_number: rowNumber,
+      requestedPeopleDetail.push({
+        ...classification.detail,
         validation_status: 'invalid',
         failure_reason: 'invalid_username',
-      }));
+      });
       return;
     }
 
-    if (seen.has(username)) {
+    if (classification.status === 'duplicate') {
       duplicatePeople.push(username);
       rowFindings.push(buildRowFinding(rowNumber, row, 'duplicate', 'duplicate_username', username));
-      requestedPeopleDetail.push(buildRequestedPersonDetail(row.join(','), {
-        username,
-        is_valid: true,
-        source_row_number: rowNumber,
+      requestedPeopleDetail.push({
+        ...classification.detail,
         validation_status: 'duplicate',
         failure_reason: 'duplicate_username',
-      }));
+      });
       return;
     }
 
-    seen.add(username);
     normalizedPeople.push(username);
     rowFindings.push(buildRowFinding(rowNumber, row, 'valid', null, username));
-    requestedPeopleDetail.push(buildRequestedPersonDetail(row.join(','), {
-      username,
-      is_valid: true,
-      source_row_number: rowNumber,
+    requestedPeopleDetail.push({
+      ...classification.detail,
       validation_status: 'valid',
       failure_reason: null,
-    }));
+    });
   });
 
   const invalidRowCount = rowFindings.filter(
@@ -253,5 +267,6 @@ module.exports = {
   CSV_ROW_NUMBERING_CONVENTION,
   REQUIRED_COLUMNS,
   createEmptyBulkCsvNormalization,
+  describeBulkCsvRowIssue,
   normalizeBulkCsvRequestedPeople,
 };

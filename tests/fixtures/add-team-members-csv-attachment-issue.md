@@ -8,14 +8,10 @@ platform-engineering
 
 ### Intake mode
 
-manual
+csv_attachment
 
 ### Requested people
 
-octocat
-hubot
-
-### Bulk CSV requested people
 
 
 ### Business justification

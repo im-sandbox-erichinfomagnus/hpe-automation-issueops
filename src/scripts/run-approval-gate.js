@@ -59,6 +59,17 @@ async function runApprovalGate(options = {}) {
   const auditArtifact = readAuditArtifact(artifactPath);
   const operation = auditArtifact.metadata && auditArtifact.metadata.operation;
 
+  if (
+    operation === 'team_membership' &&
+    auditArtifact.request &&
+    auditArtifact.request.intake_mode === 'csv_attachment' &&
+    ['executed', 'partially_executed', 'failed'].includes(auditArtifact.request.request_status)
+  ) {
+    writeGitHubOutput('approval-status', 'not_requested', env.GITHUB_OUTPUT);
+    emitAuditSummary(auditArtifact, { summaryPath: env.GITHUB_STEP_SUMMARY, overwrite: true });
+    return auditArtifact;
+  }
+
   if (!auditArtifact.validation || auditArtifact.validation.is_valid !== true) {
     writeGitHubOutput('approval-status', auditArtifact.approval && auditArtifact.approval.approval_status || 'not_requested', env.GITHUB_OUTPUT);
     emitAuditSummary(auditArtifact, { summaryPath: env.GITHUB_STEP_SUMMARY, overwrite: true });
@@ -127,6 +138,9 @@ async function runApprovalGate(options = {}) {
     auditArtifact.approval = await evaluateApprovalGate(
       {
         organization: auditArtifact.request.organization,
+        request_status: auditArtifact.request.request_status,
+        intake_mode: auditArtifact.request.intake_mode,
+        accepted_attachment_submission: auditArtifact.request.accepted_attachment_submission,
         intendedOwnerLogin: auditArtifact.request.intended_owner_login,
         designatedApproverLogin: auditArtifact.request.designated_approver_login,
         parentTeamSlug: auditArtifact.request.parent_team_slug,
