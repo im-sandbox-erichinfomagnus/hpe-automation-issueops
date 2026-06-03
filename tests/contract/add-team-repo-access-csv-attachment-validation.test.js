@@ -89,7 +89,7 @@ test('validation fixture scaffold includes CSV links for candidate discovery cov
     .map((comment) => comment.body)
     .join('\n');
 
-  assert.match(joinedBodies, /https:\/\/github\.com\/user-attachments\/files\//i);
+  assert.match(joinedBodies, /(?:^|[\s(])https:\/\/github\.com\/user-attachments\/files\/(?:$|[\s)])/i);
   assert.match(joinedBodies, /\.csv\)/i);
 });
 
