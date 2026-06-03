@@ -82,9 +82,9 @@ test('workflow applicability keeps empty-intake create-org-teams requests in val
 
 	assert.ok(requestScopeBlock);
 	assert.match(requestScopeBlock[0], /PARSED_INTENDED_OWNER:/);
-	assert.doesNotMatch(requestScopeBlock[0], /PARSED_REQUESTED_TEAM_NAMES:/);
-	assert.doesNotMatch(requestScopeBlock[0], /PARSED_BULK_CSV_REQUESTED_TEAM_NAMES:/);
-	assert.match(requestScopeBlock[0], /if \[ -n "\$\{PARSED_INTENDED_OWNER:-\}" \]; then/);
+	assert.match(requestScopeBlock[0], /PARSED_REQUESTED_TEAM_NAMES:/);
+	assert.match(requestScopeBlock[0], /PARSED_BULK_CSV_REQUESTED_TEAM_NAMES:/);
+	assert.match(requestScopeBlock[0], /if \[ -n "\$\{PARSED_ORGANIZATION:-\}" \] && \[ -n "\$\{PARSED_INTENDED_OWNER:-\}" \] && \{ \[ -n "\$\{PARSED_INTAKE_MODE:-\}" \] \|\| \[ -n "\$\{PARSED_REQUESTED_TEAM_NAMES:-\}" \] \|\| \[ -n "\$\{PARSED_BULK_CSV_REQUESTED_TEAM_NAMES:-\}" \]; \}; then/);
 });
 
 test('preserves intake-mode metadata for bulk CSV requests through validation and audit output', async () => {

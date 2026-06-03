@@ -43,10 +43,11 @@ test('workflow applicability keeps empty-intake add-child-teams requests in scop
 
   assert.ok(requestScopeBlock);
   assert.match(requestScopeBlock[0], /PARSED_PARENT_TEAM/);
+  assert.match(requestScopeBlock[0], /PARSED_DESIGNATED_HIERARCHY_APPROVER/);
   assert.match(requestScopeBlock[0], /PARSED_DESIGNATED_APPROVER/);
   assert.doesNotMatch(requestScopeBlock[0], /PARSED_REQUESTED_CHILD_TEAMS/);
   assert.doesNotMatch(requestScopeBlock[0], /PARSED_BULK_CSV_REQUESTED_CHILD_TEAMS/);
-  assert.match(requestScopeBlock[0], /if \[ -n "\$\{PARSED_PARENT_TEAM:-\}" \] && \[ -n "\$\{PARSED_DESIGNATED_APPROVER:-\}" \]; then/);
+  assert.match(requestScopeBlock[0], /if \[ -n "\$parsed_parent_team" \] && \[ -n "\$parsed_designated_approver" \]; then/);
 });
 
 test('workflow scaffolding keeps add-child-teams runtime and lint assumptions in place', () => {
@@ -61,7 +62,7 @@ test('workflow scaffolding keeps add-child-teams runtime and lint assumptions in
   assert.match(lintWorkflow, /\.github\/ISSUE_TEMPLATE\/\*\.yml/);
 });
 
-test('records an approval-ready add-child-teams request from bulk CSV intake', async () => {
+test('rejects legacy add-child-teams bulk CSV textarea intake with clear guidance', async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'add-child-teams-bulk-csv-valid-'));
   const auditPath = path.join(workspace, 'audit.json');
   const summaryPath = path.join(workspace, 'summary.md');
@@ -77,7 +78,7 @@ test('records an approval-ready add-child-teams request from bulk CSV intake', a
       PARSED_REQUEST_JSON: JSON.stringify({
         organization: 'octo-org',
         parent_team: 'Platform Engineering',
-        designated_approver: 'octocat',
+        designated_hierarchy_approver: 'octocat',
         requested_child_teams: '',
         bulk_csv_requested_child_teams: '```csv\nchild_team\nApplication Platform\nRelease Engineering\n```',
         business_justification: 'Need hierarchy updates',
@@ -92,23 +93,12 @@ test('records an approval-ready add-child-teams request from bulk CSV intake', a
     api: createHierarchyApi(validationFixture),
   });
 
-  assert.equal(result.validation.is_valid, true);
-  assert.equal(result.validation.request_status, 'awaiting_approval');
+  assert.equal(result.validation.is_valid, false);
+  assert.equal(result.validation.request_status, 'validation_failed');
   assert.equal(result.validation.request.intake_mode, 'bulk_csv');
-  assert.equal(result.validation.request.requested_child_teams_input, '');
-  assert.deepEqual(
-    result.validation.requested_child_links.map((childLink) => ({
-      child_team_slug: childLink.child_team_slug,
-      source_row_number: childLink.source_row_number,
-    })),
-    [
-      { child_team_slug: 'application-platform', source_row_number: 1 },
-      { child_team_slug: 'release-engineering', source_row_number: 2 },
-    ]
-  );
-  assert.match(fs.readFileSync(summaryPath, 'utf8'), /Intake mode: bulk_csv/i);
-  assert.match(fs.readFileSync(summaryPath, 'utf8'), /CSV row findings: 2/i);
-  assert.match(fs.readFileSync(outputPath, 'utf8'), /validation-status=awaiting_approval/);
+  assert.match(result.validation.errors.join('\n'), /bulk CSV textarea intake is no longer supported/i);
+  assert.match(fs.readFileSync(summaryPath, 'utf8'), /Validation: failed/i);
+  assert.match(fs.readFileSync(outputPath, 'utf8'), /validation-status=validation_failed/);
 });
 
 test('workflow applicability keeps empty-intake add-child-teams requests in validation scope', () => {
@@ -118,10 +108,11 @@ test('workflow applicability keeps empty-intake add-child-teams requests in vali
 
   assert.ok(requestScopeBlock);
   assert.match(requestScopeBlock[0], /PARSED_PARENT_TEAM:/);
+  assert.match(requestScopeBlock[0], /PARSED_DESIGNATED_HIERARCHY_APPROVER:/);
   assert.match(requestScopeBlock[0], /PARSED_DESIGNATED_APPROVER:/);
   assert.doesNotMatch(requestScopeBlock[0], /PARSED_REQUESTED_CHILD_TEAMS:/);
   assert.doesNotMatch(requestScopeBlock[0], /PARSED_BULK_CSV_REQUESTED_CHILD_TEAMS:/);
-  assert.match(requestScopeBlock[0], /if \[ -n "\$\{PARSED_PARENT_TEAM:-\}" \] && \[ -n "\$\{PARSED_DESIGNATED_APPROVER:-\}" \]; then/);
+  assert.match(requestScopeBlock[0], /if \[ -n "\$parsed_parent_team" \] && \[ -n "\$parsed_designated_approver" \]; then/);
 });
 
 test('preserves bulk CSV request metadata through validation and audit scaffolding', async () => {
@@ -138,7 +129,7 @@ test('preserves bulk CSV request metadata through validation and audit scaffoldi
       PARSED_REQUEST_JSON: JSON.stringify({
         organization: 'octo-org',
         parent_team: 'Platform Engineering',
-        designated_approver: 'octocat',
+        designated_hierarchy_approver: 'octocat',
         requested_child_teams: '',
         bulk_csv_requested_child_teams: '```csv\nchild_team\nApplication Platform\nApplication Platform\n\nRelease Engineering\n```',
         business_justification: 'Need hierarchy updates',
@@ -164,7 +155,7 @@ test('preserves bulk CSV request metadata through validation and audit scaffoldi
   );
 });
 
-test('approved bulk CSV requests preserve approval and execution metadata through the final artifact', async () => {
+test('legacy bulk CSV textarea requests remain validation-failed and are not execution-ready', async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'add-child-teams-bulk-csv-approved-'));
   const auditPath = path.join(workspace, 'audit.json');
   const validationFixture = loadJsonFixture('team-hierarchy-validation.json').visible_org;
@@ -178,7 +169,7 @@ test('approved bulk CSV requests preserve approval and execution metadata throug
       PARSED_REQUEST_JSON: JSON.stringify({
         organization: 'octo-org',
         parent_team: 'Platform Engineering',
-        designated_approver: 'octocat',
+        designated_hierarchy_approver: 'octocat',
         requested_child_teams: '',
         bulk_csv_requested_child_teams: '```csv\nchild_team\nApplication Platform\nRelease Engineering\n```',
         business_justification: 'Need hierarchy updates',
@@ -192,66 +183,16 @@ test('approved bulk CSV requests preserve approval and execution metadata throug
     setProcessExitCode: false,
   });
 
-  const approvedArtifact = writeArtifact({
-    ...validationResult.auditArtifact,
-    approval: {
-      approval_status: 'approved',
-      approver_login: 'octocat',
-      approver_role: 'designated_hierarchy_approver',
-      approver_authorization_state: 'authorized',
-      approved_at: '2026-05-20T12:00:00Z',
-      decision_source: 'comment',
-      decision_note: 'The approval comment approved was added by the authorized designated hierarchy approver for this request batch.',
-    },
-  });
-
-  await runApprovedExecution({
-    env: {
-      AUDIT_ARTIFACT_PATH: approvedArtifact,
-      GITHUB_RUN_ID: 'run-823',
-      GITHUB_RUN_ATTEMPT: '2',
-    },
-    tokenInfo: {
-      token: 'pat-token',
-      source: 'ISSUEOPS_GITHUB_TOKEN',
-      is_pat_backed: true,
-      token_kind: 'pat',
-      supports_team_hierarchy_mutation: true,
-    },
-    createApi: () => ({
-      listOrgTeams: async () => validationFixture.teams,
-      updateTeamParent: async ({ teamSlug, parentTeamId }) => ({
-        id: 2,
-        name: 'Application Platform',
-        slug: teamSlug,
-        parent: { id: parentTeamId, slug: 'platform-engineering' },
-      }),
-    }),
-  });
-
-  const persisted = JSON.parse(fs.readFileSync(approvedArtifact, 'utf8'));
-  const summary = formatAuditSummary(persisted);
-
-  assert.equal(persisted.request.intake_mode, 'bulk_csv');
-  assert.equal(persisted.request.request_status, 'executed');
-  assert.equal(persisted.reconciliation.intake_mode, 'bulk_csv');
-  assert.equal(persisted.execution.duplicate_row_count, 0);
-  assert.equal(persisted.execution.invalid_row_count, 0);
-  assert.deepEqual(
-    persisted.reconciliation.child_links_to_apply.map((entry) => entry.source_row_number),
-    [1]
+  assert.equal(validationResult.auditArtifact.validation.is_valid, false);
+  assert.equal(validationResult.auditArtifact.request.request_status, 'validation_failed');
+  assert.equal(validationResult.auditArtifact.request.intake_mode, 'bulk_csv');
+  assert.match(
+    validationResult.auditArtifact.validation.errors.join('\n'),
+    /bulk CSV textarea intake is no longer supported/i
   );
-  assert.deepEqual(
-    persisted.reconciliation.child_links_already_present.map((entry) => entry.source_row_number),
-    [2]
-  );
-  assert.match(summary, /Intake mode: bulk_csv/i);
-  assert.match(summary, /CSV duplicate rows: 0/i);
-  assert.match(summary, /Child links applied: 1/i);
-  assert.match(summary, /No-op: 1/i);
 });
 
-test('approval gate preserves bulk CSV audit metadata before approved execution', async () => {
+test('approval gate keeps legacy bulk CSV textarea requests in validation_failed state', async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'add-child-teams-bulk-csv-gate-'));
   const auditPath = path.join(workspace, 'audit.json');
   const validationFixture = loadJsonFixture('team-hierarchy-validation.json').visible_org;
@@ -265,7 +206,7 @@ test('approval gate preserves bulk CSV audit metadata before approved execution'
       PARSED_REQUEST_JSON: JSON.stringify({
         organization: 'octo-org',
         parent_team: 'Platform Engineering',
-        designated_approver: 'octocat',
+        designated_hierarchy_approver: 'octocat',
         requested_child_teams: '',
         bulk_csv_requested_child_teams: '```csv\nchild_team\nApplication Platform\nRelease Engineering\n```',
         business_justification: 'Need hierarchy updates',
@@ -303,13 +244,9 @@ test('approval gate preserves bulk CSV audit metadata before approved execution'
   });
 
   assert.equal(gated.request.intake_mode, 'bulk_csv');
-  assert.equal(gated.request.request_status, 'approved');
-  assert.equal(gated.approval.approval_status, 'approved');
-  assert.equal(gated.request.bulk_csv_submission.valid_row_count, 2);
+  assert.equal(gated.request.request_status, 'validation_failed');
+  assert.equal(gated.approval.approval_status, 'not_requested');
   assert.equal(gated.execution.duplicate_row_count, 0);
   assert.equal(gated.execution.invalid_row_count, 0);
-  assert.deepEqual(
-    gated.request.requested_child_links.map((entry) => entry.source_row_number),
-    [1, 2]
-  );
+  assert.match(gated.validation.errors.join('\n'), /bulk CSV textarea intake is no longer supported/i);
 });
