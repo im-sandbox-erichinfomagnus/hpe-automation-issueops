@@ -45,6 +45,22 @@ function buildPendingApprovalNote(approvalMode, approvalCommand) {
   return `Add an issue comment containing exactly '${approvalCommand}' as an organization owner to authorize execution.`;
 }
 
+function buildPendingAttachmentApprovalNote(approvalMode, approvalCommand) {
+  if (approvalMode === 'team_hierarchy') {
+    return `Add an issue comment containing exactly '${approvalCommand}' from the designated hierarchy approver after the accepted CSV attachment comment to authorize execution.`;
+  }
+
+  if (approvalMode === 'team_creation') {
+    return `Add an issue comment containing exactly '${approvalCommand}' from the active intended owner after the accepted CSV attachment comment to authorize execution.`;
+  }
+
+  if (approvalMode === 'team_repo_access') {
+    return `Add an issue comment containing exactly '${approvalCommand}' from the designated target organization owner after the accepted CSV attachment comment to authorize execution.`;
+  }
+
+  return `Add an issue comment containing exactly '${approvalCommand}' as an organization owner after the accepted CSV attachment comment to authorize execution.`;
+}
+
 async function evaluateApprovalGate(input = {}, options = {}) {
   const approvalCommand = options.approvalCommand || APPROVAL_COMMAND;
   const approvalMode = input.approvalMode || options.approvalMode || 'team_membership';
@@ -72,7 +88,11 @@ async function evaluateApprovalGate(input = {}, options = {}) {
     return resolveApproverRole(args, options);
   });
 
-  if ((approvalMode === 'team_membership' || approvalMode === 'team_creation') && intakeMode === 'csv_attachment' && requestStatus === 'waiting_for_attachment') {
+  if (
+    (approvalMode === 'team_membership' || approvalMode === 'team_creation' || approvalMode === 'team_hierarchy') &&
+    intakeMode === 'csv_attachment' &&
+    requestStatus === 'waiting_for_attachment'
+  ) {
     return {
       approval_status: 'not_requested',
       approver_login: '',
@@ -83,14 +103,14 @@ async function evaluateApprovalGate(input = {}, options = {}) {
   }
 
   const approvalComment = findLatestApprovalComment(issueComments, approvalCommand, {
-    notBefore: (approvalMode === 'team_membership' || approvalMode === 'team_creation') && intakeMode === 'csv_attachment'
+    notBefore: (approvalMode === 'team_membership' || approvalMode === 'team_creation' || approvalMode === 'team_hierarchy') && intakeMode === 'csv_attachment'
       ? acceptedAttachmentCommentCreatedAt
       : null,
   });
 
   if (!approvalComment) {
     const requiresFreshAttachmentApproval =
-      (approvalMode === 'team_membership' || approvalMode === 'team_creation') &&
+      (approvalMode === 'team_membership' || approvalMode === 'team_creation' || approvalMode === 'team_hierarchy') &&
       intakeMode === 'csv_attachment' &&
       acceptedAttachmentCommentCreatedAt;
 
@@ -102,7 +122,7 @@ async function evaluateApprovalGate(input = {}, options = {}) {
       decision_note: priorApprovalStatus === 'approved'
         ? `The approval comment '${approvalCommand}' is no longer present and execution must remain blocked.`
         : requiresFreshAttachmentApproval
-          ? `Add an issue comment containing exactly '${approvalCommand}' as an organization owner after the accepted CSV attachment comment to authorize execution.`
+          ? buildPendingAttachmentApprovalNote(approvalMode, approvalCommand)
           : buildPendingApprovalNote(approvalMode, approvalCommand),
     };
   }

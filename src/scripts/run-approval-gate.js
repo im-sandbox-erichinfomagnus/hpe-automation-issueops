@@ -60,10 +60,10 @@ async function runApprovalGate(options = {}) {
   const operation = auditArtifact.metadata && auditArtifact.metadata.operation;
 
   if (
-    (operation === 'team_membership' || operation === 'team_creation') &&
+    (operation === 'team_membership' || operation === 'team_creation' || operation === 'team_hierarchy') &&
     auditArtifact.request &&
     auditArtifact.request.intake_mode === 'csv_attachment' &&
-    ['executed', 'partially_executed', 'failed'].includes(auditArtifact.request.request_status)
+    ['executed', 'partially_executed', 'failed', 'failed_after_approved_execution'].includes(auditArtifact.request.request_status)
   ) {
     writeGitHubOutput('approval-status', 'not_requested', env.GITHUB_OUTPUT);
     emitAuditSummary(auditArtifact, { summaryPath: env.GITHUB_STEP_SUMMARY, overwrite: true });
@@ -161,14 +161,23 @@ async function runApprovalGate(options = {}) {
     );
   }
 
-  auditArtifact.request.request_status =
-    auditArtifact.approval.approval_status === 'approved'
+  const isWaitingForAttachment =
+    auditArtifact.request &&
+    auditArtifact.request.intake_mode === 'csv_attachment' &&
+    auditArtifact.approval &&
+    auditArtifact.approval.approval_status === 'not_requested';
+
+  auditArtifact.request.request_status = isWaitingForAttachment
+    ? 'waiting_for_attachment'
+    : auditArtifact.approval.approval_status === 'approved'
       ? 'approved'
       : 'awaiting_approval';
   auditArtifact.execution.summary =
     auditArtifact.metadata && auditArtifact.metadata.operation === 'team_hierarchy'
       ? auditArtifact.approval.approval_status === 'approved'
         ? 'Request approval was granted by the authorized designated hierarchy approver. No child-team mutation was attempted in this phase.'
+        : auditArtifact.approval.approval_status === 'not_requested'
+          ? 'Request is still waiting for a requester-authored CSV attachment comment before approval can be evaluated. No child-team mutation was attempted.'
         : auditArtifact.approval.approval_status === 'denied'
           ? 'Approval was denied because the approval comment did not come from the authorized designated hierarchy approver. No child-team mutation was attempted.'
           : auditArtifact.approval.approval_status === 'invalidated'

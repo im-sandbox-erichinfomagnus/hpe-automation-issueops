@@ -1,6 +1,7 @@
 'use strict';
 
 const {
+  buildNormalizedChildTeamLink,
   classifyRequestedChildTeam,
   createChildTeamNormalizationState,
   unwrapCodeFence,
@@ -231,11 +232,9 @@ function normalizeBulkCsvRequestedChildTeams(rawInput) {
       return;
     }
 
-    normalizedChildTeams.push({
-      requested_name: childTeamName,
-      child_team_slug: normalizedSlug,
-      source_row_number: rowNumber,
-    });
+    normalizedChildTeams.push(
+      buildNormalizedChildTeamLink(normalizedChildTeam, { source_row_number: rowNumber })
+    );
     rowFindings.push(buildRowFinding(rowNumber, row, 'valid', null, childTeamName, normalizedSlug));
     requestedChildTeamDetail.push(buildRequestedChildTeamDetail(childTeamName, {
       normalized_slug: normalizedSlug,

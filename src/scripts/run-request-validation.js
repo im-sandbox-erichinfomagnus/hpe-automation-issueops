@@ -22,8 +22,22 @@ const { validateTeamRepoAccessRequest } = require('../workflow-support/validate-
 const { emitAuditSummary } = require('./emit-audit-summary');
 const { createGitHubTeamApi: createMembershipGitHubApi } = require('../workflow-support/github-team-api');
 const { executeWithBoundedRetry } = require('../workflow-support/handle-rate-limit');
+const { resolveTeamHierarchyAttachmentMaxBytes } = require('../actions/team-hierarchy-policy');
 
 function parseParsedRequestJson(rawValue) {
+  if (!rawValue) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(rawValue);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseJsonFromEnv(rawValue) {
   if (!rawValue) {
     return null;
   }
@@ -46,6 +60,7 @@ function readParsedRequestFromEnv(env = process.env) {
     organization: env.PARSED_ORGANIZATION || '',
     target_team: env.PARSED_TARGET_TEAM || '',
     parent_team: env.PARSED_PARENT_TEAM || '',
+    designated_hierarchy_approver: env.PARSED_DESIGNATED_HIERARCHY_APPROVER || '',
     designated_approver: env.PARSED_DESIGNATED_APPROVER || '',
     requested_repositories: env.PARSED_REQUESTED_REPOSITORIES || '',
     bulk_csv_requested_repositories: env.PARSED_BULK_CSV_REQUESTED_REPOSITORIES || '',
@@ -93,6 +108,8 @@ function isTeamHierarchyParsedRequest(parsedRequest = {}) {
   return Boolean(
     parsedRequest.parent_team ||
     parsedRequest.parsed_parent_team ||
+    parsedRequest.designated_hierarchy_approver ||
+    parsedRequest.parsed_designated_hierarchy_approver ||
     parsedRequest.designated_approver ||
     parsedRequest.parsed_designated_approver ||
     parsedRequest.requested_child_teams ||
@@ -117,7 +134,7 @@ function buildCommentContextFromEnv(env = process.env) {
 }
 
 function isTerminalRequestStatus(status) {
-  return ['executed', 'partially_executed', 'failed'].includes(status);
+  return ['executed', 'partially_executed', 'failed', 'failed_after_approved_execution'].includes(status);
 }
 
 function terminalStateLabelPrefix(operation) {
@@ -146,7 +163,7 @@ function readIssueLabelsFromEnv(env = process.env) {
 
 function deriveTerminalStatusFromIssueLabels(labels = [], operation = null) {
   const prefix = terminalStateLabelPrefix(operation);
-  for (const status of ['executed', 'partially_executed', 'failed']) {
+  for (const status of ['executed', 'partially_executed', 'failed_after_approved_execution', 'failed']) {
     if (labels.includes(`${prefix}${status}`)) {
       return status;
     }
@@ -327,6 +344,7 @@ async function runRequestValidation(options = {}) {
   const priorAttachmentRetryState = readPriorAttachmentRetryState(artifactPath);
   const priorArtifact = priorAttachmentRetryState.priorArtifact;
   const issueLabels = readIssueLabelsFromEnv(env);
+  const teamHierarchyRepositoryPolicy = parseJsonFromEnv(env.TEAM_HIERARCHY_POLICY_JSON) || {};
   const operation = isTeamRepoAccess ? 'team_repo_access' : isTeamCreation ? 'team_creation' : isTeamHierarchy ? 'team_hierarchy' : 'team_membership';
   const terminalStatusFromIssueLabels = deriveTerminalStatusFromIssueLabels(issueLabels, operation);
   const request = (isTeamRepoAccess
@@ -357,7 +375,6 @@ async function runRequestValidation(options = {}) {
   try {
     if (
       !isTeamRepoAccess &&
-      !isTeamHierarchy &&
       request.intake_mode === 'csv_attachment' &&
       request.comment_context.comment_id &&
       terminalStatusFromIssueLabels
@@ -403,7 +420,6 @@ async function runRequestValidation(options = {}) {
       };
     } else if (
       !isTeamRepoAccess &&
-      !isTeamHierarchy &&
       request.intake_mode === 'csv_attachment' &&
       request.comment_context.comment_id &&
       priorArtifact &&
@@ -542,11 +558,44 @@ async function runRequestValidation(options = {}) {
           dry_run: validation.request.dry_run,
         });
       } else if (isTeamHierarchy) {
+        const hierarchyAttachmentMaxBytes = resolveTeamHierarchyAttachmentMaxBytes({
+          attachment_max_bytes: options.maxAttachmentBytes,
+          repository_policy: teamHierarchyRepositoryPolicy,
+        });
+        const issueComments = env.ISSUE_NUMBER
+          ? typeof api.listIssueComments === 'function'
+            ? await executeGitHubReadWithRetry(
+                () => api.listIssueComments({
+                  repository: env.GITHUB_REPOSITORY || '',
+                  issueNumber: env.ISSUE_NUMBER,
+                }),
+                { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+              )
+            : []
+          : [];
         validation = await validateTeamHierarchyRequest(request, {
-          getOrganization: ({ organization }) => api.getOrganization({ organization }),
-          listTeams: ({ organization }) => api.listOrgTeams({ organization }),
+          getOrganization: ({ organization }) => executeGitHubReadWithRetry(
+            () => api.getOrganization({ organization }),
+            { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+          ),
+          listTeams: ({ organization }) => executeGitHubReadWithRetry(
+            () => api.listOrgTeams({ organization }),
+            { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+          ),
           resolveTeamMembership: ({ organization, teamSlug, username }) =>
-            api.getMembershipForUser({ organization, teamSlug, username }),
+            executeGitHubReadWithRetry(
+              () => api.getMembershipForUser({ organization, teamSlug, username }),
+              { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+            ),
+          issueComments,
+          latestFailedValidationAt: priorAttachmentRetryState.latestFailedValidationAt,
+          latestFailedValidationAttemptId: priorAttachmentRetryState.latestFailedValidationAttemptId,
+          repositoryPolicy: teamHierarchyRepositoryPolicy,
+          token: tokenInfo.token,
+          fetchImpl: options.fetchImpl,
+          maxAttachmentBytes: hierarchyAttachmentMaxBytes,
+          maxRetries: options.maxRetries,
+          sleep: options.sleep,
         });
         reconciliationPlan = reconcileTeamHierarchy({
           request: validation.request,
@@ -614,6 +663,7 @@ async function runRequestValidation(options = {}) {
     executionResults: [],
     operationLabel: isTeamRepoAccess ? 'repository' : isTeamCreation ? 'team' : isTeamHierarchy ? 'child_link' : 'membership',
     intake_mode: validation.request && validation.request.intake_mode,
+    terminal_state: validation.request_status,
     duplicate_row_count: validation.request && validation.request.bulk_csv_submission
       ? validation.request.bulk_csv_submission.duplicate_row_count
       : 0,
@@ -700,6 +750,7 @@ module.exports = {
   isTeamHierarchyParsedRequest,
   isTeamCreationParsedRequest,
   parseParsedRequestJson,
+  parseJsonFromEnv,
   readIssueLabelsFromEnv,
   readParsedRequestFromEnv,
   buildCommentContextFromEnv,

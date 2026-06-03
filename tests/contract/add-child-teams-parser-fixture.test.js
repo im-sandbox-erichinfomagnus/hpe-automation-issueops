@@ -65,16 +65,58 @@ test('parses a valid add-child-teams fixture into a normalized request', () => {
   assert.equal(request.dry_run, true);
 });
 
+test('manual parser guardrail keeps manual intake semantics with no attachment requirement', () => {
+  const parsedRequest = loadBaseFixture();
+  const request = parseTeamHierarchyRequest({
+    parsedRequest,
+    issue: { number: 507, user: { login: 'requester' } },
+    repository: 'octo-org/issueops-speckit',
+  });
+
+  assert.equal(request.intake_mode, 'manual');
+  assert.equal(request.comment_context.comment_id, null);
+  assert.equal(request.accepted_attachment_submission.acceptance_status, 'waiting');
+  assert.equal(request.attachment_validation_attempt.attempt_status, 'waiting');
+  assert.deepEqual(
+    request.requested_child_links.map((childLink) => childLink.child_team_slug),
+    ['application-platform', 'release-engineering']
+  );
+});
+
 test('manual add-child-teams guidance remains visible in the issue form', () => {
   const templatePath = path.join(__dirname, '..', '..', '.github', 'ISSUE_TEMPLATE', 'add-child-teams.yml');
   const template = fs.readFileSync(templatePath, 'utf8');
 
+  assert.match(template, /id:\s+intake_mode/);
+  assert.match(template, /csv_attachment/i);
   assert.match(template, /id:\s+requested_child_teams/);
-  assert.match(template, /manual request path/i);
+  assert.match(template, /manual mode only/i);
   assert.match(template, /one existing child team per line/i);
-  assert.match(template, /requested_child_teams[\s\S]*required:\s+false/i);
-  assert.match(template, /validation enforces exactly one populated intake mode/i);
-  assert.match(template, /bulk_csv_requested_child_teams[\s\S]*required:\s+false/i);
+  assert.match(template, /waiting_for_attachment/i);
+  assert.match(template, /required:\s+false/i);
+});
+
+test('csv_attachment parser intake keeps manual normalization empty and initializes waiting state', () => {
+  const request = parseTeamHierarchyRequest({
+    parsedRequest: {
+      organization: 'octo-org',
+      parent_team: 'Platform Engineering',
+      designated_hierarchy_approver: 'octocat',
+      intake_mode: 'csv_attachment',
+      requested_child_teams: '',
+      business_justification: 'Need hierarchy updates',
+      dry_run: 'true',
+    },
+    issue: { number: 508, user: { login: 'requester' } },
+    repository: 'octo-org/issueops-speckit',
+  });
+
+  assert.equal(request.intake_mode, 'csv_attachment');
+  assert.equal(request.request_status, 'waiting_for_attachment');
+  assert.equal(request.designated_approver_login, 'octocat');
+  assert.equal(request.requested_child_links.length, 0);
+  assert.equal(request.requested_child_teams_input, '');
+  assert.equal(request.accepted_attachment_submission.acceptance_status, 'waiting');
 });
 
 test('rejects duplicate child teams from a fixture-derived submission', async () => {
