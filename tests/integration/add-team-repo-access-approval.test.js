@@ -223,11 +223,10 @@ test('runApprovalGate preserves manual intake when the stored optional CSV field
       organization: 'octo-org',
       team_slug: 'platform-engineering',
       team_name: 'Platform Engineering',
-      intake_mode: null,
+      intake_mode: 'manual',
       requested_repositories_input: 'service-catalog',
       bulk_csv_input: '```csv\n\n```',
       bulk_csv_submission: {
-        encoding: 'utf-8',
         header_columns: [],
         required_columns: ['repository'],
         unsupported_columns: [],

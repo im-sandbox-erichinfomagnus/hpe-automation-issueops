@@ -60,8 +60,8 @@ function determineOperation(request = {}, runContext = {}) {
 }
 
 function inferRequestIntakeMode(request = {}, operation = determineOperation(request)) {
-  if (request.intake_mode) {
-    return request.intake_mode;
+  if (Object.prototype.hasOwnProperty.call(request, 'intake_mode')) {
+    return request.intake_mode ?? null;
   }
 
   if (request.accepted_attachment_submission && request.accepted_attachment_submission.attachment_url) {

@@ -5,8 +5,8 @@ const path = require('path');
 
 const { determineOperation } = require('../workflow-support/build-audit-artifact');
 
-function readBulkCsvCount(executionValue, submissionValue) {
-  return executionValue ?? submissionValue ?? 0;
+function readBulkCsvCount(executionCount, requestCount) {
+  return executionCount ?? requestCount ?? 0;
 }
 
 function formatAuditSummary(auditArtifact = {}) {
@@ -199,10 +199,9 @@ function formatAuditSummary(auditArtifact = {}) {
         ? `- CSV row findings: ${(validation.csv_row_findings || request.csv_row_findings || []).length}`
         : null,
       isBulkCsv || isCsvAttachment
-        ? `- CSV valid rows: ${request.bulk_csv_submission && request.bulk_csv_submission.valid_row_count || 0}`
+        ? `- CSV valid rows: ${request.bulk_csv_submission?.valid_row_count ?? 0}`
         : null,
-      isBulkCsv
-        || isCsvAttachment
+      isBulkCsv || isCsvAttachment
         ? `- CSV duplicate rows: ${readBulkCsvCount(execution.duplicate_row_count, request.bulk_csv_submission?.duplicate_row_count)}`
         : null,
       isBulkCsv || isCsvAttachment
@@ -273,7 +272,7 @@ function formatAuditSummary(auditArtifact = {}) {
       ? `- CSV row findings: ${(validation.csv_row_findings || request.csv_row_findings || []).length}`
       : null,
     isBulkCsv || isCsvAttachment
-      ? `- CSV valid rows: ${request.bulk_csv_submission && request.bulk_csv_submission.valid_row_count || 0}`
+      ? `- CSV valid rows: ${request.bulk_csv_submission?.valid_row_count ?? 0}`
       : null,
     isBulkCsv || isCsvAttachment
       ? `- CSV duplicate rows: ${readBulkCsvCount(execution.duplicate_row_count, request.bulk_csv_submission?.duplicate_row_count)}`
