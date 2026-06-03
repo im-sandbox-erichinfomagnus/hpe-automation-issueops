@@ -73,6 +73,42 @@ test('inferRequestIntakeMode classifies team_repo_access bulk CSV when only norm
   assert.equal(intakeMode, 'bulk_csv');
 });
 
+test('buildAuditArtifact ignores empty fenced bulk CSV input when inferring intake mode', () => {
+  const artifact = buildAuditArtifact({
+    request: {
+      organization: 'octo-org',
+      team_slug: 'platform-engineering',
+      requested_people_input: 'octocat',
+      bulk_csv_input: '```csv\n\n```',
+      csv_row_findings: [],
+      bulk_csv_submission: {
+        schema_status: 'not_provided',
+      },
+    },
+  });
+
+  assert.equal(artifact.request.intake_mode, 'manual');
+});
+
+test('buildAuditArtifact preserves an explicitly ambiguous intake mode', () => {
+  const artifact = buildAuditArtifact({
+    request: {
+      organization: 'octo-org',
+      intended_owner_login: 'octocat',
+      intake_mode: null,
+      bulk_csv_input: '```csv\nteam_name\nPlatform Engineering\n```',
+      requested_teams: [
+        {
+          requested_name: 'Platform Engineering',
+          normalized_slug: 'platform-engineering',
+        },
+      ],
+    },
+  });
+
+  assert.equal(artifact.request.intake_mode, null);
+});
+
 test('buildAuditArtifact infers bulk CSV mode for legacy artifacts from raw CSV signals only', () => {
   const artifact = buildAuditArtifact({
     request: {
