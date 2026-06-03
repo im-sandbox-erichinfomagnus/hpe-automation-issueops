@@ -6,6 +6,10 @@ const path = require('node:path');
 const test = require('node:test');
 
 const { DEFAULT_ATTACHMENT_MAX_BYTES } = require('../../src/actions/team-repo-access-policy');
+const {
+  extractCommentLinks,
+  isTrustedGitHubAttachmentUrl,
+} = require('../../src/workflow-support/resolve-csv-attachment-comment');
 const { validateTeamRepoAccessRequest } = require('../../src/workflow-support/validate-team-repo-access-request');
 
 function loadAttachmentCommentsFixture() {
@@ -85,12 +89,11 @@ test('validation fixture scaffold includes non-requester, ambiguous, corrected, 
 });
 
 test('validation fixture scaffold includes CSV links for candidate discovery coverage', () => {
-  const joinedBodies = loadAttachmentCommentsFixture()
-    .map((comment) => comment.body)
-    .join('\n');
+  const links = loadAttachmentCommentsFixture()
+    .flatMap((comment) => extractCommentLinks(comment.body));
 
-  assert.ok(joinedBodies.includes('https://github.com/user-attachments/files/'));
-  assert.ok(joinedBodies.toLowerCase().includes('.csv)'));
+  assert.ok(links.some((link) => isTrustedGitHubAttachmentUrl(link.url)));
+  assert.ok(links.some((link) => String(link.url || '').toLowerCase().endsWith('.csv')));
 });
 
 test('rejects requester CSV links hosted outside github.com user-attachments path', async () => {
