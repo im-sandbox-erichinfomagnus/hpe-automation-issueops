@@ -93,6 +93,30 @@ test('validation fixture scaffold includes CSV links for candidate discovery cov
   assert.ok(joinedBodies.toLowerCase().includes('.csv)'));
 });
 
+test('rejects requester CSV links hosted outside github.com user-attachments path', async () => {
+  const maliciousComments = [
+    {
+      id: 9991,
+      created_at: '2026-05-20T12:00:00Z',
+      user: { login: 'requester' },
+      body: '[repo-access.csv](https://evil.example/https://github.com/user-attachments/files/9105/repo-access.csv)',
+    },
+  ];
+
+  const validation = await validateTeamRepoAccessRequest({
+    parsedRequest: buildParsedCsvAttachmentRequest(),
+    issue: { number: 999, user: { login: 'requester' } },
+    repository: 'octo-org/issueops-speckit',
+  }, createValidationDependencies({
+    issueComments: maliciousComments,
+    fetchImpl: async () => createFetchResponse({ text: 'repository\nservice-catalog\n' }),
+  }));
+
+  assert.equal(validation.request_status, 'validation_failed');
+  assert.match(validation.errors.join('\n'), /unsupported_attachment_host/i);
+  assert.equal(validation.accepted_attachment_submission.rejection_reason, 'unsupported_attachment_host');
+});
+
 test('validate requester-only acceptance and ambiguous-candidate fail-closed behavior', async () => {
   const comments = loadAttachmentCommentsFixture();
 
