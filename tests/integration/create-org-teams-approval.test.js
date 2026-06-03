@@ -28,7 +28,6 @@ function writeAuditArtifact(directory, overrides = {}) {
       bulk_csv_input: '',
       requested_teams: [
         {
-          requested_name: 'Platform Engineering',
           normalized_slug: 'platform-engineering',
           intended_owner_login: 'himanshu-im',
           desired_action: 'create_team'

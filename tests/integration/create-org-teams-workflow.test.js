@@ -25,7 +25,7 @@ function writeArtifact(baseArtifact) {
 function createBulkCsvApprovedArtifact() {
   const artifact = loadFixture('create-team-success.json').approved_artifact;
   artifact.request.intake_mode = 'bulk_csv';
-  artifact.request.bulk_csv_input = '```csv\nteam_name\nPlatform Engineering\nAI Model Routing Specialists\n```';
+  artifact.request.bulk_csv_input = '```csv\nteam_name\nPlatform Engineering\nAI Model Routing Specialists\nPlatform Engineering\n```';
   artifact.request.bulk_csv_submission = {
     encoding: 'utf-8',
     header_columns: ['team_name'],
