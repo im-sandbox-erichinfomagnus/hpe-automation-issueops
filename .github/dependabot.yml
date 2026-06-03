@@ -7,7 +7,7 @@ updates:
       day: "monday"
       time: "05:00"
       timezone: "UTC"
-    target-branch: "009-add-team-repo-access-bulk-csv-mode"
+    target-branch: "008-add-child-teams-bulk-csv-mode"
     open-pull-requests-limit: 10
     labels:
       - "dependencies"
