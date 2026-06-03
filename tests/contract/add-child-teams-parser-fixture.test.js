@@ -94,6 +94,7 @@ test('manual add-child-teams guidance remains visible in the issue form', () => 
   assert.match(template, /one existing child team per line/i);
   assert.match(template, /waiting_for_attachment/i);
   assert.match(template, /required:\s+false/i);
+  assert.match(template, /requested_child_teams[\s\S]*required:\s+false/i);
 });
 
 test('csv_attachment parser intake keeps manual normalization empty and initializes waiting state', () => {

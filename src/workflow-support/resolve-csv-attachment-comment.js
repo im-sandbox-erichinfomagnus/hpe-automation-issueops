@@ -19,6 +19,24 @@ function inferFilenameFromUrl(url = '') {
   }
 }
 
+function isTrustedGitHubAttachmentUrl(url = '') {
+  try {
+    const parsed = new URL(url);
+    const hostname = String(parsed.hostname || '').toLowerCase();
+    const pathname = String(parsed.pathname || '');
+
+    return (
+      parsed.protocol === 'https:'
+      && hostname === 'github.com'
+      && !parsed.username
+      && !parsed.password
+      && pathname.startsWith('/user-attachments/files/')
+    );
+  } catch {
+    return false;
+  }
+}
+
 function inferFilenameFromLink(link = {}) {
   const inferredFromUrl = inferFilenameFromUrl(link.url || '');
   const normalizedLabel = String(link.label || '').trim();
@@ -141,6 +159,17 @@ function classifyAttachmentComment(comment = {}, options = {}) {
     };
   }
 
+  if (csvLinks.length === 1 && !isTrustedGitHubAttachmentUrl(csvLinks[0].url || '')) {
+    return {
+      status: 'non_csv_attachment',
+      comment_id: comment.id || null,
+      comment_created_at: comment.created_at || null,
+      uploader_login: authorLogin || null,
+      attachment_links: csvLinks,
+      rejection_reason: 'unsupported_attachment_host',
+    };
+  }
+
   if (csvLinks.length > 1) {
     return {
       status: 'ambiguous',
@@ -232,6 +261,7 @@ module.exports = {
   inferFilenameFromUrl,
   inferFilenameFromLink,
   isCsvLink,
+  isTrustedGitHubAttachmentUrl,
   resolveCsvAttachmentComment,
   sortCommentsAscending,
 };

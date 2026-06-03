@@ -87,12 +87,19 @@ function buildExecutionOutcome(input = {}) {
   const groupedLabel = summary.operation_label === 'membership'
     ? 'membership(s)'
     : `${summary.operation_label}(ies)`;
+  const terminalState = input.terminal_state || 'not_started';
+  const waitingSummary = terminalState === 'waiting_for_attachment'
+    ? 'Request metadata is valid, but execution remains blocked until the requester posts a qualifying CSV attachment comment.'
+    : null;
+  const awaitingApprovalSummary = terminalState === 'awaiting_approval' && summary.mutated.length === 0
+    ? 'Request is validated and ready for approval. No mutation was attempted in this phase.'
+    : null;
 
   return {
     run_id: runContext.run_id || process.env.GITHUB_RUN_ID || null,
     run_attempt: runContext.run_attempt || process.env.GITHUB_RUN_ATTEMPT || null,
     intake_mode: input.intake_mode || null,
-    terminal_state: input.terminal_state || 'not_started',
+    terminal_state: terminalState,
     mutation_count: summary.mutated.length,
     created_count: summary.mutated.length,
     linked_count: summary.mutated.length,
@@ -111,7 +118,7 @@ function buildExecutionOutcome(input = {}) {
     failed_subset: summary.failed,
     rejected_subset: summary.rejected,
     remediation_instructions: remediationInstructions,
-    summary: [
+    summary: waitingSummary || awaitingApprovalSummary || [
       `Processed ${summary.mutated.length} ${processedLabel},`,
       `${summary.noop.length} no-op ${groupedLabel},`,
       `${summary.rejected.length} rejected ${groupedLabel},`,

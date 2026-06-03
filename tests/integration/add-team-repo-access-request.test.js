@@ -25,6 +25,7 @@ function createRepoAccessApi(scenario) {
       const repositoryEntry = scenario.repositories[`${owner}/${repo}`];
       return repositoryEntry ? repositoryEntry.permission : { exists: false, current_permission_api_value: 'none' };
     },
+    listIssueComments: async () => scenario.comments || [],
   };
 }
 
@@ -280,4 +281,78 @@ test('runRequestValidation preserves manual intake when the optional CSV field i
   assert.equal(result.validation.request.intake_mode, 'manual');
   assert.equal(result.auditArtifact.request.intake_mode, 'manual');
   assert.match(summary, /Intake mode: manual/i);
+});
+
+test('manual-path guardrail keeps approval-ready status and avoids waiting_for_attachment transitions', async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'add-team-repo-access-manual-guardrail-'));
+  const auditPath = path.join(workspace, 'audit.json');
+  const validationFixture = loadJsonFixture('team-repo-access-validation.json').visible_org;
+
+  const result = await runRequestValidation({
+    env: {
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      GITHUB_REPOSITORY: 'octo-org/issueops-speckit',
+      ISSUE_NUMBER: '808',
+      REQUESTER_LOGIN: 'requester',
+      PARSED_REQUEST_JSON: JSON.stringify({
+        organization: 'octo-org',
+        target_team: 'Platform Engineering',
+        designated_approver: 'octocat',
+        requested_repositories: ['service-catalog'],
+        permission_level: 'write',
+        business_justification: 'Need repository access',
+        dry_run: true
+      }),
+      AUDIT_ARTIFACT_PATH: auditPath,
+      COMMENT_ID: '9999',
+      COMMENT_AUTHOR_LOGIN: 'random-user',
+      COMMENT_BODY: 'approved'
+    },
+    api: createRepoAccessApi(validationFixture),
+  });
+
+  assert.equal(result.validation.request.intake_mode, 'manual');
+  assert.equal(result.validation.request_status, 'awaiting_approval');
+  assert.notEqual(result.validation.request_status, 'waiting_for_attachment');
+});
+
+test('runRequestValidation keeps csv_attachment requests in waiting_for_attachment until requester attachment arrives', async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'add-team-repo-access-csv-waiting-'));
+  const auditPath = path.join(workspace, 'audit.json');
+  const summaryPath = path.join(workspace, 'summary.md');
+  const validationFixture = loadJsonFixture('team-repo-access-validation.json').visible_org;
+
+  const result = await runRequestValidation({
+    env: {
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      GITHUB_REPOSITORY: 'octo-org/issueops-speckit',
+      ISSUE_NUMBER: '809',
+      REQUESTER_LOGIN: 'requester',
+      PARSED_REQUEST_JSON: JSON.stringify({
+        organization: 'octo-org',
+        target_team: 'Platform Engineering',
+        designated_approver: 'octocat',
+        requested_repositories: '',
+        permission_level: 'write',
+        business_justification: 'Need repository access',
+        dry_run: true,
+        intake_mode: 'csv_attachment'
+      }),
+      AUDIT_ARTIFACT_PATH: auditPath,
+      GITHUB_STEP_SUMMARY: summaryPath,
+      COMMENT_ID: '',
+      COMMENT_AUTHOR_LOGIN: '',
+      COMMENT_BODY: ''
+    },
+    api: createRepoAccessApi(validationFixture),
+  });
+
+  const summary = fs.readFileSync(summaryPath, 'utf8');
+
+  assert.equal(result.validation.request.intake_mode, 'csv_attachment');
+  assert.equal(result.validation.request_status, 'waiting_for_attachment');
+  assert.equal(result.validation.is_valid, false);
+  assert.equal(result.auditArtifact.request.request_status, 'waiting_for_attachment');
+  assert.match(result.auditArtifact.execution.summary, /blocked until the requester posts a qualifying CSV attachment comment/i);
+  assert.match(summary, /Attachment status: waiting for requester CSV attachment comment/i);
 });

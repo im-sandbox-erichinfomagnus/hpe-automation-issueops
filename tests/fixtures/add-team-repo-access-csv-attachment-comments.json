@@ -1,0 +1,38 @@
+[
+  {
+    "id": 9101,
+    "created_at": "2026-05-25T10:00:00Z",
+    "body": "Following up with an attachment from another actor: [repo-access.csv](https://github.com/user-attachments/files/9101/repo-access.csv)",
+    "user": { "login": "other-user" }
+  },
+  {
+    "id": 9102,
+    "created_at": "2026-05-25T10:02:00Z",
+    "body": "Requester posted non-CSV content first: [repo-access.txt](https://github.com/user-attachments/files/9102/repo-access.txt)",
+    "user": { "login": "requester" }
+  },
+  {
+    "id": 9103,
+    "created_at": "2026-05-25T10:04:00Z",
+    "body": "Ambiguous requester upload set:\n[repo-access-a.csv](https://github.com/user-attachments/files/9103/repo-access-a.csv)\n[repo-access-b.csv](https://github.com/user-attachments/files/9104/repo-access-b.csv)",
+    "user": { "login": "requester" }
+  },
+  {
+    "id": 9104,
+    "created_at": "2026-05-25T10:06:00Z",
+    "body": "Requester posted valid csv for attempt 1: [repo-access.csv](https://github.com/user-attachments/files/9105/repo-access.csv)",
+    "user": { "login": "requester" }
+  },
+  {
+    "id": 9105,
+    "created_at": "2026-05-25T10:07:00Z",
+    "body": "Requester posted corrected CSV after failed validation: [repo-access-corrected.csv](https://github.com/user-attachments/files/9106/repo-access-corrected.csv)",
+    "user": { "login": "requester" }
+  },
+  {
+    "id": 9106,
+    "created_at": "2026-05-25T10:08:00Z",
+    "body": "approved",
+    "user": { "login": "octocat" }
+  }
+]

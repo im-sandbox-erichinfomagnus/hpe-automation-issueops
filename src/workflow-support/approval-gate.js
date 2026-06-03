@@ -89,7 +89,7 @@ async function evaluateApprovalGate(input = {}, options = {}) {
   });
 
   if (
-    (approvalMode === 'team_membership' || approvalMode === 'team_creation' || approvalMode === 'team_hierarchy') &&
+    (approvalMode === 'team_membership' || approvalMode === 'team_creation' || approvalMode === 'team_hierarchy' || approvalMode === 'team_repo_access') &&
     intakeMode === 'csv_attachment' &&
     requestStatus === 'waiting_for_attachment'
   ) {
@@ -103,14 +103,14 @@ async function evaluateApprovalGate(input = {}, options = {}) {
   }
 
   const approvalComment = findLatestApprovalComment(issueComments, approvalCommand, {
-    notBefore: (approvalMode === 'team_membership' || approvalMode === 'team_creation' || approvalMode === 'team_hierarchy') && intakeMode === 'csv_attachment'
+    notBefore: (approvalMode === 'team_membership' || approvalMode === 'team_creation' || approvalMode === 'team_hierarchy' || approvalMode === 'team_repo_access') && intakeMode === 'csv_attachment'
       ? acceptedAttachmentCommentCreatedAt
       : null,
   });
 
   if (!approvalComment) {
     const requiresFreshAttachmentApproval =
-      (approvalMode === 'team_membership' || approvalMode === 'team_creation' || approvalMode === 'team_hierarchy') &&
+      (approvalMode === 'team_membership' || approvalMode === 'team_creation' || approvalMode === 'team_hierarchy' || approvalMode === 'team_repo_access') &&
       intakeMode === 'csv_attachment' &&
       acceptedAttachmentCommentCreatedAt;
 
