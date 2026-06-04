@@ -1,7 +1,6 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const path = require('node:path');
 const test = require('node:test');
 
 const { commitRegistryRecord } = require('../../src/workflow-support/commit-registry-record');
