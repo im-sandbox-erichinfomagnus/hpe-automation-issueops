@@ -149,6 +149,11 @@ test('runRequestValidation fails when a requested child team is missing', async 
 
   assert.equal(result.validation.is_valid, false);
   assert.match(result.validation.errors.join('\n'), /child teams do not exist/i);
+  assert.equal(result.validation.designated_approver_authorization.state, 'authorized');
+  assert.doesNotMatch(
+    result.validation.errors.join('\n'),
+    /not a current maintainer of the requested parent team/i
+  );
 });
 
 test('runRequestValidation fails duplicate child-team requests instead of silently deduplicating them', async () => {
