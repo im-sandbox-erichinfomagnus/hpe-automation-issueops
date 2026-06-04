@@ -80,7 +80,38 @@ test('runRequestValidation records hierarchy audit metadata and missing-token fa
   assert.equal(persisted.execution.failure_count, 0);
   assert.match(persisted.execution.summary, /No child-team mutation was attempted/i);
 });
+test('runRequestValidation classifies remove-team-repo-access when only team and requested repositories are provided', async () => {
+  const os = require('node:os');
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'remove-team-repo-access-classification-'));
+  const artifactPath = path.join(workspace, 'audit.json');
 
+  const result = await runRequestValidation({
+    env: {
+      GITHUB_REPOSITORY: 'octo-org/issueops-speckit',
+      ISSUE_NUMBER: '613',
+      REQUESTER_LOGIN: 'requester',
+      PARSED_ORGANIZATION: 'octo-org',
+      PARSED_TEAM: 'Platform Engineering',
+      PARSED_DESIGNATED_APPROVER: 'octocat',
+      PARSED_REQUESTED_REPOSITORIES: 'service-catalog',
+      PARSED_INTAKE_MODE: 'manual',
+      PARSED_BUSINESS_JUSTIFICATION: 'Remove access for team cleanup',
+      PARSED_DRY_RUN: 'true',
+      AUDIT_ARTIFACT_PATH: artifactPath,
+    },
+    setProcessExitCode: false,
+  });
+
+  const persisted = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
+  assert.equal(result.validation.is_valid, false);
+  assert.equal(result.validation.request_status, 'validation_failed');
+  assert.match(result.validation.errors.join('\n'), /workflow token secret is missing/i);
+  assert.equal(persisted.metadata.operation, 'team_repo_access_removal');
+  assert.equal(persisted.request.team_slug, 'platform-engineering');
+  assert.match(persisted.execution.summary, /No repository-access mutation was attempted/i);
+});
 test('runRequestValidation records repo-access audit metadata and missing-token failures when no workflow token is available', async () => {
   const os = require('node:os');
   const fs = require('node:fs');

@@ -178,4 +178,4 @@ jobs:
         if: ${{ always() && steps.request_scope.outputs.matches-request == 'true' && steps.validate_request.outcome != 'skipped' }}
         env:
           AUDIT_ARTIFACT_PATH: ${{ env.AUDIT_ARTIFACT_PATH }}
-        run: node src/scripts/emit-audit-summary.js
+        run: node src/scripts/emit-audit-summary.js "${{ env.AUDIT_ARTIFACT_PATH }}"

@@ -86,13 +86,23 @@ function readParsedRequestFromEnv(env = process.env) {
 }
 
 function isTeamRepoAccessParsedRequest(parsedRequest = {}) {
-  return Boolean(
-    parsedRequest.target_team ||
-    parsedRequest.parsed_target_team ||
-    parsedRequest.bulk_csv_requested_repositories ||
-    parsedRequest.parsed_bulk_csv_requested_repositories ||
+  const hasPermissionLevel = Boolean(
     parsedRequest.permission_level ||
     parsedRequest.parsed_permission_level
+  );
+
+  const hasTargetTeam = Boolean(
+    parsedRequest.target_team ||
+    parsedRequest.parsed_target_team
+  );
+
+  const hasBulkCsvRequestedRepositories = Boolean(
+    parsedRequest.bulk_csv_requested_repositories ||
+    parsedRequest.parsed_bulk_csv_requested_repositories
+  );
+
+  return Boolean(
+    hasPermissionLevel && (hasTargetTeam || hasBulkCsvRequestedRepositories)
   );
 }
 
