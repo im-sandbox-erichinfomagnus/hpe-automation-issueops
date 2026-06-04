@@ -119,12 +119,12 @@ jobs:
           echo "matches-request=$matches_request" >> "$GITHUB_OUTPUT"
 
       - name: Skip unrelated issue form
-        if: ${{ steps.request_scope.outputs.matches-request != 'true' }}
+        if: ${{ steps.request_scope.outputs['matches-request'] != 'true' }}
         run: |
           echo 'This issue does not match the create-tenant-model form. Exiting without validation or execution.' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Restore prior request audit artifact
-        if: ${{ steps.request_scope.outputs.matches-request == 'true' }}
+        if: ${{ steps.request_scope.outputs['matches-request'] == 'true' }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
           ISSUE_NUMBER: ${{ env.ISSUE_NUMBER }}
@@ -135,7 +135,7 @@ jobs:
 
       - name: Validate request and record approval-ready state
         id: validate_request
-        if: ${{ steps.request_scope.outputs.matches-request == 'true' }}
+        if: ${{ steps.request_scope.outputs['matches-request'] == 'true' }}
         env:
           ISSUEOPS_GITHUB_TOKEN: ${{ secrets.ISSUEOPS_GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.ISSUEOPS_GITHUB_TOKEN || github.token }}
