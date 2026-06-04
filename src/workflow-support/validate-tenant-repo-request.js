@@ -1,6 +1,11 @@
 'use strict';
 
 const { parseTenantRepoRequest } = require('./parse-tenant-repo-request');
+const {
+  ALLOWED_REPOSITORY_VISIBILITIES,
+  describeAllowedRepositoryVisibilities,
+  normalizeRepositoryVisibility,
+} = require('./repository-visibility');
 const { resolveTenantContextFromRegistry } = require('./resolve-tenant-context-from-registry');
 
 function isSafeRepositoryName(value) {
@@ -26,6 +31,52 @@ async function validateTenantRepoRequest(input = {}, options = {}) {
 
   if (!request.repository_name_normalized || !isSafeRepositoryName(request.repository_name_normalized)) {
     errors.push('Repository name normalization failed or produced an unsafe repository slug.');
+  }
+
+  const { visibility: repositoryVisibility, source: repositoryVisibilitySource } = normalizeRepositoryVisibility(request.repository_visibility);
+  const allowedRepositoryVisibilities = ALLOWED_REPOSITORY_VISIBILITIES;
+  request.repository_visibility = repositoryVisibility;
+  request.repository_visibility_source = request.repository_visibility_source || repositoryVisibilitySource;
+  let visibilityValidationStatus = 'valid';
+  let visibilityValidationReason = '';
+
+  if (!allowedRepositoryVisibilities.includes(repositoryVisibility)) {
+    visibilityValidationStatus = 'invalid_visibility';
+    visibilityValidationReason = `Repository visibility '${repositoryVisibility}' is invalid. Allowed values are: ${describeAllowedRepositoryVisibilities()}.`;
+    errors.push(visibilityValidationReason);
+  }
+
+  if (
+    allowedRepositoryVisibilities.includes(repositoryVisibility) &&
+    typeof options.verifyRepositoryVisibilitySupport === 'function'
+  ) {
+    const supported = await options.verifyRepositoryVisibilitySupport({
+      organization: request.organization,
+      visibility: repositoryVisibility,
+    });
+
+    if (!supported) {
+      visibilityValidationStatus = 'unsupported_visibility';
+      visibilityValidationReason = `Requested repository visibility '${repositoryVisibility}' is not supported for organization '${request.organization}'. Allowed values are: ${describeAllowedRepositoryVisibilities()}.`;
+      errors.push(visibilityValidationReason);
+    }
+  } else if (
+    allowedRepositoryVisibilities.includes(repositoryVisibility) &&
+    typeof options.getSupportedRepositoryVisibilities === 'function'
+  ) {
+    const supportedVisibilities = await options.getSupportedRepositoryVisibilities({
+      organization: request.organization,
+    });
+
+    if (Array.isArray(supportedVisibilities) && !supportedVisibilities.includes(repositoryVisibility)) {
+      visibilityValidationStatus = 'unsupported_visibility';
+      visibilityValidationReason = `Requested repository visibility '${repositoryVisibility}' is not supported for organization '${request.organization}'. Allowed values are: ${describeAllowedRepositoryVisibilities()}.`;
+      errors.push(visibilityValidationReason);
+    }
+  }
+
+  if (visibilityValidationStatus === 'valid' && allowedRepositoryVisibilities.includes(repositoryVisibility)) {
+    visibilityValidationReason = `Requested repository visibility '${repositoryVisibility}' is allowed.`;
   }
 
   if (!request.designated_approver_login) {
@@ -203,6 +254,10 @@ async function validateTenantRepoRequest(input = {}, options = {}) {
       tenant_resolution_status: tenantResolution.tenant_resolution_status,
       governance_relation_status: canonicalTenantContext ? canonicalTenantContext.governance_relation_status : 'unknown',
       context_marker: canonicalTenantContext ? canonicalTenantContext.context_marker : '',
+      requested_visibility: repositoryVisibility,
+      allowed_repository_visibilities: allowedRepositoryVisibilities,
+      visibility_validation_status: visibilityValidationStatus,
+      visibility_validation_reason: visibilityValidationReason,
       repository_exists: Boolean(repositoryState && repositoryState.exists),
       current_repo_admin_permission: currentRepoAdminPermission,
       dry_run_no_mutation: Boolean(request.dry_run),

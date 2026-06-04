@@ -10,6 +10,10 @@ ContosoUK
 
 acme-platform-service
 
+### Repository visibility
+
+private
+
 ### Designated approver
 
 org-owner-user

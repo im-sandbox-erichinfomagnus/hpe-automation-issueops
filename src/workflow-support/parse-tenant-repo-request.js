@@ -1,5 +1,7 @@
 'use strict';
 
+const { normalizeRepositoryVisibility } = require('./repository-visibility');
+
 function normalizeText(value) {
   return String(value || '').trim();
 }
@@ -83,6 +85,8 @@ function parseTenantRepoRequest(input = {}) {
     readField(parsed, ['dry_run', 'parsed_dry_run']) || input.dry_run,
     true
   );
+  const repositoryVisibilityInput = readField(parsed, ['repository_visibility', 'parsed_repository_visibility']) || input.repositoryVisibility || input.repository_visibility;
+  const { visibility: repositoryVisibility, source: repositoryVisibilitySource } = normalizeRepositoryVisibility(repositoryVisibilityInput);
   const justification = normalizeText(
     readField(parsed, ['justification', 'parsed_justification', 'business_justification']) || input.justification
   );
@@ -104,6 +108,8 @@ function parseTenantRepoRequest(input = {}) {
     tenant_name_normalized: tenantNameNormalized,
     repository_name_input: repositoryNameInput,
     repository_name_normalized: repositoryNameNormalized,
+    repository_visibility: repositoryVisibility,
+    repository_visibility_source: repositoryVisibilitySource,
     designated_approver_login: designatedApproverLogin,
     dry_run: dryRun,
     business_justification: justification,

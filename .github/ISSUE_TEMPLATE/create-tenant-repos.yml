@@ -32,6 +32,19 @@ body:
     validations:
       required: true
 
+  - type: dropdown
+    id: repository_visibility
+    attributes:
+      label: Repository visibility
+      description: Select the requested visibility for the new repository. Defaults to private when not specified.
+      options:
+        - private
+        - internal
+        - public
+      default: 0
+    validations:
+      required: false
+
   - type: input
     id: designated_approver
     attributes:

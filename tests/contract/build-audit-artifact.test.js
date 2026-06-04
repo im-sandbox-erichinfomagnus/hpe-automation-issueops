@@ -51,3 +51,37 @@ test('buildAuditArtifact preserves an explicit prior operation during artifact r
 
   assert.equal(artifact.metadata.operation, 'team_creation');
 });
+
+test('buildAuditArtifact preserves tenant repo visibility intent and actual visibility', () => {
+  const artifact = buildAuditArtifact({
+    request: {
+      organization: 'octo-org',
+      repository: 'octo-org/issueops-speckit',
+      repository_name_input: 'acme-platform-service',
+      repository_name_normalized: 'acme-platform-service',
+      repository_visibility: 'internal',
+      repository_visibility_source: 'user_selected',
+    },
+    reconciliationPlan: {
+      repository_full_name: 'octo-org/acme-platform-service',
+      requested_visibility: 'internal',
+      existing_visibility: null,
+      actual_visibility: 'internal',
+      desired_repository_visibility: 'internal',
+      visibility_conflict: false,
+      creation_action: 'create_repository',
+      permission_action: 'grant_admin',
+      state: 'approved_for_execution',
+    },
+    runContext: {
+      operation: 'tenant_repo_creation',
+      run_id: '123',
+      run_attempt: '1',
+    },
+  });
+
+  assert.equal(artifact.metadata.operation, 'tenant_repo_creation');
+  assert.equal(artifact.reconciliation.requested_visibility, 'internal');
+  assert.equal(artifact.reconciliation.actual_visibility, 'internal');
+  assert.equal(artifact.reconciliation.visibility_conflict, false);
+});

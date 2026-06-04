@@ -53,6 +53,7 @@ function mapRepositoryState(repository) {
       : '',
     archived: Boolean(repository.archived),
     private: Boolean(repository.private),
+    visibility: String(repository.visibility || (repository.private ? 'private' : 'public')).toLowerCase(),
   };
 }
 
@@ -158,18 +159,25 @@ function createGitHubTeamRepoApi(options = {}) {
       };
     },
 
-    async createOrganizationRepository({ organization, name, privateVisibility = true, description = '' }) {
+    async createOrganizationRepository({ organization, name, privateVisibility = true, visibility = null, description = '' }) {
+      const body = {
+        name,
+        description: String(description || ''),
+        auto_init: false,
+        has_issues: true,
+        has_projects: false,
+        has_wiki: false,
+      };
+
+      if (visibility) {
+        body.visibility = String(visibility);
+      } else {
+        body.private = Boolean(privateVisibility);
+      }
+
       const result = await request(`/orgs/${organization}/repos`, {
         method: 'POST',
-        body: {
-          name,
-          private: Boolean(privateVisibility),
-          description: String(description || ''),
-          auto_init: false,
-          has_issues: true,
-          has_projects: false,
-          has_wiki: false,
-        },
+        body,
       });
 
       if (!result.ok) {

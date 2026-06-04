@@ -566,7 +566,10 @@ async function runApprovedExecution(options = {}) {
   latestRateLimitSnapshot = reconciliationPlan.rate_limit_snapshot || latestRateLimitSnapshot;
 
   if (isTenantRepoCreation) {
+    reconciliationPlan.actual_visibility = reconciliationPlan.actual_visibility || reconciliationPlan.existing_visibility || null;
+
     if (reconciliationPlan.creation_action === 'noop') {
+      reconciliationPlan.actual_visibility = reconciliationPlan.existing_visibility || reconciliationPlan.requested_visibility || reconciliationPlan.actual_visibility;
       executionResults.push({
         repository_full_name: reconciliationPlan.repository_full_name,
         execution_result: 'noop',
@@ -576,7 +579,7 @@ async function runApprovedExecution(options = {}) {
       executionResults.push({
         repository_full_name: reconciliationPlan.repository_full_name,
         execution_result: 'failed',
-        failure_reason: 'boundary_revalidation_mismatch',
+        failure_reason: reconciliationPlan.blocked_reason || 'boundary_revalidation_mismatch',
       });
     }
 
@@ -689,7 +692,7 @@ async function runApprovedExecution(options = {}) {
             () => api.createOrganizationRepository({
               organization: repoOwner,
               name: repoName,
-              privateVisibility: true,
+              visibility: reconciliationPlan.desired_repository_visibility || auditArtifact.request.repository_visibility || 'private',
               description: `Tenant-scoped repository for ${auditArtifact.request.tenant_display_name || auditArtifact.request.tenant_name_input || auditArtifact.request.tenant_key || 'tenant'}`,
             }),
             {
@@ -700,22 +703,30 @@ async function runApprovedExecution(options = {}) {
 
           latestRateLimitSnapshot = attemptResult.retry_plan.rate_limit_snapshot || latestRateLimitSnapshot;
 
+          if (attemptResult.ok) {
+            reconciliationPlan.actual_visibility = attemptResult.value && attemptResult.value.repository && attemptResult.value.repository.visibility
+              ? String(attemptResult.value.repository.visibility).toLowerCase()
+              : reconciliationPlan.desired_repository_visibility || auditArtifact.request.repository_visibility || 'private';
+          }
+
           executionResults.push({
             repository_full_name: reconciliationPlan.repository_full_name,
             execution_result: attemptResult.ok ? 'created' : 'failed',
             failure_reason: attemptResult.ok ? null : classifyFailureReason(attemptResult.error),
           });
         } else if (reconciliationPlan.creation_action === 'noop') {
+          reconciliationPlan.actual_visibility = reconciliationPlan.existing_visibility || reconciliationPlan.requested_visibility || reconciliationPlan.actual_visibility;
           executionResults.push({
             repository_full_name: reconciliationPlan.repository_full_name,
             execution_result: 'noop',
             failure_reason: null,
           });
         } else if (reconciliationPlan.creation_action === 'reject') {
+          reconciliationPlan.actual_visibility = reconciliationPlan.existing_visibility || reconciliationPlan.actual_visibility;
           executionResults.push({
             repository_full_name: reconciliationPlan.repository_full_name,
             execution_result: 'failed',
-            failure_reason: 'creation_rejected',
+            failure_reason: reconciliationPlan.blocked_reason || 'creation_rejected',
           });
         }
 
@@ -779,7 +790,7 @@ async function runApprovedExecution(options = {}) {
           executionResults.push({
             repository_full_name: reconciliationPlan.repository_full_name,
             execution_result: 'failed',
-            failure_reason: 'permission_rejected',
+            failure_reason: reconciliationPlan.blocked_reason || 'permission_rejected',
           });
         }
       }

@@ -77,6 +77,8 @@ function readParsedRequestFromEnv(env = process.env) {
     requested_repositories: env.PARSED_REQUESTED_REPOSITORIES || '',
     bulk_csv_requested_repositories: env.PARSED_BULK_CSV_REQUESTED_REPOSITORIES || '',
     permission_level: env.PARSED_PERMISSION_LEVEL || '',
+    repository_visibility: env.PARSED_REPOSITORY_VISIBILITY || '',
+    parsed_repository_visibility: env.PARSED_REPOSITORY_VISIBILITY || '',
     requested_child_teams: env.PARSED_REQUESTED_CHILD_TEAMS || '',
     bulk_csv_requested_child_teams: env.PARSED_BULK_CSV_REQUESTED_CHILD_TEAMS || '',
     intended_owner: env.PARSED_INTENDED_OWNER || '',

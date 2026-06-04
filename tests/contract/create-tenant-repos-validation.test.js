@@ -235,6 +235,98 @@ test('tenant repo validation rejects unsafe repository-name normalization outcom
   assert.match(result.errors.join('\n'), /repository name normalization/i);
 });
 
+test('tenant repo validation rejects invalid repository visibility with explicit findings', async () => {
+  const result = await validateTenantRepoRequest({
+    parsedRequest: {
+      organization: 'octo-org',
+      tenant_name: 'Tenant A',
+      repository_name: 'acme-platform-service',
+      repository_visibility: 'secret',
+      designated_approver: 'org-owner-user',
+      dry_run: 'true',
+      justification: 'Test request',
+    },
+    issue: {
+      number: 4,
+      user: {
+        login: 'tenant-admin-user',
+      },
+    },
+    repository: 'owner/repo',
+  }, {
+    registryDirectory: path.join(os.tmpdir(), 'non-existent-tenant-registry-directory'),
+    getOrganization: async () => ({ exists: true }),
+  });
+
+  assert.equal(result.is_valid, false);
+  assert.equal(result.request.repository_visibility, 'secret');
+  assert.equal(result.validation_findings.visibility_validation_status, 'invalid_visibility');
+  assert.equal(result.validation_findings.requested_visibility, 'secret');
+  assert.deepEqual(result.validation_findings.allowed_repository_visibilities, ['private', 'internal', 'public']);
+  assert.match(result.validation_findings.visibility_validation_reason, /Allowed values are: private, internal, public/i);
+  assert.match(result.errors.join('\n'), /Repository visibility 'secret' is invalid/i);
+});
+
+test('tenant repo validation reports unsupported repository visibility with explicit findings', async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'issueops-tenant-repo-unsupported-'));
+  const registryDir = path.join(tempRoot, 'tenant-registry');
+  fs.mkdirSync(registryDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(registryDir, 'tenant-a.json'),
+    JSON.stringify({
+      tenant_key: 'tenant-a',
+      tenant_display_name: 'Tenant A',
+      organization: 'octo-org',
+      tenant_team_name: 'TenantA_Tenant',
+      tenant_team_slug: 'tenanta-tenant',
+      repo_admin_team_name: 'TenantA_RepoAdmin',
+      repo_admin_team_slug: 'tenanta-repoadmin',
+    }, null, 2),
+    'utf8'
+  );
+
+  const result = await validateTenantRepoRequest({
+    parsedRequest: {
+      organization: 'octo-org',
+      tenant_name: 'Tenant A',
+      repository_name: 'acme-platform-service',
+      repository_visibility: 'public',
+      designated_approver: 'org-owner-user',
+      dry_run: 'true',
+      justification: 'Test request',
+    },
+    issue: {
+      number: 5,
+      user: {
+        login: 'tenant-admin-user',
+      },
+    },
+    repository: 'owner/repo',
+  }, {
+    registryDirectory: registryDir,
+    registryRef: 'main',
+    getOrganization: async () => ({ exists: true }),
+    listTeams: async () => ([
+      { slug: 'tenanta-tenant', parent: null },
+      { slug: 'tenanta-repoadmin', parent: { slug: 'tenanta-tenant' } },
+    ]),
+    getMembershipForUser: async ({ teamSlug }) => {
+      if (teamSlug === 'tenanta-tenant') {
+        return { state: 'active', membership: { role: 'maintainer' } };
+      }
+      return { state: 'active', membership: { role: 'member' } };
+    },
+    getOrganizationMembership: async () => ({ exists: true, membership: { role: 'admin', state: 'active' } }),
+    getRepository: async () => ({ exists: false, repository: null }),
+    getSupportedRepositoryVisibilities: async () => ['private', 'internal'],
+  });
+
+  assert.equal(result.is_valid, false);
+  assert.equal(result.validation_findings.visibility_validation_status, 'unsupported_visibility');
+  assert.match(result.validation_findings.visibility_validation_reason, /not supported for organization 'octo-org'/i);
+  assert.match(result.validation_findings.visibility_validation_reason, /Allowed values are: private, internal, public/i);
+});
+
 test('tenant repo validation fails when tenant registry directory is missing', async () => {
   const result = await validateTenantRepoRequest({
     parsedRequest: {

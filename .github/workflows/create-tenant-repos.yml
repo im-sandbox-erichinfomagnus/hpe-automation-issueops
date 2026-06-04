@@ -103,6 +103,7 @@ jobs:
           PARSED_ORGANIZATION: ${{ steps.parse_request.outputs.parsed_organization }}
           PARSED_TENANT_NAME: ${{ steps.parse_request.outputs.parsed_tenant_name }}
           PARSED_REPOSITORY_NAME: ${{ steps.parse_request.outputs.parsed_repository_name }}
+          PARSED_REPOSITORY_VISIBILITY: ${{ steps.parse_request.outputs.parsed_repository_visibility }}
           PARSED_DESIGNATED_APPROVER: ${{ steps.parse_request.outputs.parsed_designated_approver }}
           PARSED_DRY_RUN: ${{ steps.parse_request.outputs.parsed_dry_run }}
           PARSED_JUSTIFICATION: ${{ steps.parse_request.outputs.parsed_justification }}
@@ -174,16 +175,18 @@ jobs:
         if: always()
         run: |
           {
-            echo "Validation status: ${{ steps.request_validation.outputs['validation-status'] || 'unknown' }}"
+            echo "Request status: ${{ steps.approved_execution.outputs['execution-status'] || steps.approval_gate.outputs['approval-status'] || steps.request_validation.outputs['validation-status'] || 'unknown' }}"
             echo "Approval status: ${{ steps.approval_gate.outputs['approval-status'] || 'unknown' }}"
             echo "Execution status: ${{ steps.approved_execution.outputs['execution-status'] || 'not_requested' }}"
             echo "Audit artifact path: ${{ steps.approved_execution.outputs['audit-artifact-path'] || steps.approval_gate.outputs['audit-artifact-path'] || steps.request_validation.outputs['audit-artifact-path'] || steps.request_validation.outputs.artifact_path || 'n/a' }}"
             echo "Parsed organization: ${{ steps.parse_request.outputs.parsed_organization || '' }}"
             echo "Parsed tenant name: ${{ steps.parse_request.outputs.parsed_tenant_name || '' }}"
             echo "Parsed repository name: ${{ steps.parse_request.outputs.parsed_repository_name || '' }}"
+            raw_visibility="${{ steps.parse_request.outputs.parsed_repository_visibility || 'private' }}"
+            echo "Parsed repository visibility: ${raw_visibility//[\[\]]/}"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Guarded execution gate
+      - name: Approved execution note
         if: ${{ steps.approval_gate.outputs['approval-status'] == 'approved' }}
         run: |
           echo "Approval is context-valid and approved execution has been attempted in this phase." >> "$GITHUB_STEP_SUMMARY"

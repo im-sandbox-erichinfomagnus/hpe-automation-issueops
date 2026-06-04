@@ -19,6 +19,7 @@ test('create-tenant-repos workflow includes validation and approval gates', () =
   assert.match(workflow, /run-request-validation\.js/i);
   assert.match(workflow, /run-approval-gate\.js/i);
   assert.match(workflow, /run-approved-execution\.js/i);
+  assert.match(workflow, /PARSED_REPOSITORY_VISIBILITY/i);
   assert.match(workflow, /steps\.approval_gate\.outputs\['approval-status'\]\s*==\s*'approved'/i);
 });
 
@@ -49,6 +50,7 @@ function buildValidationEnv(artifactPath, registryDir, overrides = {}) {
     PARSED_ORGANIZATION: 'im-sandbox-himanshu',
     PARSED_TENANT_NAME: 'ContosoUK',
     PARSED_REPOSITORY_NAME: 'acme-platform-service',
+    PARSED_REPOSITORY_VISIBILITY: 'private',
     PARSED_DESIGNATED_APPROVER: 'himanshu-im',
     PARSED_DRY_RUN: 'false',
     PARSED_JUSTIFICATION: 'Need a tenant repository',
@@ -181,6 +183,91 @@ test('US3 happy path creates repository and grants admin to X_RepoAdmin', async 
   ]);
 });
 
+test('US3 creates repositories with requested private, internal, and public visibility', async () => {
+  for (const visibility of ['private', 'internal', 'public']) {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), `create-tenant-repos-${visibility}-`));
+    const artifactPath = path.join(workspace, 'audit.json');
+    const registryDir = buildTenantRepoRegistry(workspace);
+    const createCalls = [];
+
+    await runRequestValidation({
+      env: buildValidationEnv(artifactPath, registryDir, {
+        PARSED_REPOSITORY_VISIBILITY: visibility,
+      }),
+      api: buildValidationApi(),
+      tenantRepoApi: {
+        getRepository: async () => ({ exists: false, repository: null }),
+        getTeamRepositoryPermission: async () => ({ current_permission_api_value: 'none' }),
+      },
+      setProcessExitCode: false,
+    });
+
+    await runApprovalGate({
+      env: {
+        AUDIT_ARTIFACT_PATH: artifactPath,
+        ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+        GITHUB_TOKEN: 'pat-token',
+      },
+      api: {
+        getAssignableOwners: async () => ['aeruvakalpanaa'],
+        addIssueAssignees: async () => ({ status: 'assigned' }),
+        listIssueComments: async () => [
+          {
+            id: 301,
+            body: 'approved',
+            created_at: '2026-05-29T10:00:00Z',
+            user: { login: 'himanshu-im' },
+          },
+        ],
+        getOrganizationMembership: async () => ({
+          exists: true,
+          membership: { role: 'admin', state: 'active' },
+        }),
+      },
+      setProcessExitCode: false,
+    });
+
+    const result = await runApprovedExecution({
+      env: {
+        AUDIT_ARTIFACT_PATH: artifactPath,
+        ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+        GITHUB_RUN_ID: '26627740733',
+        GITHUB_RUN_ATTEMPT: '2',
+        TENANT_REGISTRY_DIR: registryDir,
+        TENANT_REGISTRY_REF: 'main',
+      },
+      tokenInfo: {
+        token: 'pat-token',
+        source: 'ISSUEOPS_GITHUB_TOKEN',
+        token_kind: 'pat',
+        is_pat_backed: true,
+        supports_team_repo_access_mutation: true,
+      },
+      createApi: () => ({
+        getRepository: async () => ({ exists: false, repository: null }),
+        getTeamRepositoryPermission: async () => ({ current_permission_api_value: 'none' }),
+        createOrganizationRepository: async ({ organization, name, visibility: requestedVisibility }) => {
+          createCalls.push(`${organization}/${name}:${requestedVisibility}`);
+          return {
+            exists: true,
+            repository: { full_name: `${organization}/${name}`, visibility: requestedVisibility },
+          };
+        },
+        addOrUpdateTeamRepositoryPermission: async ({ owner, repo, permission }) => ({
+          repository_full_name: `${owner}/${repo}`,
+          permission,
+        }),
+      }),
+      teamApi: buildValidationApi(),
+      setProcessExitCode: false,
+    });
+
+    assert.deepEqual(createCalls, [`im-sandbox-himanshu/acme-platform-service:${visibility}`]);
+    assert.equal(result.reconciliation.requested_visibility, visibility);
+    assert.equal(result.reconciliation.actual_visibility, visibility);
+  }
+});
+
 test('US3 existing repository follows no-op or missing-grant reconciliation', async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'create-tenant-repos-noop-'));
   const artifactPath = path.join(workspace, 'audit.json');
@@ -190,7 +277,7 @@ test('US3 existing repository follows no-op or missing-grant reconciliation', as
     artifactPath,
     registryDir,
     validationTenantRepoApi: {
-      getRepository: async () => ({ exists: true, repository: { full_name: 'im-sandbox-himanshu/acme-platform-service' } }),
+      getRepository: async () => ({ exists: true, repository: { full_name: 'im-sandbox-himanshu/acme-platform-service', visibility: 'private' } }),
       getTeamRepositoryPermission: async () => ({ current_permission_api_value: 'admin' }),
     },
   });
@@ -212,7 +299,7 @@ test('US3 existing repository follows no-op or missing-grant reconciliation', as
       supports_team_repo_access_mutation: true,
     },
     createApi: () => ({
-      getRepository: async () => ({ exists: true, repository: { full_name: 'im-sandbox-himanshu/acme-platform-service' } }),
+      getRepository: async () => ({ exists: true, repository: { full_name: 'im-sandbox-himanshu/acme-platform-service', visibility: 'private' } }),
       getTeamRepositoryPermission: async () => ({ current_permission_api_value: 'admin' }),
       createOrganizationRepository: async () => {
         throw new Error('create should not run for existing repository noop path');
@@ -228,6 +315,8 @@ test('US3 existing repository follows no-op or missing-grant reconciliation', as
   assert.equal(noopResult.request.request_status, 'executed');
   assert.equal(noopResult.execution.repository_creation_result, 'noop');
   assert.equal(noopResult.execution.repo_admin_grant_result, 'noop');
+  assert.equal(noopResult.reconciliation.actual_visibility, 'private');
+  assert.equal(noopResult.reconciliation.visibility_conflict, false);
   assert.equal(noopResult.execution.noop_count >= 2, true);
 
   const grantCalls = [];
@@ -248,7 +337,7 @@ test('US3 existing repository follows no-op or missing-grant reconciliation', as
       supports_team_repo_access_mutation: true,
     },
     createApi: () => ({
-      getRepository: async () => ({ exists: true, repository: { full_name: 'im-sandbox-himanshu/acme-platform-service' } }),
+      getRepository: async () => ({ exists: true, repository: { full_name: 'im-sandbox-himanshu/acme-platform-service', visibility: 'private' } }),
       getTeamRepositoryPermission: async () => ({ current_permission_api_value: 'maintain' }),
       createOrganizationRepository: async () => {
         throw new Error('create should not run when repository already exists');
@@ -265,7 +354,92 @@ test('US3 existing repository follows no-op or missing-grant reconciliation', as
   assert.equal(missingGrantResult.request.request_status, 'executed');
   assert.equal(missingGrantResult.execution.repository_creation_result, 'noop');
   assert.equal(missingGrantResult.execution.repo_admin_grant_result, 'granted');
+  assert.equal(missingGrantResult.reconciliation.actual_visibility, 'private');
   assert.deepEqual(grantCalls, ['im-sandbox-himanshu/acme-platform-service:admin']);
+});
+
+test('US3 existing repository with mismatched visibility is blocked as a conflict with no mutation', async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'create-tenant-repos-visibility-conflict-'));
+  const artifactPath = path.join(workspace, 'audit.json');
+  const registryDir = buildTenantRepoRegistry(workspace);
+  let mutationAttempted = false;
+
+  await runRequestValidation({
+    env: buildValidationEnv(artifactPath, registryDir, {
+      PARSED_REPOSITORY_VISIBILITY: 'private',
+    }),
+    api: buildValidationApi(),
+    tenantRepoApi: {
+      getRepository: async () => ({ exists: true, repository: { full_name: 'im-sandbox-himanshu/acme-platform-service', visibility: 'public' } }),
+      getTeamRepositoryPermission: async () => ({ current_permission_api_value: 'admin' }),
+    },
+    setProcessExitCode: false,
+  });
+
+  await runApprovalGate({
+    env: {
+      AUDIT_ARTIFACT_PATH: artifactPath,
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      GITHUB_TOKEN: 'pat-token',
+    },
+    api: {
+      getAssignableOwners: async () => ['aeruvakalpanaa'],
+      addIssueAssignees: async () => ({ status: 'assigned' }),
+      listIssueComments: async () => [
+        {
+          id: 301,
+          body: 'approved',
+          created_at: '2026-05-29T10:00:00Z',
+          user: { login: 'himanshu-im' },
+        },
+      ],
+      getOrganizationMembership: async () => ({
+        exists: true,
+        membership: { role: 'admin', state: 'active' },
+      }),
+    },
+    setProcessExitCode: false,
+  });
+
+  const result = await runApprovedExecution({
+    env: {
+      AUDIT_ARTIFACT_PATH: artifactPath,
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      GITHUB_RUN_ID: '26627740733',
+      GITHUB_RUN_ATTEMPT: '6',
+      TENANT_REGISTRY_DIR: registryDir,
+      TENANT_REGISTRY_REF: 'main',
+    },
+    tokenInfo: {
+      token: 'pat-token',
+      source: 'ISSUEOPS_GITHUB_TOKEN',
+      token_kind: 'pat',
+      is_pat_backed: true,
+      supports_team_repo_access_mutation: true,
+    },
+    createApi: () => ({
+      getRepository: async () => ({ exists: true, repository: { full_name: 'im-sandbox-himanshu/acme-platform-service', visibility: 'public' } }),
+      getTeamRepositoryPermission: async () => ({ current_permission_api_value: 'admin' }),
+      createOrganizationRepository: async () => {
+        mutationAttempted = true;
+        throw new Error('create should not run for visibility conflict');
+      },
+      addOrUpdateTeamRepositoryPermission: async () => {
+        mutationAttempted = true;
+        throw new Error('grant should not run for visibility conflict');
+      },
+    }),
+    teamApi: buildValidationApi(),
+    setProcessExitCode: false,
+  });
+
+  assert.equal(mutationAttempted, false);
+  assert.equal(result.request.request_status, 'failed');
+  assert.equal(result.reconciliation.visibility_conflict, true);
+  assert.equal(result.reconciliation.blocked_reason, 'visibility_conflict');
+  assert.equal(result.reconciliation.requested_visibility, 'private');
+  assert.equal(result.reconciliation.actual_visibility, 'public');
+  assert.equal(result.execution.repository_creation_result, 'failed');
 });
 
 test('US3 blocks approved execution when boundary revalidation mismatches', async () => {
