@@ -5,7 +5,7 @@ const test = require('node:test');
 
 const { buildExecutionOutcome } = require('../../src/workflow-support/build-execution-outcome');
 
-test('buildExecutionOutcome preserves explicit zero row counts over bulk CSV fallback values', () => {
+test('buildExecutionOutcome preserves explicit zero row counts over fallback bulk CSV metadata', () => {
   const outcome = buildExecutionOutcome({
     executionResults: [],
     duplicate_row_count: 0,

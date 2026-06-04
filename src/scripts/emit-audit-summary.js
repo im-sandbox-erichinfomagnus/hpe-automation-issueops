@@ -3,6 +3,8 @@
 const fs = require('fs');
 const path = require('path');
 
+const { determineOperation } = require('../workflow-support/build-audit-artifact');
+
 function readBulkCsvCount(executionValue, submissionValue) {
   return executionValue ?? submissionValue ?? 0;
 }
@@ -15,24 +17,12 @@ function formatAuditSummary(auditArtifact = {}) {
   const reconciliation = auditArtifact.reconciliation || {};
   const execution = auditArtifact.execution || {};
   const metadata = auditArtifact.metadata || {};
+  const operation = metadata.operation || determineOperation(request);
   const isBulkCsv = request.intake_mode === 'bulk_csv';
   const isCsvAttachment = request.intake_mode === 'csv_attachment';
-  const operation = metadata.operation || '';
-  const isTeamRepoAccess = Array.isArray(request.requested_repository_grants) && (
-    request.requested_repository_grants.length > 0 ||
-    Boolean(request.requested_permission_api_value) ||
-    Boolean(request.team_slug && request.designated_approver_login)
-  );
-  const isTeamHierarchy = !isTeamRepoAccess && (
-    operation === 'team_hierarchy' ||
-    Boolean(request.parent_team_slug || request.parent_team_name) ||
-    (Array.isArray(request.requested_child_links) && request.requested_child_links.length > 0)
-  );
-  const isTeamCreation = !isTeamRepoAccess && !isTeamHierarchy && (
-    (Array.isArray(request.requested_teams) && request.requested_teams.length > 0) ||
-    Boolean(request.intended_owner_login) ||
-    (auditArtifact.metadata && auditArtifact.metadata.operation === 'team_creation')
-  );
+  const isTeamRepoAccess = operation === 'team_repo_access';
+  const isTeamHierarchy = operation === 'team_hierarchy';
+  const isTeamCreation = operation === 'team_creation';
 
   const hierarchyApprovalState = approval.approver_authorization_state && approval.approver_authorization_state !== 'unknown'
     ? approval.approver_authorization_state
@@ -352,10 +342,9 @@ function formatAuditSummary(auditArtifact = {}) {
         ? `- CSV row findings: ${(validation.csv_row_findings || request.csv_row_findings || []).length}`
         : null,
       isBulkCsv || isCsvAttachment
-        ? `- CSV valid rows: ${request.bulk_csv_submission && request.bulk_csv_submission.valid_row_count || 0}`
+        ? `- CSV valid rows: ${request.bulk_csv_submission?.valid_row_count ?? 0}`
         : null,
-      isBulkCsv
-        || isCsvAttachment
+      isBulkCsv || isCsvAttachment
         ? `- CSV duplicate rows: ${readBulkCsvCount(execution.duplicate_row_count, request.bulk_csv_submission?.duplicate_row_count)}`
         : null,
       isBulkCsv || isCsvAttachment
@@ -426,7 +415,7 @@ function formatAuditSummary(auditArtifact = {}) {
       ? `- CSV row findings: ${(validation.csv_row_findings || request.csv_row_findings || []).length}`
       : null,
     isBulkCsv || isCsvAttachment
-      ? `- CSV valid rows: ${request.bulk_csv_submission && request.bulk_csv_submission.valid_row_count || 0}`
+      ? `- CSV valid rows: ${request.bulk_csv_submission?.valid_row_count ?? 0}`
       : null,
     isBulkCsv || isCsvAttachment
       ? `- CSV duplicate rows: ${readBulkCsvCount(execution.duplicate_row_count, request.bulk_csv_submission?.duplicate_row_count)}`
