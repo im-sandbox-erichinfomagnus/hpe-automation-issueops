@@ -162,7 +162,7 @@ test('validate end-to-end waiting_for_attachment progression for csv_attachment 
   assert.equal(result.validation.request_status, 'waiting_for_attachment');
   assert.equal(result.validation.is_valid, false);
   assert.equal(result.auditArtifact.request.request_status, 'waiting_for_attachment');
-  assert.match(fs.readFileSync(summaryPath, 'utf8'), /Attachment status: waiting for requester CSV attachment comment/i);
+  assert.match(fs.readFileSync(summaryPath, 'utf8'), /Request is waiting for a requester-authored CSV attachment comment/i);
 });
 
 test('validate failed then corrected attachment progression to awaiting_approval', async () => {

@@ -4,6 +4,7 @@ const { resolveApproverRole } = require('./resolve-approver-role');
 const { resolveTeamCreationApprover } = require('./resolve-team-creation-approver');
 const { resolveTeamHierarchyApprover } = require('./resolve-team-hierarchy-approver');
 const { resolveTeamRepoAccessApprover } = require('./resolve-team-repo-access-approver');
+const { resolveTenantCreationApprover } = require('./resolve-tenant-creation-approver');
 
 const APPROVAL_COMMAND = 'approved';
 
@@ -42,6 +43,10 @@ function buildPendingApprovalNote(approvalMode, approvalCommand) {
     return `Add an issue comment containing exactly '${approvalCommand}' from the designated target organization owner to authorize execution.`;
   }
 
+  if (approvalMode === 'tenant_creation') {
+    return `Add an issue comment containing exactly '${approvalCommand}' from the designated active target organization owner to authorize execution.`;
+  }
+
   return `Add an issue comment containing exactly '${approvalCommand}' as an organization owner to authorize execution.`;
 }
 
@@ -56,6 +61,10 @@ function buildPendingAttachmentApprovalNote(approvalMode, approvalCommand) {
 
   if (approvalMode === 'team_repo_access') {
     return `Add an issue comment containing exactly '${approvalCommand}' from the designated target organization owner after the accepted CSV attachment comment to authorize execution.`;
+  }
+
+  if (approvalMode === 'tenant_creation') {
+    return `Add an issue comment containing exactly '${approvalCommand}' from the designated active target organization owner after the accepted CSV attachment comment to authorize execution.`;
   }
 
   return `Add an issue comment containing exactly '${approvalCommand}' as an organization owner after the accepted CSV attachment comment to authorize execution.`;
@@ -85,11 +94,15 @@ async function evaluateApprovalGate(input = {}, options = {}) {
       return resolveTeamRepoAccessApprover(args, options);
     }
 
+    if (approvalMode === 'tenant_creation') {
+      return resolveTenantCreationApprover(args, options);
+    }
+
     return resolveApproverRole(args, options);
   });
 
   if (
-    (approvalMode === 'team_membership' || approvalMode === 'team_creation' || approvalMode === 'team_hierarchy' || approvalMode === 'team_repo_access') &&
+    (approvalMode === 'team_membership' || approvalMode === 'team_creation' || approvalMode === 'team_hierarchy' || approvalMode === 'team_repo_access' || approvalMode === 'tenant_creation') &&
     intakeMode === 'csv_attachment' &&
     requestStatus === 'waiting_for_attachment'
   ) {
@@ -103,14 +116,14 @@ async function evaluateApprovalGate(input = {}, options = {}) {
   }
 
   const approvalComment = findLatestApprovalComment(issueComments, approvalCommand, {
-    notBefore: (approvalMode === 'team_membership' || approvalMode === 'team_creation' || approvalMode === 'team_hierarchy' || approvalMode === 'team_repo_access') && intakeMode === 'csv_attachment'
+    notBefore: (approvalMode === 'team_membership' || approvalMode === 'team_creation' || approvalMode === 'team_hierarchy' || approvalMode === 'team_repo_access' || approvalMode === 'tenant_creation') && intakeMode === 'csv_attachment'
       ? acceptedAttachmentCommentCreatedAt
       : null,
   });
 
   if (!approvalComment) {
     const requiresFreshAttachmentApproval =
-      (approvalMode === 'team_membership' || approvalMode === 'team_creation' || approvalMode === 'team_hierarchy' || approvalMode === 'team_repo_access') &&
+      (approvalMode === 'team_membership' || approvalMode === 'team_creation' || approvalMode === 'team_hierarchy' || approvalMode === 'team_repo_access' || approvalMode === 'tenant_creation') &&
       intakeMode === 'csv_attachment' &&
       acceptedAttachmentCommentCreatedAt;
 
@@ -208,6 +221,32 @@ async function evaluateApprovalGate(input = {}, options = {}) {
       approved_at: approvalComment.created_at || null,
       decision_source: 'comment',
       decision_note: `The approval comment '${approvalCommand}' was added by the authorized designated target organization owner for this request batch.`,
+    };
+  }
+
+  if (approvalMode === 'tenant_creation') {
+    if (approver.approver_role !== 'target_org_owner') {
+      return {
+        approval_status: 'denied',
+        approver_login: approverLogin,
+        approver_role: approver.approver_role,
+        approver_authorization_state: approver.approver_authorization_state || 'unknown',
+        approver_membership_state: approver.approver_membership_state || 'unknown',
+        approved_at: approvalComment.created_at || null,
+        decision_source: 'comment',
+        decision_note: `The approval comment '${approvalCommand}' was not added by the authorized designated target organization owner and does not authorize tenant bootstrap mutation.`,
+      };
+    }
+
+    return {
+      approval_status: 'approved',
+      approver_login: approverLogin,
+      approver_role: approver.approver_role,
+      approver_authorization_state: approver.approver_authorization_state || 'authorized',
+      approver_membership_state: approver.approver_membership_state || 'active',
+      approved_at: approvalComment.created_at || null,
+      decision_source: 'comment',
+      decision_note: `The approval comment '${approvalCommand}' was added by the authorized designated target organization owner for this tenant bootstrap request.`,
     };
   }
 

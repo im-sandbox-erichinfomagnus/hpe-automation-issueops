@@ -6,6 +6,7 @@ const test = require('node:test');
 const {
   buildAuditArtifact,
   determineOperation,
+  inferRequestIntakeMode,
 } = require('../../src/workflow-support/build-audit-artifact');
 
 test('determineOperation keeps team creation classification when normalized empty arrays are present', () => {
@@ -50,6 +51,26 @@ test('buildAuditArtifact preserves an explicit prior operation during artifact r
   });
 
   assert.equal(artifact.metadata.operation, 'team_creation');
+});
+
+test('inferRequestIntakeMode classifies team_repo_access bulk CSV when only normalized grants are present', () => {
+  const intakeMode = inferRequestIntakeMode({
+    organization: 'octo-org',
+    requested_team_slug: 'platform-engineering',
+    requested_repositories_input: '',
+    requested_permission_api_value: 'push',
+    requested_repository_grants: [
+      {
+        repository_name: 'service-catalog',
+        permission: 'push',
+      },
+    ],
+    bulk_csv_submission: {
+      schema_status: 'valid',
+    },
+  }, 'team_repo_access');
+
+  assert.equal(intakeMode, 'bulk_csv');
 });
 
 test('buildAuditArtifact ignores empty fenced bulk CSV input when inferring intake mode', () => {

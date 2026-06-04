@@ -3,10 +3,18 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
+      interval: "weekly"
+      day: "monday"
+      time: "05:00"
+      timezone: "UTC"
+    target-branch: "013-setup-feature-branch"
     open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "github-actions"
   - package-ecosystem: npm
     directory: /
+    target-branch: 013-setup-feature-branch
     schedule:
       interval: weekly
     open-pull-requests-limit: 5

@@ -69,8 +69,17 @@ function buildTeamCreationPermissionGuard(context = {}, options = {}) {
   };
 }
 
+function assertTenantBootstrapCreationAllowed(context = {}, options = {}) {
+  const decision = assertTeamCreationAllowed(context, options);
+  if (!context.designated_approver_login) {
+    throw new Error('Tenant bootstrap blocked because designated approver is missing');
+  }
+  return decision;
+}
+
 module.exports = {
   assertTeamCreationAllowed,
+  assertTenantBootstrapCreationAllowed,
   buildTeamCreationPermissionGuard,
   hasPatBackedOrgMutationToken,
   isEligibleTeamCreationApprover,

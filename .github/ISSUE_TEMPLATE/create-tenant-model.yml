@@ -1,0 +1,54 @@
+name: Create tenant model
+description: Request tenant bootstrap teams, hierarchy, and requester maintainer setup.
+title: "[create-tenant-model] <org>/<tenant>: <summary>"
+labels:
+  - issueops
+  - create-tenant-model
+body:
+  - type: input
+    id: organization
+    attributes:
+      label: Target organization
+      description: GitHub organization where tenant teams will be created.
+      placeholder: octo-org
+    validations:
+      required: true
+
+  - type: input
+    id: tenant_name
+    attributes:
+      label: Tenant name
+      description: Human-readable tenant name used to derive deterministic team names.
+      placeholder: Acme
+    validations:
+      required: true
+
+  - type: input
+    id: designated_approver
+    attributes:
+      label: Designated approver
+      description: GitHub login for an active owner in the target organization who will post the approval comment.
+      placeholder: org-owner-user
+    validations:
+      required: true
+
+  - type: dropdown
+    id: dry_run
+    attributes:
+      label: Dry-run mode
+      description: Dry-run validates and plans reconciliation without mutation.
+      options:
+        - "true"
+        - "false"
+      default: 0
+    validations:
+      required: true
+
+  - type: textarea
+    id: justification
+    attributes:
+      label: Business justification
+      description: Explain why this tenant bootstrap operation is required.
+      placeholder: Tenant needs isolated administration teams.
+    validations:
+      required: true

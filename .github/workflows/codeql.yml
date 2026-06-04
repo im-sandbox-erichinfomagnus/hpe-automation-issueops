@@ -3,6 +3,7 @@ name: CodeQL
 on:
   push:
     branches:
+      - 013-setup-feature-branch
       - main
   schedule:
     - cron: '0 5 * * 1'
