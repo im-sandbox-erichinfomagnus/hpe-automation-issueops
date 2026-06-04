@@ -41,7 +41,7 @@ jobs:
       AUDIT_ARTIFACT_PATH: artifacts/add-child-teams-validation-${{ github.event.issue.number || inputs.issue-number || 'manual' }}.json
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -101,27 +101,16 @@ jobs:
           PARSED_REQUEST_JSON: ${{ steps.parse_request.outputs.json }}
           PARSED_PARENT_TEAM: ${{ steps.parse_request.outputs.parsed_parent_team }}
           PARSED_DESIGNATED_HIERARCHY_APPROVER: ${{ steps.parse_request.outputs.parsed_designated_hierarchy_approver }}
-          PARSED_DESIGNATED_APPROVER: ${{ steps.parse_request.outputs.parsed_designated_approver }}
         run: |
           set -euo pipefail
 
+          json_parent_team=$(echo "${PARSED_REQUEST_JSON:-{\}}" | jq -r '.parent_team // ""')
+          json_designated_approver=$(echo "${PARSED_REQUEST_JSON:-{\}}" | jq -r '.designated_hierarchy_approver // ""')
+
           matches_request=false
-          parsed_parent_team="${PARSED_PARENT_TEAM:-}"
-          parsed_designated_approver="${PARSED_DESIGNATED_HIERARCHY_APPROVER:-${PARSED_DESIGNATED_APPROVER:-}}"
-
-          if [ -n "${PARSED_REQUEST_JSON:-}" ] && [ "$PARSED_REQUEST_JSON" != 'null' ]; then
-            json_parent_team=$(printf '%s' "$PARSED_REQUEST_JSON" | jq -r '.parent_team // .parsed_parent_team // empty' 2>/dev/null || true)
-            json_designated_approver=$(printf '%s' "$PARSED_REQUEST_JSON" | jq -r '.designated_hierarchy_approver // .parsed_designated_hierarchy_approver // .designated_approver // .parsed_designated_approver // empty' 2>/dev/null || true)
-
-            if [ -z "$parsed_parent_team" ] && [ -n "$json_parent_team" ]; then
-              parsed_parent_team="$json_parent_team"
-            fi
-            if [ -z "$parsed_designated_approver" ] && [ -n "$json_designated_approver" ]; then
-              parsed_designated_approver="$json_designated_approver"
-            fi
-          fi
-
-          if [ -n "$parsed_parent_team" ] && [ -n "$parsed_designated_approver" ]; then
+          if [ -n "${PARSED_PARENT_TEAM:-}" ] && [ -n "${PARSED_DESIGNATED_HIERARCHY_APPROVER:-}" ]; then
+            matches_request=true
+          elif [ -n "${json_parent_team:-}" ] && [ -n "${json_designated_approver:-}" ]; then
             matches_request=true
           fi
 

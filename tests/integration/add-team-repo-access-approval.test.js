@@ -223,11 +223,10 @@ test('runApprovalGate preserves manual intake when the stored optional CSV field
       organization: 'octo-org',
       team_slug: 'platform-engineering',
       team_name: 'Platform Engineering',
-      intake_mode: null,
+      intake_mode: 'manual',
       requested_repositories_input: 'service-catalog',
       bulk_csv_input: '```csv\n\n```',
       bulk_csv_submission: {
-        encoding: 'utf-8',
         header_columns: [],
         required_columns: ['repository'],
         unsupported_columns: [],
@@ -404,7 +403,8 @@ test('csv_attachment waiting request bypasses central assignment and does not ad
   assert.equal(result.assignment.assignment_status, 'not_attempted');
   assert.equal(result.approval.approval_status, 'pending');
   assert.equal(result.request.request_status, 'waiting_for_attachment');
-  assert.match(fs.readFileSync(summaryPath, 'utf8'), /Attachment status: waiting for requester CSV attachment comment/i);
+  assert.match(fs.readFileSync(summaryPath, 'utf8'), /Request status: waiting_for_attachment/i);
+  assert.doesNotMatch(fs.readFileSync(summaryPath, 'utf8'), /Attachment status:/i);
 });
 
 test('approval integration enforces least-privilege boundary when ISSUEOPS_GITHUB_TOKEN is unavailable', async () => {

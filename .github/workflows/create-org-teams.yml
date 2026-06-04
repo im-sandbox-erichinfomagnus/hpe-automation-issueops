@@ -41,7 +41,7 @@ jobs:
       AUDIT_ARTIFACT_PATH: artifacts/create-org-teams-validation-${{ github.event.issue.number || inputs.issue-number || 'manual' }}.json
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -78,8 +78,8 @@ jobs:
             requester_login=$(printf '%s' "$issue_json" | jq -r '.user.login // ""')
           fi
 
-          echo "requester_login=$requester_login" >> "$GITHUB_OUTPUT"
           {
+            echo "requester_login=$requester_login"
             echo 'issue_body<<EOF'
             printf '%s\n' "$issue_body"
             echo EOF
@@ -97,14 +97,11 @@ jobs:
         env:
           PARSED_ORGANIZATION: ${{ steps.parse_request.outputs.parsed_organization }}
           PARSED_INTENDED_OWNER: ${{ steps.parse_request.outputs.parsed_intended_owner }}
-          PARSED_INTAKE_MODE: ${{ steps.parse_request.outputs.parsed_intake_mode }}
-          PARSED_REQUESTED_TEAM_NAMES: ${{ steps.parse_request.outputs.parsed_requested_team_names }}
-          PARSED_BULK_CSV_REQUESTED_TEAM_NAMES: ${{ steps.parse_request.outputs.parsed_bulk_csv_requested_team_names }}
         run: |
           set -euo pipefail
 
           matches_request=false
-          if [ -n "${PARSED_ORGANIZATION:-}" ] && [ -n "${PARSED_INTENDED_OWNER:-}" ] && { [ -n "${PARSED_INTAKE_MODE:-}" ] || [ -n "${PARSED_REQUESTED_TEAM_NAMES:-}" ] || [ -n "${PARSED_BULK_CSV_REQUESTED_TEAM_NAMES:-}" ]; }; then
+          if [ -n "${PARSED_INTENDED_OWNER:-}" ]; then
             matches_request=true
           fi
 

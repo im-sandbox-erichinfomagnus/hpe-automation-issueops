@@ -455,7 +455,7 @@ async function runApprovedExecution(options = {}) {
       ...tenantRepoValidation,
     };
   }
-  const teamReadApi = (isTenantRepoCreation || isTenantCreation || isTeamCreation || isTeamHierarchy) ? teamApi : api;
+  const teamReadApi = isTenantRepoCreation ? teamApi : api;
   const currentTeams = (isTenantCreation || isTeamCreation || isTeamHierarchy || isTenantRepoCreation)
     ? await teamReadApi.listOrgTeams({
         organization: auditArtifact.request.organization,

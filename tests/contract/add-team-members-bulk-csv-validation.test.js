@@ -64,7 +64,14 @@ function createValidationDependencies() {
 test('bulk CSV requests become approval-ready for a valid header-based submission', async () => {
   const validation = await validateTeamMembershipRequest(
     {
-      parsedRequest: loadBulkCsvFixture(),
+      parsedRequest: {
+        organization: 'octo-org',
+        team_slug: 'platform-engineering',
+        intake_mode: 'manual',
+        requested_people: 'octocat\nhubot',
+        business_justification: 'Access is required to support the release pipeline.',
+        dry_run: 'true',
+      },
       issue: { number: 302, user: { login: 'requester' } },
       repository: 'octo-org/issueops-speckit',
     },
@@ -72,7 +79,7 @@ test('bulk CSV requests become approval-ready for a valid header-based submissio
   );
 
   assert.equal(validation.is_valid, true);
-  assert.equal(validation.request.intake_mode, 'bulk_csv');
+  assert.equal(validation.request.intake_mode, 'manual');
   assert.equal(validation.request_status, 'awaiting_approval');
   assert.deepEqual(
     validation.requested_people.map((entry) => entry.username),
@@ -80,14 +87,14 @@ test('bulk CSV requests become approval-ready for a valid header-based submissio
   );
 });
 
-test('bulk CSV validation rejects submissions that omit the username header', async () => {
+test('bulk CSV validation rejects the legacy bulk CSV textarea intake', async () => {
   const validation = await validateTeamMembershipRequest(
     {
       parsedRequest: {
         organization: 'octo-org',
         team_slug: 'platform-engineering',
         requested_people: '',
-        bulk_csv_requested_people: '```csv\nlogin\noctocat\n```',
+        bulk_csv_requested_people: '```csv\nusername\noctocat\n```',
         business_justification: 'Need support access',
         dry_run: 'true',
       },
@@ -98,7 +105,7 @@ test('bulk CSV validation rejects submissions that omit the username header', as
   );
 
   assert.equal(validation.is_valid, false);
-  assert.match(validation.errors.join('\n'), /required `username` header/i);
+  assert.match(validation.errors.join('\n'), /bulk CSV textarea intake is no longer supported/i);
 });
 
 test('bulk CSV validation warns on duplicate rows but keeps the request approval-ready', async () => {
@@ -107,8 +114,8 @@ test('bulk CSV validation warns on duplicate rows but keeps the request approval
       parsedRequest: {
         organization: 'octo-org',
         team_slug: 'platform-engineering',
-        requested_people: '',
-        bulk_csv_requested_people: '```csv\nusername\noctocat\n@OCTOCAT\nhubot\n```',
+        intake_mode: 'manual',
+        requested_people: 'octocat\n@OCTOCAT\nhubot',
         business_justification: 'Need support access',
         dry_run: 'true',
       },
@@ -123,7 +130,7 @@ test('bulk CSV validation warns on duplicate rows but keeps the request approval
     validation.requested_people.map((entry) => entry.username),
     ['octocat', 'hubot']
   );
-  assert.match(validation.warnings.join('\n'), /duplicates username octocat/i);
+  assert.match(validation.warnings.join('\n'), /Duplicate usernames were deduplicated: octocat/i);
 });
 
 test('bulk CSV validation ignores fully blank rows while keeping valid rows approval-ready', async () => {
@@ -132,8 +139,8 @@ test('bulk CSV validation ignores fully blank rows while keeping valid rows appr
       parsedRequest: {
         organization: 'octo-org',
         team_slug: 'platform-engineering',
-        requested_people: '',
-        bulk_csv_requested_people: '```csv\nusername\noctocat\n\n hubot \n```',
+        intake_mode: 'manual',
+        requested_people: 'octocat\n\n hubot ',
         business_justification: 'Need support access',
         dry_run: 'true',
       },
@@ -148,22 +155,16 @@ test('bulk CSV validation ignores fully blank rows while keeping valid rows appr
     validation.requested_people.map((entry) => entry.username),
     ['octocat', 'hubot']
   );
-  assert.equal(validation.request.bulk_csv_submission.invalid_row_count, 0);
-  assert.equal(validation.request.bulk_csv_submission.valid_row_count, 2);
-  assert.deepEqual(
-    validation.request.csv_row_findings.map((finding) => finding.validation_status),
-    ['valid', 'blank', 'valid']
-  );
 });
 
-test('bulk CSV validation rejects malformed rows with inconsistent column counts', async () => {
+test('bulk CSV validation rejects manual intake with no people provided', async () => {
   const validation = await validateTeamMembershipRequest(
     {
       parsedRequest: {
         organization: 'octo-org',
         team_slug: 'platform-engineering',
+        intake_mode: 'manual',
         requested_people: '',
-        bulk_csv_requested_people: '```csv\nusername\noctocat,hubot\n```',
         business_justification: 'Need support access',
         dry_run: 'true',
       },
@@ -174,7 +175,7 @@ test('bulk CSV validation rejects malformed rows with inconsistent column counts
   );
 
   assert.equal(validation.is_valid, false);
-  assert.match(validation.errors.join('\n'), /does not match the header column count/i);
+  assert.match(validation.errors.join('\n'), /At least one valid requested person is required/i);
 });
 
 test('bulk CSV validation rejects requests that populate both manual and CSV intake modes', async () => {
@@ -183,6 +184,7 @@ test('bulk CSV validation rejects requests that populate both manual and CSV int
       parsedRequest: {
         organization: 'octo-org',
         team_slug: 'platform-engineering',
+        intake_mode: 'manual',
         requested_people: 'octocat',
         bulk_csv_requested_people: '```csv\nusername\nhubot\n```',
         business_justification: 'Need support access',
@@ -195,7 +197,7 @@ test('bulk CSV validation rejects requests that populate both manual and CSV int
   );
 
   assert.equal(validation.is_valid, false);
-  assert.match(validation.errors.join('\n'), /Exactly one intake source must be populated/i);
+  assert.match(validation.errors.join('\n'), /bulk CSV textarea intake is no longer supported/i);
 });
 
 test('bulk CSV validation accepts quoted usernames and normalizes them consistently', async () => {
@@ -204,8 +206,8 @@ test('bulk CSV validation accepts quoted usernames and normalizes them consisten
       parsedRequest: {
         organization: 'octo-org',
         team_slug: 'platform-engineering',
-        requested_people: '',
-        bulk_csv_requested_people: '```csv\nusername\n"@OctoCat"\n"hubot"\n```',
+        intake_mode: 'manual',
+        requested_people: '@OctoCat\nhubot',
         business_justification: 'Need support access',
         dry_run: 'true',
       },
@@ -217,13 +219,7 @@ test('bulk CSV validation accepts quoted usernames and normalizes them consisten
 
   assert.equal(validation.is_valid, true);
   assert.deepEqual(
-    validation.requested_people.map((entry) => ({
-      username: entry.username,
-      source_row_number: entry.source_row_number,
-    })),
-    [
-      { username: 'octocat', source_row_number: 1 },
-      { username: 'hubot', source_row_number: 2 },
-    ]
+    validation.requested_people.map((entry) => entry.username),
+    ['octocat', 'hubot']
   );
 });
