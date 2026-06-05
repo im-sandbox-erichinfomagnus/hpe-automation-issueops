@@ -11,7 +11,7 @@
   {
     "id": 6101,
     "created_at": "2026-05-25T09:05:00Z",
-    "body": "Attaching the first hierarchy CSV candidate.\n\n[child-teams.csv](https://github.com/octo-org/issueops-speckit/files/6101/child-teams.csv)",
+    "body": "Attaching the first hierarchy CSV candidate.\n\n[child-teams.csv](https://github.com/user-attachments/files/6101/child-teams.csv)",
     "html_url": "https://github.com/octo-org/issueops-speckit/issues/610#issuecomment-6101",
     "user": {
       "login": "requester"
@@ -20,7 +20,7 @@
   {
     "id": 6102,
     "created_at": "2026-05-25T09:07:00Z",
-    "body": "Uploading an ambiguous set in one comment.\n\n[child-teams-a.csv](https://github.com/octo-org/issueops-speckit/files/6102/child-teams-a.csv)\n[child-teams-b.csv](https://github.com/octo-org/issueops-speckit/files/61021/child-teams-b.csv)",
+    "body": "Uploading an ambiguous set in one comment.\n\n[child-teams-a.csv](https://github.com/user-attachments/files/6102/child-teams-a.csv)\n[child-teams-b.csv](https://github.com/user-attachments/files/61021/child-teams-b.csv)",
     "html_url": "https://github.com/octo-org/issueops-speckit/issues/610#issuecomment-6102",
     "user": {
       "login": "requester"
@@ -29,7 +29,7 @@
   {
     "id": 61025,
     "created_at": "2026-05-25T09:07:30Z",
-    "body": "Posting a competing non-requester CSV attachment.\n\n[outsider-child-teams.csv](https://github.com/octo-org/issueops-speckit/files/61025/outsider-child-teams.csv)",
+    "body": "Posting a competing non-requester CSV attachment.\n\n[outsider-child-teams.csv](https://github.com/user-attachments/files/61025/outsider-child-teams.csv)",
     "html_url": "https://github.com/octo-org/issueops-speckit/issues/610#issuecomment-61025",
     "user": {
       "login": "other-user"
@@ -38,7 +38,7 @@
   {
     "id": 61026,
     "created_at": "2026-05-25T09:08:00Z",
-    "body": "Posting a non-CSV attachment candidate.\n\n[child-teams.txt](https://github.com/octo-org/issueops-speckit/files/61026/child-teams.txt)",
+    "body": "Posting a non-CSV attachment candidate.\n\n[child-teams.txt](https://github.com/user-attachments/files/61026/child-teams.txt)",
     "html_url": "https://github.com/octo-org/issueops-speckit/issues/610#issuecomment-61026",
     "user": {
       "login": "requester"
@@ -47,7 +47,7 @@
   {
     "id": 6103,
     "created_at": "2026-05-25T09:09:00Z",
-    "body": "Posting corrected CSV attachment after validation feedback.\n\n[child-teams-corrected.csv](https://github.com/octo-org/issueops-speckit/files/6103/child-teams-corrected.csv)",
+    "body": "Posting corrected CSV attachment after validation feedback.\n\n[child-teams-corrected.csv](https://github.com/user-attachments/files/6103/child-teams-corrected.csv)",
     "html_url": "https://github.com/octo-org/issueops-speckit/issues/610#issuecomment-6103",
     "user": {
       "login": "requester"

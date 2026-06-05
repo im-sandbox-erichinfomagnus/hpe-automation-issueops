@@ -159,7 +159,7 @@ test('preserves manual-mode validation defaults while exposing empty CSV metadat
   assert.equal(validation.request.requested_team_names_input, parsedRequest.requested_team_names);
 });
 
-test('manual create-org-teams fixture remains a manual-only request surface before attachment handling is added', async () => {
+test('manual create-org-teams fixture remains a manual-only request surface alongside csv_attachment support', async () => {
   const parsedRequest = loadBaseFixture();
 
   const validation = await validateTeamCreationRequest({

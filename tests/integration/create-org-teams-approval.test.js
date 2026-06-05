@@ -34,7 +34,8 @@ function writeAuditArtifact(directory, overrides = {}) {
         }
       ],
       request_status: 'awaiting_approval',
-      dry_run: true
+      dry_run: true,
+      requested_team_names_input: 'Platform Engineering',
     },
     validation: {
       is_valid: true,

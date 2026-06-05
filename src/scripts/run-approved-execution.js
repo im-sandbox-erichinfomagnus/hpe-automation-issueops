@@ -303,13 +303,21 @@ async function runApprovedExecution(options = {}) {
   let mutationDecision;
   try {
     mutationDecision = isTenantCreation
-      ? assertTenantBootstrapMembershipAllowed({
-          approval_status: auditArtifact.approval.approval_status,
-          approver_role: auditArtifact.approval.approver_role,
-          requester_login: auditArtifact.request.requester_login,
-          dry_run: auditArtifact.request.dry_run,
-          tokenInfo: options.tokenInfo,
-        })
+      ? (() => {
+          const decision = assertTenantBootstrapMembershipAllowed({
+            approval_status: auditArtifact.approval.approval_status,
+            approver_role: auditArtifact.approval.approver_role,
+            requester_login: auditArtifact.request.requester_login,
+            dry_run: auditArtifact.request.dry_run,
+            tokenInfo: options.tokenInfo,
+          });
+
+          if (!decision.tokenInfo || !decision.tokenInfo.is_pat_backed) {
+            throw new Error('Tenant bootstrap mutation blocked because the workflow token is not PAT-backed for org mutation');
+          }
+
+          return decision;
+        })()
       : isTeamCreation
       ? assertTeamCreationAllowed({
           approval_status: auditArtifact.approval.approval_status,

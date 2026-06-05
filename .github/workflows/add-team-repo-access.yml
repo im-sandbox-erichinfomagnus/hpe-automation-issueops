@@ -40,7 +40,7 @@ jobs:
       AUDIT_ARTIFACT_PATH: artifacts/add-team-repo-access-validation-${{ github.event.issue.number || inputs.issue-number || 'manual' }}.json
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -145,7 +145,7 @@ jobs:
 
       - name: Execute approved repository-access reconciliation
         id: execute_request
-        if: ${{ always() && steps.request_scope.outputs.matches-request == 'true' && steps.approval_gate.outputs.approval-status == 'approved' }}
+        if: ${{ always() && steps.request_scope.outputs.matches-request == 'true' && steps.approval_gate.outputs['approval-status'] == 'approved' }}
         env:
           ISSUEOPS_GITHUB_TOKEN: ${{ secrets.ISSUEOPS_GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ github.token }}

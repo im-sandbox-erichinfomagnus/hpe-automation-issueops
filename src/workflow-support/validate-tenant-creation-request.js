@@ -3,7 +3,7 @@
 const { parseTenantCreationRequest } = require('./parse-tenant-creation-request');
 
 function isSafeTenantKey(value) {
-  return /^[a-z0-9][a-z0-9-]*$/.test(String(value || ''));
+  return /^[a-z0-9][a-z0-9_-]*$/.test(String(value || ''));
 }
 
 async function validateTenantCreationRequest(input = {}, options = {}) {
