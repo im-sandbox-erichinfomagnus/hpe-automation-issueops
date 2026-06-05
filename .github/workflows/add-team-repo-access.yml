@@ -79,6 +79,7 @@ jobs:
 
           {
             echo "requester_login=$requester_login"
+            echo "issue_labels_json=$issue_labels_json"
             echo 'issue_body<<EOF'
             printf '%s\n' "$issue_body"
             echo EOF

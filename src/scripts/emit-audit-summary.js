@@ -5,8 +5,8 @@ const path = require('path');
 
 const { determineOperation } = require('../workflow-support/build-audit-artifact');
 
-function readBulkCsvCount(executionCount, requestCount) {
-  return executionCount ?? requestCount ?? 0;
+function readBulkCsvCount(executionValue, submissionValue) {
+  return executionValue ?? submissionValue ?? 0;
 }
 
 function formatAuditSummary(auditArtifact = {}) {
@@ -16,9 +16,8 @@ function formatAuditSummary(auditArtifact = {}) {
   const approval = auditArtifact.approval || {};
   const reconciliation = auditArtifact.reconciliation || {};
   const execution = auditArtifact.execution || {};
-  const operation = auditArtifact.metadata && auditArtifact.metadata.operation
-    ? auditArtifact.metadata.operation
-    : determineOperation(request);
+  const metadata = auditArtifact.metadata || {};
+  const operation = metadata.operation || determineOperation(request);
   const isBulkCsv = request.intake_mode === 'bulk_csv';
   const isCsvAttachment = request.intake_mode === 'csv_attachment';
   const isTeamRepoAccess = operation === 'team_repo_access';
@@ -35,6 +34,76 @@ function formatAuditSummary(auditArtifact = {}) {
     : validation.designated_approver_authorization
       ? validation.designated_approver_authorization.state || 'unknown'
       : 'n/a';
+
+  const isTenantRepoCreation = operation === 'tenant_repo_creation' || Boolean(request.repository_name_normalized || request.repository_name_input);
+
+  if (isTenantRepoCreation) {
+    return [
+      '# Create Tenant Repositories Workflow Summary',
+      '',
+      `- Request ID: ${request.request_id || 'n/a'}`,
+      `- Repository: ${request.repository || 'n/a'}`,
+      `- Target organization: ${request.organization || 'n/a'}`,
+      `- Tenant name: ${request.tenant_name_input || request.tenant_display_name || 'n/a'}`,
+      `- Target repository name: ${request.repository_name_normalized || request.repository_name_input || 'n/a'}`,
+      `- Requested repository visibility: ${request.repository_visibility || 'private'}`,
+      `- Repository visibility source: ${request.repository_visibility_source || 'default'}`,
+      `- Existing repository visibility: ${reconciliation.existing_visibility || 'n/a'}`,
+      `- Actual repository visibility: ${reconciliation.actual_visibility || 'n/a'}`,
+      `- Visibility conflict: ${reconciliation.visibility_conflict ? 'true' : 'false'}`,
+      `- Designated approver: ${request.designated_approver_login || 'n/a'}`,
+      `- Intake mode: ${request.intake_mode || 'n/a'}`,
+      `- Dry-run mode: ${request.dry_run ? 'true' : 'false'}`,
+      `- Request status: ${request.request_status || 'submitted'}`,
+      `- Central assignment: ${assignment.assignment_status || 'not_attempted'}${assignment.assigned_login ? ` (${assignment.assigned_login})` : ''}`,
+      `- Approval: ${approval.approval_status || 'pending'} (${approval.approver_authorization_state || 'unknown'})`,
+      approval.approver_login ? `- Approver: ${approval.approver_login}` : null,
+      approval.approved_context_marker ? `- Approved context marker: ${approval.approved_context_marker}` : null,
+      approval.latest_context_marker ? `- Latest context marker: ${approval.latest_context_marker}` : null,
+      `- Validation: ${validation.is_valid ? 'passed' : 'failed'}`,
+      `- Visibility validation status: ${validation.validation_findings && validation.validation_findings.visibility_validation_status || 'unknown'}`,
+      `- Visibility validation reason: ${validation.validation_findings && validation.validation_findings.visibility_validation_reason || 'n/a'}`,
+      `- Allowed repository visibilities: ${validation.validation_findings && Array.isArray(validation.validation_findings.allowed_repository_visibilities) ? validation.validation_findings.allowed_repository_visibilities.join(', ') : 'private, internal, public'}`,
+      `- Tenant resolution: ${validation.tenant_resolution && validation.tenant_resolution.tenant_resolution_status || 'unknown'}`,
+      `- Tenant matches: ${validation.tenant_resolution && validation.tenant_resolution.tenant_match_count || 0}`,
+      `- Tenant parent team: ${request.tenant_team_slug || 'n/a'}`,
+      `- Tenant repo-admin team: ${request.repo_admin_team_slug || 'n/a'}`,
+      `- Context marker: ${request.context_marker || validation.validation_findings && validation.validation_findings.context_marker || 'n/a'}`,
+      `- Repository exists: ${validation.repository_exists ? 'true' : 'false'}`,
+      `- Current repo-admin permission: ${validation.current_repo_admin_permission || 'unknown'}`,
+      `- Planned creation action: ${reconciliation.creation_action || 'n/a'}`,
+      `- Planned permission action: ${reconciliation.permission_action || 'n/a'}`,
+      `- Blocked reason: ${reconciliation.blocked_reason || 'n/a'}`,
+      `- Direct admin avoidance: ${reconciliation.direct_admin_avoidance || 'n/a'}`,
+      `- Boundary revalidation: ${reconciliation.boundary_revalidation_status || 'n/a'}`,
+      `- Repository creation result: ${execution.repository_creation_result || 'n/a'}`,
+      `- Repo-admin grant result: ${execution.repo_admin_grant_result || 'n/a'}`,
+      `- Audit persistence result: ${execution.audit_persistence_result || 'n/a'}`,
+      `- Added: ${execution.mutation_count || 0}`,
+      `- No-op: ${execution.noop_count || 0}`,
+      `- Pending: ${execution.pending_count || 0}`,
+      `- Failed: ${execution.failure_count || 0}`,
+      `- Rollback status: ${execution.rollback_status || 'not_needed'}`,
+      metadata.artifact_name ? `- Audit artifact name: ${metadata.artifact_name}` : null,
+      metadata.artifact_retention_days != null ? `- Audit artifact retention (days): ${metadata.artifact_retention_days}` : null,
+      validation.warnings && validation.warnings.length > 0
+        ? `- Validation warnings: ${validation.warnings.join('; ')}`
+        : null,
+      validation.errors && validation.errors.length > 0
+        ? `- Validation errors: ${validation.errors.join('; ')}`
+        : null,
+      assignment.assignment_note ? `- Assignment note: ${assignment.assignment_note}` : null,
+      approval.decision_note ? `- Approval note: ${approval.decision_note}` : null,
+      '',
+      execution.summary || (validation.is_valid
+        ? approval.approval_status === 'approved'
+          ? 'Request is approved and eligible for tenant repository execution. No repository mutation was attempted in this phase.'
+          : approval.approval_status === 'denied'
+            ? 'Approval was denied or invalid. No tenant repository mutation was attempted.'
+            : 'Request is validated and ready for approval. No tenant repository mutation was attempted.'
+        : 'Request validation failed. No tenant repository mutation was attempted.'),
+    ].filter(Boolean).join('\n');
+  }
 
   const isTenantCreation = operation === 'tenant_creation' || Boolean(request.tenant_key || request.tenant_display_name);
 
@@ -107,10 +176,10 @@ function formatAuditSummary(auditArtifact = {}) {
       isBulkCsv
         ? `- CSV row findings: ${(validation.csv_row_findings || request.csv_row_findings || []).length}`
         : null,
-      isBulkCsv
+      (isBulkCsv || isCsvAttachment)
         ? `- CSV duplicate rows: ${readBulkCsvCount(execution.duplicate_row_count, request.bulk_csv_submission?.duplicate_row_count)}`
         : null,
-      isBulkCsv
+      (isBulkCsv || isCsvAttachment)
         ? `- CSV invalid rows: ${readBulkCsvCount(execution.invalid_row_count, request.bulk_csv_submission?.invalid_row_count)}`
         : null,
       isBulkCsv && request.csv_row_numbering_convention
