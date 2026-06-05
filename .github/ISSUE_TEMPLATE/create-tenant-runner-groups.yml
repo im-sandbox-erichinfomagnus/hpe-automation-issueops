@@ -1,0 +1,88 @@
+name: Create tenant runner group
+description: Request creation of a tenant-scoped Actions runner group at organization level, authorized by tenant CI/CD admin membership.
+title: "[create-tenant-runner-groups] <org>/<group>: <summary>"
+labels:
+  - issueops
+  - create-tenant-runner-groups
+body:
+  - type: input
+    id: organization
+    attributes:
+      label: Target organization
+      description: GitHub organization where the runner group should be created.
+      placeholder: octo-org
+    validations:
+      required: true
+
+  - type: input
+    id: tenant_name
+    attributes:
+      label: Tenant name
+      description: Human-readable tenant name exactly as defined in tenant-registry for the target organization.
+      placeholder: ContosoUK
+    validations:
+      required: true
+
+  - type: input
+    id: runner_group_name
+    attributes:
+      label: Runner group name
+      description: Base name for the runner group. The full group name is derived as TenantName_GroupName.
+      placeholder: Builders
+    validations:
+      required: true
+
+  - type: dropdown
+    id: runner_group_visibility
+    attributes:
+      label: Runner group visibility
+      description: Which repositories may use the group. Defaults to selected (repositories are attached later) to preserve tenant isolation.
+      options:
+        - selected
+        - all
+        - private
+      default: 0
+    validations:
+      required: false
+
+  - type: dropdown
+    id: allows_public_repositories
+    attributes:
+      label: Allow public repositories
+      description: Whether public repositories may use the group. Defaults to false.
+      options:
+        - "false"
+        - "true"
+      default: 0
+    validations:
+      required: false
+
+  - type: input
+    id: designated_approver
+    attributes:
+      label: Designated approver
+      description: GitHub login for the authorized approver who will post the approval comment (must be an active organization owner).
+      placeholder: org-owner-user
+    validations:
+      required: true
+
+  - type: dropdown
+    id: dry_run
+    attributes:
+      label: Dry-run mode
+      description: Dry-run validates tenant context and planned mutation without creating the runner group.
+      options:
+        - "true"
+        - "false"
+      default: 0
+    validations:
+      required: true
+
+  - type: textarea
+    id: justification
+    attributes:
+      label: Business justification
+      description: Explain why this runner group is needed for the tenant.
+      placeholder: Isolate tenant CI runners behind a tenant-scoped runner group.
+    validations:
+      required: true

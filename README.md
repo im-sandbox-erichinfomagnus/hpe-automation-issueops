@@ -126,6 +126,15 @@ This list should be updated as new IssueOps workflows are added.
 - `add-team-repo-access`: Request, validate, approve, and reconcile granting
 	one existing GitHub team access to one or more existing repositories in a
 	target organization.
+- `create-tenant-hosted-runner`: Request, validate, approve, and reconcile
+	creating one tenant-prefixed GitHub-hosted runner at organization level,
+	authorized by active membership in the derived tenant CI/CD admin team.
+- `delete-tenant-hosted-runner`: Request, validate, approve, and reconcile
+	deleting one tenant-prefixed GitHub-hosted runner at organization level,
+	with no-op convergence when the runner is already absent.
+- `create-tenant-runner-groups`: Request, validate, approve, and reconcile
+	creating one tenant-prefixed Actions runner group at organization level
+	with isolation-preserving defaults.
 
 Detailed design and operator guidance for the current operation live in:
 

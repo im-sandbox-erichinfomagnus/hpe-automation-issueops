@@ -38,6 +38,33 @@ function determineOperation(request = {}, runContext = {}) {
     return 'tenant_repo_creation';
   }
 
+  const isHostedRunnerCreation = Boolean(
+    request.runner_image_id ||
+      request.runner_size
+  );
+
+  if (isHostedRunnerCreation) {
+    return 'hosted_runner_creation';
+  }
+
+  const isHostedRunnerDeletion = Boolean(
+    request.runner_deletion_scope ||
+      ((request.runner_name_derived || request.runner_base_name_input) && !request.runner_image_id)
+  );
+
+  if (isHostedRunnerDeletion) {
+    return 'hosted_runner_deletion';
+  }
+
+  const isRunnerGroupCreation = Boolean(
+    request.runner_group_name_derived ||
+      request.runner_group_base_name_input
+  );
+
+  if (isRunnerGroupCreation) {
+    return 'runner_group_creation';
+  }
+
   const isTenantCreation = Boolean(
     request.tenant_key ||
       request.tenant_display_name ||
@@ -211,6 +238,23 @@ function buildAuditArtifact(input = {}) {
       tenant_team_slug: request.tenant_team_slug,
       repo_admin_team_name: request.repo_admin_team_name,
       repo_admin_team_slug: request.repo_admin_team_slug,
+      cicd_admin_team_name: request.cicd_admin_team_name,
+      cicd_admin_team_slug: request.cicd_admin_team_slug,
+      runner_base_name_input: request.runner_base_name_input || '',
+      runner_name_derivation: request.runner_name_derivation || null,
+      runner_name_derived: request.runner_name_derived || '',
+      runner_image_id: request.runner_image_id || '',
+      runner_image_source: request.runner_image_source || '',
+      runner_size: request.runner_size || '',
+      runner_group_name_input: request.runner_group_name_input || '',
+      maximum_runners: request.maximum_runners ?? null,
+      runner_deletion_scope: request.runner_deletion_scope || '',
+      runner_group_base_name_input: request.runner_group_base_name_input || '',
+      runner_group_name_derivation: request.runner_group_name_derivation || null,
+      runner_group_name_derived: request.runner_group_name_derived || '',
+      runner_group_visibility: request.runner_group_visibility || '',
+      runner_group_visibility_source: request.runner_group_visibility_source || '',
+      allows_public_repositories: request.allows_public_repositories ?? null,
       team_slug: request.team_slug,
       intake_mode: intakeMode,
       requested_repositories_input: request.requested_repositories_input || '',
@@ -272,6 +316,12 @@ function buildAuditArtifact(input = {}) {
       repository_exists: validation.repository_exists,
       current_repo_admin_permission: validation.current_repo_admin_permission || null,
       requester_eligibility: validation.requester_eligibility || null,
+      runner_exists: validation.runner_exists,
+      existing_runner_id: validation.existing_runner_id ?? null,
+      existing_runner_status: validation.existing_runner_status || null,
+      runner_group_resolution: validation.runner_group_resolution || null,
+      runner_group_exists: validation.runner_group_exists,
+      existing_runner_group_id: validation.existing_runner_group_id ?? null,
       validation_findings: validation.validation_findings || null,
       no_mutation_planned:
         Boolean(request.dry_run) ||
@@ -325,9 +375,19 @@ function buildAuditArtifact(input = {}) {
       actual_visibility: reconciliationPlan.actual_visibility || reconciliationPlan.existing_visibility || null,
       creation_action: reconciliationPlan.creation_action || null,
       permission_action: reconciliationPlan.permission_action || null,
+      deletion_action: reconciliationPlan.deletion_action || null,
       direct_admin_avoidance: reconciliationPlan.direct_admin_avoidance || null,
       blocked_reason: reconciliationPlan.blocked_reason || null,
       boundary_revalidation_status: reconciliationPlan.boundary_revalidation_status || null,
+      runner_exists: reconciliationPlan.runner_exists,
+      existing_runner_id: reconciliationPlan.existing_runner_id ?? null,
+      runner_name_derived: reconciliationPlan.runner_name_derived || '',
+      runner_group_resolution: reconciliationPlan.runner_group_resolution || null,
+      runner_group_exists: reconciliationPlan.runner_group_exists,
+      existing_runner_group_id: reconciliationPlan.existing_runner_group_id ?? null,
+      runner_group_name_derived: reconciliationPlan.runner_group_name_derived || '',
+      runner_group_visibility: reconciliationPlan.runner_group_visibility || null,
+      allows_public_repositories: reconciliationPlan.allows_public_repositories ?? null,
       team_exists: reconciliationPlan.team_exists,
       repositories_to_grant: reconciliationPlan.repositories_to_grant || [],
       repositories_already_satisfied: reconciliationPlan.repositories_already_satisfied || [],
