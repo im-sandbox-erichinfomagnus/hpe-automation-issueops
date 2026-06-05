@@ -38,7 +38,7 @@ function terminalStateLabelPrefix(operation) {
     team_repo_access: 'issueops:add-team-repo-access:',
     team_repo_access_removal: 'issueops:remove-team-repo-access:',
     tenant_repo_creation: 'issueops:create-tenant-repos:',
-    tenant_creation: 'issueops:create-tenant-model:',
+    tenant_creation: 'issueops:create-tenant:',
   };
   return operationPrefixes[operation] || 'issueops:add-team-members:';
 }
@@ -1314,11 +1314,18 @@ async function runApprovedExecution(options = {}) {
     intakeMode: auditArtifact.request && auditArtifact.request.intake_mode,
     approvalStatus: auditArtifact.approval && auditArtifact.approval.approval_status,
   });
+  const isExecutedNoMutationOutcome =
+    requestStatus === 'executed' &&
+    executionOutcome.mutation_count === 0 &&
+    executionOutcome.pending_count === 0 &&
+    executionOutcome.failure_count === 0;
   if ((isTenantCreation || isTeamCreation) && executionOutcome.created_count > 0) {
     executionOutcome.summary = `${executionOutcome.summary} Note: GitHub automatically makes the authenticated creator a team maintainer when a new team is created, so the creator becomes a team maintainer as an operational constraint of this workflow.`;
   }
   const summaryPrefix =
-    requestStatus === 'executed'
+    isExecutedNoMutationOutcome
+      ? `Request is already satisfied. Additional approval comments do not trigger a new ${isTenantCreation ? 'tenant bootstrap' : isTenantRepoCreation ? 'tenant repository' : isTeamCreation ? 'team creation' : isTeamHierarchy ? 'child-team' : (isTeamRepoAccess || isTeamRepoAccessRemoval) ? 'repository-access' : 'membership'} mutation run.`
+      : requestStatus === 'executed'
       ? `Approved ${isTenantCreation ? 'tenant bootstrap execution' : isTenantRepoCreation ? 'tenant repository execution' : isTeamCreation ? 'team creation' : isTeamHierarchy ? 'child-team execution' : (isTeamRepoAccess || isTeamRepoAccessRemoval) ? 'repository-access execution' : 'execution'} completed.`
       : requestStatus === 'partially_executed'
         ? `Approved ${isTenantCreation ? 'tenant bootstrap execution' : isTenantRepoCreation ? 'tenant repository execution' : isTeamCreation ? 'team creation' : isTeamHierarchy ? 'child-team execution' : (isTeamRepoAccess || isTeamRepoAccessRemoval) ? 'repository-access execution' : 'execution'} completed with partial failure.`
@@ -1377,7 +1384,7 @@ async function runApprovedExecution(options = {}) {
     updatedArtifact.request &&
     updatedArtifact.request.issue_number != null &&
     typeof api.addIssueLabels === 'function' &&
-    (updatedArtifact.request.intake_mode === 'csv_attachment' || isTenantRepoCreation);
+    (updatedArtifact.request.intake_mode === 'csv_attachment' || isTenantRepoCreation || isTenantCreation);
 
   if (shouldAddTerminalLabel) {
     const labelPrefix = terminalStateLabelPrefix(operation);

@@ -147,6 +147,19 @@ test('runRequestValidation records repo-access audit metadata and missing-token 
   assert.match(persisted.execution.summary, /No repository-access mutation was attempted/i);
 });
 
+test('deriveTerminalStatusFromIssueLabels accepts both normalized and legacy tenant label prefixes', () => {
+  const { deriveTerminalStatusFromIssueLabels } = require('../../src/scripts/run-request-validation');
+
+  assert.equal(
+    deriveTerminalStatusFromIssueLabels(['issueops:create-tenant:executed'], 'tenant_creation'),
+    'executed'
+  );
+  assert.equal(
+    deriveTerminalStatusFromIssueLabels(['issueops:create-tenant-model:executed'], 'tenant_creation'),
+    'executed'
+  );
+});
+
 test('runRequestValidation keeps tenant creation classification when parser JSON includes stray requested_repositories', async () => {
   const os = require('node:os');
   const fs = require('node:fs');
