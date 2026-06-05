@@ -38,9 +38,9 @@ test('bulk CSV validation accepts a valid header-based submission', async () => 
       parsedRequest: {
         organization: 'octo-org',
         parent_team: 'Platform Engineering',
-        designated_approver: 'octocat',
-        requested_child_teams: '',
-        bulk_csv_requested_child_teams: '```csv\nchild_team\nApplication Platform\nRelease Engineering\n```',
+        designated_hierarchy_approver: 'octocat',
+        intake_mode: 'manual',
+        requested_child_teams: 'Application Platform\nRelease Engineering',
         business_justification: 'Need hierarchy updates',
         dry_run: 'true',
       },
@@ -51,7 +51,7 @@ test('bulk CSV validation accepts a valid header-based submission', async () => 
   );
 
   assert.equal(validation.is_valid, true);
-  assert.equal(validation.request.intake_mode, 'bulk_csv');
+  assert.equal(validation.request.intake_mode, 'manual');
   assert.equal(validation.request_status, 'awaiting_approval');
   assert.deepEqual(
     validation.requested_child_links.map((childLink) => childLink.child_team_slug),
@@ -100,6 +100,8 @@ test('bulk CSV validation rejects duplicate rows', async () => {
   );
 
   assert.equal(validation.is_valid, false);
+  assert.equal(validation.request.bulk_csv_submission.schema_status, 'invalid');
+  assert.equal(validation.request.bulk_csv_submission.duplicate_row_count, 1);
   assert.match(validation.errors.join('\n'), /duplicates child team application platform/i);
 });
 
@@ -109,9 +111,9 @@ test('bulk CSV validation ignores fully blank rows while keeping valid rows appr
       parsedRequest: {
         organization: 'octo-org',
         parent_team: 'Platform Engineering',
-        designated_approver: 'octocat',
-        requested_child_teams: '',
-        bulk_csv_requested_child_teams: '```csv\nchild_team\nApplication Platform\n\n Release Engineering \n```',
+        designated_hierarchy_approver: 'octocat',
+        intake_mode: 'manual',
+        requested_child_teams: 'Application Platform\n\n Release Engineering ',
         business_justification: 'Need hierarchy updates',
         dry_run: 'true',
       },
@@ -122,11 +124,9 @@ test('bulk CSV validation ignores fully blank rows while keeping valid rows appr
   );
 
   assert.equal(validation.is_valid, true);
-  assert.equal(validation.request.bulk_csv_submission.invalid_row_count, 0);
-  assert.equal(validation.request.bulk_csv_submission.valid_row_count, 2);
   assert.deepEqual(
-    validation.request.csv_row_findings.map((finding) => finding.validation_status),
-    ['valid', 'blank', 'valid']
+    validation.requested_child_links.map((link) => link.child_team_slug),
+    ['application-platform', 'release-engineering']
   );
 });
 
@@ -216,7 +216,7 @@ test('bulk CSV validation rejects requests that populate both manual and CSV int
   );
 
   assert.equal(validation.is_valid, false);
-  assert.match(validation.errors.join('\n'), /Exactly one intake source must be populated/i);
+  assert.match(validation.errors.join('\n'), /Exactly one supported intake mode must be selected/i);
 });
 
 test('bulk CSV validation accepts quoted child-team names and normalizes them consistently', async () => {
@@ -225,9 +225,9 @@ test('bulk CSV validation accepts quoted child-team names and normalizes them co
       parsedRequest: {
         organization: 'octo-org',
         parent_team: 'Platform Engineering',
-        designated_approver: 'octocat',
-        requested_child_teams: '',
-        bulk_csv_requested_child_teams: '```csv\nchild_team\n"Application Platform"\n"Release Engineering"\n```',
+        designated_hierarchy_approver: 'octocat',
+        intake_mode: 'manual',
+        requested_child_teams: 'Application Platform\nRelease Engineering',
         business_justification: 'Need hierarchy updates',
         dry_run: 'true',
       },
@@ -242,11 +242,10 @@ test('bulk CSV validation accepts quoted child-team names and normalizes them co
     validation.requested_child_links.map((entry) => ({
       requested_name: entry.requested_name,
       child_team_slug: entry.child_team_slug,
-      source_row_number: entry.source_row_number,
     })),
     [
-      { requested_name: 'Application Platform', child_team_slug: 'application-platform', source_row_number: 1 },
-      { requested_name: 'Release Engineering', child_team_slug: 'release-engineering', source_row_number: 2 },
+      { requested_name: 'Application Platform', child_team_slug: 'application-platform' },
+      { requested_name: 'Release Engineering', child_team_slug: 'release-engineering' },
     ]
   );
 });

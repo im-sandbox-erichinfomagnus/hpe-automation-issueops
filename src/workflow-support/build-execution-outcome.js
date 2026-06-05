@@ -65,7 +65,9 @@ function buildRemediationInstructions(summary) {
     return [];
   }
 
-  const failedEntities = summary.failed.map((entry) => entry.entity_id);
+  const failedEntities = summary.failed
+    .map((entry) => entry.entity_id || entry.failure_reason || 'unknown_failure')
+    .filter(Boolean);
   return [
     `Retry or re-request the failed subset only: ${failedEntities.join(', ')}`,
     'Preserve the successful subset in the audit artifact to avoid duplicate writes on rerun.',
@@ -116,6 +118,9 @@ function buildExecutionOutcome(input = {}) {
     noop_teams: summary.noop,
     failed_teams: summary.failed,
     rollback_status: rollbackStatus,
+    repository_creation_result: input.repository_creation_result || null,
+    repo_admin_grant_result: input.repo_admin_grant_result || null,
+    audit_persistence_result: input.audit_persistence_result || null,
     failed_subset: summary.failed,
     rejected_subset: summary.rejected,
     mutated_repositories: summary.mutated.map((entry) => entry.repository_full_name).filter(Boolean),

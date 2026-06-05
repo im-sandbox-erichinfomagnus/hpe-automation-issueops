@@ -23,16 +23,19 @@ function writeAuditArtifact(directory, overrides = {}) {
       requester_login: 'himanshu-im',
       organization: 'im-sandbox-himanshu',
       intended_owner_login: 'himanshu-im',
+      intake_mode: 'manual',
+      requested_team_names_input: 'Platform Engineering',
+      bulk_csv_input: '',
       requested_teams: [
         {
-          requested_name: 'Platform Engineering',
           normalized_slug: 'platform-engineering',
           intended_owner_login: 'himanshu-im',
           desired_action: 'create_team'
         }
       ],
       request_status: 'awaiting_approval',
-      dry_run: true
+      dry_run: true,
+      requested_team_names_input: 'Platform Engineering',
     },
     validation: {
       is_valid: true,

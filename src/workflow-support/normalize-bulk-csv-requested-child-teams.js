@@ -246,6 +246,10 @@ function normalizeBulkCsvRequestedChildTeams(rawInput) {
   const invalidRowCount = rowFindings.filter(
     (finding) => finding.validation_status === 'invalid'
   ).length;
+  const duplicateRowCount = rowFindings.filter(
+    (finding) => finding.validation_status === 'duplicate'
+  ).length;
+  const hasBlockingRows = invalidRowCount > 0 || duplicateRowCount > 0;
 
   return {
     encoding: 'utf-8',
@@ -255,8 +259,8 @@ function normalizeBulkCsvRequestedChildTeams(rawInput) {
     row_count: rows.length - 1,
     valid_row_count: rowFindings.filter((finding) => finding.validation_status === 'valid').length,
     invalid_row_count: invalidRowCount,
-    duplicate_row_count: rowFindings.filter((finding) => finding.validation_status === 'duplicate').length,
-    schema_status: schemaErrors.length === 0 && invalidRowCount === 0 ? 'valid' : 'invalid',
+    duplicate_row_count: duplicateRowCount,
+    schema_status: schemaErrors.length === 0 && !hasBlockingRows ? 'valid' : 'invalid',
     schema_errors: schemaErrors,
     raw_input: rawInput,
     normalizedChildTeams,

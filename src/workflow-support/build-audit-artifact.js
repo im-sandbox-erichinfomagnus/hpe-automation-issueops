@@ -10,10 +10,42 @@ function hasPopulatedString(value) {
   return typeof value === 'string' && unwrapCodeFence(value).trim() !== '';
 }
 
+function hasManualNormalizedEntries(value) {
+  if (!Array.isArray(value) || value.length === 0) {
+    return false;
+  }
+
+  return value.some((entry) => (
+    entry != null && (
+      typeof entry !== 'object' ||
+    (entry.source_row_number == null && entry.source_comment_id == null)
+    )
+  ));
+}
+
 function determineOperation(request = {}, runContext = {}) {
   const explicitOperation = runContext.operation || request.operation;
   if (explicitOperation) {
     return explicitOperation;
+  }
+
+  const isTenantRepoCreation = Boolean(
+    request.repository_name_input ||
+      request.repository_name_normalized
+  );
+
+  if (isTenantRepoCreation) {
+    return 'tenant_repo_creation';
+  }
+
+  const isTenantCreation = Boolean(
+    request.tenant_key ||
+      request.tenant_display_name ||
+      (request.tenant_team_slug && request.repo_admin_team_slug)
+  );
+
+  if (isTenantCreation) {
+    return 'tenant_creation';
   }
 
   const isTeamHierarchy = Boolean(
@@ -69,8 +101,8 @@ function determineOperation(request = {}, runContext = {}) {
 }
 
 function inferRequestIntakeMode(request = {}, operation = determineOperation(request)) {
-  if (request.intake_mode) {
-    return request.intake_mode;
+  if (Object.prototype.hasOwnProperty.call(request, 'intake_mode')) {
+    return request.intake_mode ?? null;
   }
 
   if (request.accepted_attachment_submission && request.accepted_attachment_submission.attachment_url) {
@@ -82,22 +114,36 @@ function inferRequestIntakeMode(request = {}, operation = determineOperation(req
     hasNonEmptyArray(request.csv_row_findings) ||
     (request.bulk_csv_submission && request.bulk_csv_submission.schema_status && request.bulk_csv_submission.schema_status !== 'not_provided')
   );
-  const hasManualSignals = (
+  // hasManualInputSignals checks raw input strings only (not derived arrays), to detect
+  // genuinely ambiguous cases where both manual and CSV input strings are populated.
+  const hasManualInputSignals = (
+    operation === 'team_creation' && hasPopulatedString(request.requested_team_names_input)
+  ) || (
+    operation === 'team_membership' && hasPopulatedString(request.requested_people_input)
+  ) || (
+    operation === 'team_hierarchy' && hasPopulatedString(request.requested_child_teams_input)
+  ) || (
+    operation === 'team_repo_access' && hasPopulatedString(request.requested_repositories_input)
+  );
+  // hasManualArraySignals covers legacy artifacts where input strings may not be stored but
+  // derived arrays are populated (e.g. artifacts created before intake_mode was introduced).
+  const hasManualArraySignals = (
     operation === 'team_creation' && (
       hasPopulatedString(request.requested_team_names_input) ||
-      hasNonEmptyArray(request.requested_teams) ||
-      hasNonEmptyArray(request.requested_team_detail)
+      hasManualNormalizedEntries(request.requested_teams) ||
+      hasManualNormalizedEntries(request.requested_team_detail)
     )
   ) || (
     operation === 'team_membership' && (
       hasPopulatedString(request.requested_people_input) ||
-      hasNonEmptyArray(request.requested_people)
+      hasManualNormalizedEntries(request.requested_people_detail) ||
+      hasManualNormalizedEntries(request.requested_people)
     )
   ) || (
     operation === 'team_hierarchy' && (
       hasPopulatedString(request.requested_child_teams_input) ||
-      hasNonEmptyArray(request.requested_child_links) ||
-      hasNonEmptyArray(request.requested_child_link_detail)
+      hasManualNormalizedEntries(request.requested_child_links) ||
+      hasManualNormalizedEntries(request.requested_child_link_detail)
     )
   ) || (
     operation === 'team_repo_access_removal' && (
@@ -107,12 +153,15 @@ function inferRequestIntakeMode(request = {}, operation = determineOperation(req
   ) || (
     operation === 'team_repo_access' && (
       hasPopulatedString(request.requested_repositories_input) ||
-      hasNonEmptyArray(request.requested_repository_grants) ||
-      Boolean(request.requested_permission_api_value)
+      hasManualNormalizedEntries(request.requested_repository_grants) ||
+      (
+        Boolean(request.requested_permission_api_value) &&
+        !hasBulkCsvSignals
+      )
     )
   );
 
-  if (hasBulkCsvSignals && hasManualSignals) {
+  if (hasBulkCsvSignals && hasManualInputSignals) {
     return null;
   }
 
@@ -120,7 +169,7 @@ function inferRequestIntakeMode(request = {}, operation = determineOperation(req
     return 'bulk_csv';
   }
 
-  if (hasManualSignals) {
+  if (hasManualInputSignals || hasManualArraySignals) {
     return 'manual';
   }
 
@@ -163,6 +212,19 @@ function buildAuditArtifact(input = {}) {
       repository: request.repository,
       requester_login: request.requester_login,
       organization: request.organization,
+      tenant_name_input: request.tenant_name_input || '',
+      tenant_name_normalized: request.tenant_name_normalized || '',
+      repository_name_input: request.repository_name_input || '',
+      repository_name_normalized: request.repository_name_normalized || '',
+      repository_visibility: request.repository_visibility || 'private',
+      repository_visibility_source: request.repository_visibility_source || 'default',
+      context_marker: request.context_marker || '',
+      tenant_display_name: request.tenant_display_name,
+      tenant_key: request.tenant_key,
+      tenant_team_name: request.tenant_team_name,
+      tenant_team_slug: request.tenant_team_slug,
+      repo_admin_team_name: request.repo_admin_team_name,
+      repo_admin_team_slug: request.repo_admin_team_slug,
       team_slug: request.team_slug,
       intake_mode: intakeMode,
       requested_repositories_input: request.requested_repositories_input || '',
@@ -220,6 +282,15 @@ function buildAuditArtifact(input = {}) {
       requested_people: validation.requested_people || [],
       organization_visible: validation.organization_visible,
       designated_approver_authorization: validation.designated_approver_authorization || null,
+      canonical_tenant_context: validation.canonical_tenant_context || null,
+      tenant_resolution: validation.tenant_resolution || null,
+      repository_exists: validation.repository_exists,
+      current_repo_admin_permission: validation.current_repo_admin_permission || null,
+      requester_eligibility: validation.requester_eligibility || null,
+      validation_findings: validation.validation_findings || null,
+      no_mutation_planned:
+        Boolean(request.dry_run) ||
+        ['submitted', 'awaiting_approval', 'validation_failed', 'waiting_for_attachment'].includes(String(request.request_status || '')),
       requested_repository_grants: validation.requested_repository_grants || [],
       requested_repository_removals: validation.requested_repository_removals || [],
       already_absent_repository_removals: validation.already_absent_repository_removals || [],
@@ -243,6 +314,8 @@ function buildAuditArtifact(input = {}) {
       approver_role: approval.approver_role || 'other',
       approver_membership_state: approval.approver_membership_state || 'unknown',
       approver_authorization_state: approval.approver_authorization_state || 'unknown',
+      approved_context_marker: approval.approved_context_marker || null,
+      latest_context_marker: approval.latest_context_marker || null,
       approved_at: approval.approved_at || null,
       decision_source: approval.decision_source || '',
       decision_note: approval.decision_note || '',
@@ -257,6 +330,21 @@ function buildAuditArtifact(input = {}) {
       people_already_present: reconciliationPlan.people_already_present || [],
       people_rejected: reconciliationPlan.people_rejected || [],
       organization_exists: reconciliationPlan.organization_exists,
+      organization_visible: reconciliationPlan.organization_visible,
+      repository_exists: reconciliationPlan.repository_exists,
+      repository_full_name: reconciliationPlan.repository_full_name || '',
+      current_repo_admin_permission: reconciliationPlan.current_repo_admin_permission || null,
+      desired_repo_admin_permission: reconciliationPlan.desired_repo_admin_permission || null,
+      requested_visibility: reconciliationPlan.requested_visibility || request.repository_visibility || 'private',
+      existing_visibility: reconciliationPlan.existing_visibility || null,
+      visibility_conflict: reconciliationPlan.visibility_conflict || false,
+      desired_repository_visibility: reconciliationPlan.desired_repository_visibility || request.repository_visibility || 'private',
+      actual_visibility: reconciliationPlan.actual_visibility || reconciliationPlan.existing_visibility || null,
+      creation_action: reconciliationPlan.creation_action || null,
+      permission_action: reconciliationPlan.permission_action || null,
+      direct_admin_avoidance: reconciliationPlan.direct_admin_avoidance || null,
+      blocked_reason: reconciliationPlan.blocked_reason || null,
+      boundary_revalidation_status: reconciliationPlan.boundary_revalidation_status || null,
       team_exists: reconciliationPlan.team_exists,
       repositories_to_grant: reconciliationPlan.repositories_to_grant || [],
       repositories_already_satisfied: reconciliationPlan.repositories_already_satisfied || [],
@@ -273,6 +361,10 @@ function buildAuditArtifact(input = {}) {
       child_links_to_apply: reconciliationPlan.child_links_to_apply || [],
       child_links_already_present: reconciliationPlan.child_links_already_present || [],
       child_links_rejected: reconciliationPlan.child_links_rejected || [],
+      requester_bootstrap_action: reconciliationPlan.requester_bootstrap_action || null,
+      registry_persistence_action: reconciliationPlan.registry_persistence_action || null,
+      registry_persistence_result: reconciliationPlan.registry_persistence_result || null,
+      registry_commit_result: reconciliationPlan.registry_commit_result || null,
       dry_run: reconciliationPlan.dry_run,
       rate_limit_snapshot: reconciliationPlan.rate_limit_snapshot || null,
       state: reconciliationPlan.state || '',
@@ -290,6 +382,10 @@ function buildAuditArtifact(input = {}) {
       run_attempt: runContext.run_attempt || process.env.GITHUB_RUN_ATTEMPT || null,
       generated_at: new Date().toISOString(),
       operation,
+      artifact_name: runContext.artifact_name || process.env.AUDIT_ARTIFACT_NAME || null,
+      artifact_retention_days: Number.isFinite(Number(runContext.artifact_retention_days || process.env.AUDIT_ARTIFACT_RETENTION_DAYS))
+        ? Number(runContext.artifact_retention_days || process.env.AUDIT_ARTIFACT_RETENTION_DAYS)
+        : null,
     },
   };
 }

@@ -53,6 +53,7 @@ function mapRepositoryState(repository) {
       : '',
     archived: Boolean(repository.archived),
     private: Boolean(repository.private),
+    visibility: String(repository.visibility || (repository.private ? 'private' : 'public')).toLowerCase(),
   };
 }
 
@@ -158,6 +159,39 @@ function createGitHubTeamRepoApi(options = {}) {
       };
     },
 
+    async createOrganizationRepository({ organization, name, privateVisibility = true, visibility = null, description = '' }) {
+      const body = {
+        name,
+        description: String(description || ''),
+        auto_init: false,
+        has_issues: true,
+        has_projects: false,
+        has_wiki: false,
+      };
+
+      if (visibility) {
+        body.visibility = String(visibility);
+      } else {
+        body.private = Boolean(privateVisibility);
+      }
+
+      const result = await request(`/orgs/${organization}/repos`, {
+        method: 'POST',
+        body,
+      });
+
+      if (!result.ok) {
+        throw Object.assign(new Error('Failed to create organization repository'), result, {
+          retry_after: getHeader(result.headers, 'retry-after'),
+        });
+      }
+
+      return {
+        exists: true,
+        repository: mapRepositoryState(result.payload || {}),
+      };
+    },
+
     async getTeamRepositoryPermission({ organization, teamSlug, owner, repo }) {
       const result = await request(`/orgs/${organization}/teams/${teamSlug}/repos/${owner}/${repo}`, {
         headers: {
@@ -224,6 +258,18 @@ function createGitHubTeamRepoApi(options = {}) {
       return {
         repository_full_name: `${owner}/${repo}`.toLowerCase(),
       };
+    },
+
+    async addIssueLabels({ repository, issueNumber, labels }) {
+      const [owner, repo] = String(repository || '').split('/');
+      const result = await request(`/repos/${owner}/${repo}/issues/${issueNumber}/labels`, {
+        method: 'POST',
+        body: { labels },
+      });
+      if (!result.ok) {
+        throw Object.assign(new Error('Failed to add issue labels'), result);
+      }
+      return (result.payload || []).map((label) => String(label.name || '').toLowerCase()).filter(Boolean);
     },
   };
 }

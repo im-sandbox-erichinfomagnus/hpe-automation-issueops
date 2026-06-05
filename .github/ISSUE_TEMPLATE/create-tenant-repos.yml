@@ -1,0 +1,76 @@
+name: Create tenant repositories
+description: Request creation of a tenant-scoped repository managed by the tenant repo-admin team.
+title: "[create-tenant-repos] <org>/<repo>: <summary>"
+labels:
+  - issueops
+  - create-tenant-repos
+body:
+  - type: input
+    id: organization
+    attributes:
+      label: Target organization
+      description: GitHub organization where the repository should be created.
+      placeholder: octo-org
+    validations:
+      required: true
+
+  - type: input
+    id: tenant_name
+    attributes:
+      label: Tenant name
+      description: Human-readable tenant name exactly as defined in tenant-registry for the target organization.
+      placeholder: ContosoUK
+    validations:
+      required: true
+
+  - type: input
+    id: repository_name
+    attributes:
+      label: Repository name
+      description: Name for exactly one repository to create within the resolved tenant boundary (do not include owner or organization prefix).
+      placeholder: acme-platform-service
+    validations:
+      required: true
+
+  - type: dropdown
+    id: repository_visibility
+    attributes:
+      label: Repository visibility
+      description: Select the requested visibility for the new repository. Defaults to private when not specified.
+      options:
+        - private
+        - internal
+        - public
+      default: 0
+    validations:
+      required: false
+
+  - type: input
+    id: designated_approver
+    attributes:
+      label: Designated approver
+      description: GitHub login for the authorized approver who will post the approval comment.
+      placeholder: org-owner-user
+    validations:
+      required: true
+
+  - type: dropdown
+    id: dry_run
+    attributes:
+      label: Dry-run mode
+      description: Dry-run validates tenant context and planned mutation without creating the repository.
+      options:
+        - "true"
+        - "false"
+      default: 0
+    validations:
+      required: true
+
+  - type: textarea
+    id: justification
+    attributes:
+      label: Business justification
+      description: Explain why this repository is needed for the tenant.
+      placeholder: Create an in-tenant service repository managed by tenant repo admins.
+    validations:
+      required: true

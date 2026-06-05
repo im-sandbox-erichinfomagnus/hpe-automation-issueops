@@ -1,14 +1,15 @@
-name: codeql
+name: CodeQL
 
 on:
   push:
     branches:
       - 020-remove-team-repo-access
+      - main
   pull_request:
     branches:
       - 020-remove-team-repo-access
   schedule:
-    - cron: '19 3 * * 1'
+    - cron: '0 5 * * 1'
 
 permissions:
   actions: read
@@ -17,8 +18,9 @@ permissions:
 
 jobs:
   analyze:
-    name: Analyze
+    name: Analyze (javascript-typescript)
     runs-on: ubuntu-latest
+    timeout-minutes: 360
     strategy:
       fail-fast: false
       matrix:
@@ -33,7 +35,9 @@ jobs:
         uses: github/codeql-action/init@v3
         with:
           languages: ${{ matrix.language }}
-          build-mode: none
 
-      - name: Perform CodeQL Analysis
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL analysis
         uses: github/codeql-action/analyze@v3

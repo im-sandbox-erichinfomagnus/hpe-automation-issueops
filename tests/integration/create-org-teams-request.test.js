@@ -147,6 +147,7 @@ test('runRequestValidation rejects ambiguous create-org-teams requests when neit
   assert.equal(result.validation.request.intake_mode, null);
   assert.match(result.validation.errors.join('\n'), /Exactly one intake source must be populated/i);
   assert.match(result.validation.errors.join('\n'), /At least one valid requested team name is required/i);
+  assert.match(fs.readFileSync(summaryPath, 'utf8'), /Create Organization Teams Workflow Summary/);
   assert.match(fs.readFileSync(summaryPath, 'utf8'), /Validation errors: .*Exactly one intake source must be populated/i);
 });
 

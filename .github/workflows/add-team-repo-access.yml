@@ -20,7 +20,6 @@ on:
         type: string
 
 permissions:
-  actions: read
   contents: read
   issues: write
 
@@ -41,7 +40,7 @@ jobs:
       AUDIT_ARTIFACT_PATH: artifacts/add-team-repo-access-validation-${{ github.event.issue.number || inputs.issue-number || 'manual' }}.json
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -62,7 +61,6 @@ jobs:
           if [ "$EVENT_NAME" = "issues" ] || [ "$EVENT_NAME" = "issue_comment" ]; then
             issue_body=$(jq -r '.issue.body // ""' "$GITHUB_EVENT_PATH")
             requester_login=$(jq -r '.issue.user.login // ""' "$GITHUB_EVENT_PATH")
-            issue_labels_json=$(jq -c '.issue.labels // []' "$GITHUB_EVENT_PATH")
           else
             if [ -z "$ISSUE_NUMBER" ]; then
               echo "workflow_dispatch requires an issue number to replay" >&2
@@ -77,7 +75,6 @@ jobs:
 
             issue_body=$(printf '%s' "$issue_json" | jq -r '.body // ""')
             requester_login=$(printf '%s' "$issue_json" | jq -r '.user.login // ""')
-            issue_labels_json=$(printf '%s' "$issue_json" | jq -c '.labels // []')
           fi
 
           {
@@ -116,16 +113,6 @@ jobs:
         run: |
           echo 'This issue does not match the add-team-repo-access form. Exiting without validation or assignment.' >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Restore prior request audit artifact
-        if: ${{ steps.request_scope.outputs.matches-request == 'true' }}
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          ISSUE_NUMBER: ${{ env.ISSUE_NUMBER }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          GITHUB_RUN_ID: ${{ github.run_id }}
-          AUDIT_ARTIFACT_PATH: artifacts/add-team-repo-access-validation-${{ env.ISSUE_NUMBER || 'manual' }}.json
-        run: node src/scripts/restore-request-audit-artifact.js
-
       - name: Validate request and record approval-ready state
         id: validate_request
         if: ${{ steps.request_scope.outputs.matches-request == 'true' }}
@@ -140,15 +127,9 @@ jobs:
           PARSED_DESIGNATED_APPROVER: ${{ steps.parse_request.outputs.parsed_designated_approver }}
           PARSED_REQUESTED_REPOSITORIES: ${{ steps.parse_request.outputs.parsed_requested_repositories }}
           PARSED_BULK_CSV_REQUESTED_REPOSITORIES: ${{ steps.parse_request.outputs.parsed_bulk_csv_requested_repositories }}
-          PARSED_INTAKE_MODE: ${{ steps.parse_request.outputs.parsed_intake_mode }}
           PARSED_PERMISSION_LEVEL: ${{ steps.parse_request.outputs.parsed_permission_level }}
           PARSED_BUSINESS_JUSTIFICATION: ${{ steps.parse_request.outputs.parsed_business_justification }}
           PARSED_DRY_RUN: ${{ steps.parse_request.outputs.parsed_dry_run }}
-          TEAM_REPO_ACCESS_POLICY_JSON: ${{ vars.TEAM_REPO_ACCESS_POLICY_JSON || '' }}
-          ISSUE_LABELS_JSON: ${{ steps.issue_context.outputs.issue_labels_json }}
-          COMMENT_ID: ${{ github.event.comment.id || '' }}
-          COMMENT_AUTHOR_LOGIN: ${{ github.event.comment.user.login || '' }}
-          COMMENT_BODY: ${{ github.event.comment.body || '' }}
           AUDIT_ARTIFACT_PATH: ${{ env.AUDIT_ARTIFACT_PATH }}
         run: node src/scripts/run-request-validation.js
 
