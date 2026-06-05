@@ -146,3 +146,36 @@ test('runRequestValidation records repo-access audit metadata and missing-token 
   assert.equal(persisted.execution.failure_count, 0);
   assert.match(persisted.execution.summary, /No repository-access mutation was attempted/i);
 });
+
+test('runRequestValidation keeps tenant creation classification when parser JSON includes stray requested_repositories', async () => {
+  const os = require('node:os');
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'tenant-create-classification-'));
+  const artifactPath = path.join(workspace, 'audit.json');
+
+  const result = await runRequestValidation({
+    env: {
+      GITHUB_REPOSITORY: 'octo-org/issueops-speckit',
+      ISSUE_NUMBER: '614',
+      REQUESTER_LOGIN: 'requester',
+      PARSED_REQUEST_JSON: JSON.stringify({
+        organization: 'octo-org',
+        parsed_tenant_name: 'Acme Platform',
+        tenant_name: 'Acme Platform',
+        designated_approver: 'octocat',
+        requested_repositories: 'service-catalog',
+        dry_run: 'true',
+      }),
+      AUDIT_ARTIFACT_PATH: artifactPath,
+    },
+    setProcessExitCode: false,
+  });
+
+  const persisted = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
+
+  assert.equal(result.validation.is_valid, false);
+  assert.equal(result.validation.request_status, 'validation_failed');
+  assert.equal(persisted.metadata.operation, 'tenant_creation');
+  assert.match(persisted.execution.summary, /No tenant bootstrap mutation was attempted/i);
+});

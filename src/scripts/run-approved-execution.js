@@ -1342,6 +1342,7 @@ async function runApprovedExecution(options = {}) {
     runContext: {
       run_id: env.GITHUB_RUN_ID || auditArtifact.metadata && auditArtifact.metadata.run_id,
       run_attempt: env.GITHUB_RUN_ATTEMPT || auditArtifact.metadata && auditArtifact.metadata.run_attempt,
+      operation: operation || auditArtifact.metadata && auditArtifact.metadata.operation,
       artifact_name: path.basename(artifactPath),
       artifact_retention_days: env.AUDIT_ARTIFACT_RETENTION_DAYS || '',
     },

@@ -99,16 +99,24 @@ function readParsedRequestFromEnv(env = process.env) {
 }
 
 function isTeamRepoAccessParsedRequest(parsedRequest = {}) {
-  return Boolean(
+  const hasGrantSpecificSignals = Boolean(
     parsedRequest.target_team ||
     parsedRequest.parsed_target_team ||
-    parsedRequest.requested_repositories ||
-    parsedRequest.parsed_requested_repositories ||
     parsedRequest.bulk_csv_requested_repositories ||
     parsedRequest.parsed_bulk_csv_requested_repositories ||
     parsedRequest.permission_level ||
     parsedRequest.parsed_permission_level
   );
+
+  const hasTenantSignals = Boolean(
+    parsedRequest.tenant_name ||
+    parsedRequest.parsed_tenant_name ||
+    parsedRequest.tenant_display_name ||
+    parsedRequest.repository_name ||
+    parsedRequest.parsed_repository_name
+  );
+
+  return hasGrantSpecificSignals && !hasTenantSignals;
 }
 
 function isTeamRepoAccessRemovalParsedRequest(parsedRequest = {}) {
@@ -137,7 +145,15 @@ function isTeamRepoAccessRemovalParsedRequest(parsedRequest = {}) {
     parsedRequest.parsed_requested_people
   );
 
-  return hasRemovalSignals && !hasAccessGrantSignals && !hasOtherOperationSignals;
+  const hasTenantSignals = Boolean(
+    parsedRequest.tenant_name ||
+    parsedRequest.parsed_tenant_name ||
+    parsedRequest.tenant_display_name ||
+    parsedRequest.repository_name ||
+    parsedRequest.parsed_repository_name
+  );
+
+  return hasRemovalSignals && !hasAccessGrantSignals && !hasOtherOperationSignals && !hasTenantSignals;
 }
 
 function isTenantRepoCreationParsedRequest(parsedRequest = {}) {
@@ -1043,6 +1059,7 @@ async function runRequestValidation(options = {}) {
     runContext: {
       run_id: env.GITHUB_RUN_ID,
       run_attempt: env.GITHUB_RUN_ATTEMPT,
+      operation,
       artifact_name: path.basename(artifactPath),
       artifact_retention_days: env.AUDIT_ARTIFACT_RETENTION_DAYS || '',
     },

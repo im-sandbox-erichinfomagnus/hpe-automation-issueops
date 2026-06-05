@@ -41,7 +41,7 @@ jobs:
       AUDIT_ARTIFACT_PATH: artifacts/remove-team-repo-access-validation-${{ github.event.issue.number || inputs.issue-number || 'manual' }}.json
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
