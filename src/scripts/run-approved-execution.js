@@ -43,6 +43,28 @@ function terminalStateLabelPrefix(operation) {
   return operationPrefixes[operation] || 'issueops:add-team-members:';
 }
 
+function buildTerminalLabelPrefixes(operation) {
+  const prefixes = [terminalStateLabelPrefix(operation)];
+
+  if (operation === 'tenant_creation') {
+    // Backward compatibility for labels written before prefix normalization.
+    prefixes.push('issueops:create-tenant-model:');
+  }
+
+  if (operation === 'tenant_repo_creation') {
+    // Tenant-repo requests should not keep stale tenant-bootstrap terminal labels.
+    prefixes.push('issueops:create-tenant:');
+    prefixes.push('issueops:create-tenant-model:');
+  }
+
+  return [...new Set(prefixes)];
+}
+
+function buildTerminalStateLabels(prefixes = []) {
+  const statuses = ['executed', 'partially_executed', 'failed_after_approved_execution', 'failed'];
+  return prefixes.flatMap((prefix) => statuses.map((status) => `${prefix}${status}`));
+}
+
 function readAuditArtifact(filePath) {
   const resolvedPath = path.resolve(filePath);
   return JSON.parse(fs.readFileSync(resolvedPath, 'utf8'));
@@ -1384,15 +1406,35 @@ async function runApprovedExecution(options = {}) {
     updatedArtifact.request &&
     updatedArtifact.request.issue_number != null &&
     typeof api.addIssueLabels === 'function' &&
-    (updatedArtifact.request.intake_mode === 'csv_attachment' || isTenantRepoCreation || isTenantCreation);
+    (updatedArtifact.request.intake_mode === 'csv_attachment' || isTenantRepoCreation || isTenantCreation || isTeamCreation);
 
   if (shouldAddTerminalLabel) {
     const labelPrefix = terminalStateLabelPrefix(operation);
+    const targetLabel = `${labelPrefix}${updatedArtifact.request.request_status}`;
     try {
+      if (typeof api.listIssueLabels === 'function' && typeof api.removeIssueLabel === 'function') {
+        const existingLabels = await api.listIssueLabels({
+          repository: updatedArtifact.request.repository,
+          issueNumber: updatedArtifact.request.issue_number,
+        });
+
+        const managedTerminalLabels = new Set(buildTerminalStateLabels(buildTerminalLabelPrefixes(operation)));
+        const staleTerminalLabels = existingLabels
+          .filter((label) => managedTerminalLabels.has(label) && label !== targetLabel);
+
+        for (const staleLabel of staleTerminalLabels) {
+          await api.removeIssueLabel({
+            repository: updatedArtifact.request.repository,
+            issueNumber: updatedArtifact.request.issue_number,
+            label: staleLabel,
+          });
+        }
+      }
+
       await api.addIssueLabels({
         repository: updatedArtifact.request.repository,
         issueNumber: updatedArtifact.request.issue_number,
-        labels: [`${labelPrefix}${updatedArtifact.request.request_status}`],
+        labels: [targetLabel],
       });
     } catch (labelError) {
       // Non-fatal: label application failure should not degrade an otherwise successful execution.

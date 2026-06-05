@@ -98,19 +98,34 @@ jobs:
       - name: Check request applicability
         id: request_scope
         env:
+          ISSUE_LABELS_JSON: ${{ steps.issue_context.outputs.issue_labels_json }}
           PARSED_REQUEST_JSON: ${{ steps.parse_request.outputs.json }}
           PARSED_PARENT_TEAM: ${{ steps.parse_request.outputs.parsed_parent_team }}
           PARSED_DESIGNATED_HIERARCHY_APPROVER: ${{ steps.parse_request.outputs.parsed_designated_hierarchy_approver }}
+          PARSED_DESIGNATED_APPROVER: ${{ steps.parse_request.outputs.parsed_designated_approver }}
         run: |
           set -euo pipefail
 
-          json_parent_team=$(echo "${PARSED_REQUEST_JSON:-{\}}" | jq -r '.parent_team // ""')
-          json_designated_approver=$(echo "${PARSED_REQUEST_JSON:-{\}}" | jq -r '.designated_hierarchy_approver // ""')
+          json_parent_team=$(echo "${PARSED_REQUEST_JSON:-{\}}" | jq -r '.parent_team // .parent_team_slug // .parent_team_name // ""')
+          json_designated_approver=$(echo "${PARSED_REQUEST_JSON:-{\}}" | jq -r '.designated_hierarchy_approver // .designated_approver // ""')
+          json_requested_child_teams=$(echo "${PARSED_REQUEST_JSON:-{\}}" | jq -r '.requested_child_teams // .bulk_csv_requested_child_teams // ""')
+          json_intake_mode=$(echo "${PARSED_REQUEST_JSON:-{\}}" | jq -r '.intake_mode // ""')
+          has_add_child_teams_label=$(echo "${ISSUE_LABELS_JSON:-[]}" | jq -r 'map((.name // .) | ascii_downcase) | any(. == "add-child-teams" or . == "issueops:add-child-teams")')
+          json_has_hierarchy_signals=false
+          if [ -n "${json_parent_team:-}" ] || [ -n "${json_designated_approver:-}" ] || [ -n "${json_requested_child_teams:-}" ] || [ -n "${json_intake_mode:-}" ]; then
+            json_has_hierarchy_signals=true
+          fi
 
           matches_request=false
           if [ -n "${PARSED_PARENT_TEAM:-}" ] && [ -n "${PARSED_DESIGNATED_HIERARCHY_APPROVER:-}" ]; then
             matches_request=true
+          elif [ -n "${PARSED_PARENT_TEAM:-}" ] && [ -n "${PARSED_DESIGNATED_APPROVER:-}" ]; then
+            matches_request=true
           elif [ -n "${json_parent_team:-}" ] && [ -n "${json_designated_approver:-}" ]; then
+            matches_request=true
+          elif [ "${has_add_child_teams_label:-false}" = "true" ]; then
+            matches_request=true
+          elif [ "${json_has_hierarchy_signals:-false}" = "true" ]; then
             matches_request=true
           fi
 

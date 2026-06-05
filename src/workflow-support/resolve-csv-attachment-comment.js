@@ -24,13 +24,15 @@ function isTrustedGitHubAttachmentUrl(url = '') {
     const parsed = new URL(url);
     const hostname = String(parsed.hostname || '').toLowerCase();
     const pathname = String(parsed.pathname || '');
+    const isLegacyRepositoryFilesPath = /^\/[^/]+\/[^/]+\/files\/[0-9]+\//.test(pathname);
+    const isUserAttachmentPath = pathname.startsWith('/user-attachments/files/');
 
     return (
       parsed.protocol === 'https:'
       && hostname === 'github.com'
       && !parsed.username
       && !parsed.password
-      && pathname.startsWith('/user-attachments/files/')
+      && (isUserAttachmentPath || isLegacyRepositoryFilesPath)
     );
   } catch {
     return false;

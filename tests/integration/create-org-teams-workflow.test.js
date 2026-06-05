@@ -123,6 +123,37 @@ test('executes approved team creation and records created teams', async () => {
   assert.equal(result.execution.failure_count, 0);
 });
 
+test('manual create-org-teams execution applies terminal status label', async () => {
+  const baseArtifact = loadFixture('create-team-success.json').approved_artifact;
+  const artifactPath = writeArtifact(baseArtifact);
+  const appliedLabels = [];
+
+  const result = await runApprovedExecution({
+    env: {
+      AUDIT_ARTIFACT_PATH: artifactPath,
+      GITHUB_RUN_ID: '778',
+      GITHUB_RUN_ATTEMPT: '2',
+    },
+    tokenInfo: { token: 'test-token', source: 'ISSUEOPS_GITHUB_TOKEN', is_pat_backed: true, token_kind: 'pat' },
+    createApi: () => ({
+      listOrgTeams: async () => [],
+      createTeam: async ({ name, organization }) => ({
+        id: 1,
+        name,
+        organization,
+        slug: name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+      }),
+      addIssueLabels: async ({ labels }) => {
+        appliedLabels.push(...labels);
+        return labels;
+      },
+    }),
+  });
+
+  assert.equal(result.request.request_status, 'executed');
+  assert.ok(appliedLabels.includes('issueops:create-org-teams:executed'));
+});
+
 test('execution persists team-creation audit fields and requester-facing summary content', async () => {
   const baseArtifact = loadFixture('create-team-success.json').approved_artifact;
   const artifactPath = writeArtifact(baseArtifact);

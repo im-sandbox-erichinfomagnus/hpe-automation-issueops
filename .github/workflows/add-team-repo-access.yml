@@ -61,6 +61,7 @@ jobs:
           if [ "$EVENT_NAME" = "issues" ] || [ "$EVENT_NAME" = "issue_comment" ]; then
             issue_body=$(jq -r '.issue.body // ""' "$GITHUB_EVENT_PATH")
             requester_login=$(jq -r '.issue.user.login // ""' "$GITHUB_EVENT_PATH")
+            issue_labels_json=$(jq -c '.issue.labels // []' "$GITHUB_EVENT_PATH")
           else
             if [ -z "$ISSUE_NUMBER" ]; then
               echo "workflow_dispatch requires an issue number to replay" >&2
@@ -75,6 +76,7 @@ jobs:
 
             issue_body=$(printf '%s' "$issue_json" | jq -r '.body // ""')
             requester_login=$(printf '%s' "$issue_json" | jq -r '.user.login // ""')
+            issue_labels_json=$(printf '%s' "$issue_json" | jq -c '.labels // []')
           fi
 
           {

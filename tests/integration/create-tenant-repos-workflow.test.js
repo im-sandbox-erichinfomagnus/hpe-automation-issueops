@@ -737,6 +737,77 @@ test('approved execution grants admin only to repo-admin team, never direct indi
   }
 });
 
+test('approved tenant-repo execution removes stale tenant terminal labels before writing current terminal label', async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'create-tenant-repos-label-reconcile-'));
+  const artifactPath = path.join(workspace, 'audit.json');
+  const registryDir = buildTenantRepoRegistry(workspace);
+  const removedLabels = [];
+  const addedLabels = [];
+
+  await runValidatedAndApprovedFlow({
+    artifactPath,
+    registryDir,
+    validationTenantRepoApi: {
+      getRepository: async () => ({
+        exists: true,
+        repository: { full_name: 'im-sandbox-himanshu/acme-platform-service', visibility: 'private' },
+      }),
+      getTeamRepositoryPermission: async () => ({ current_permission_api_value: 'admin' }),
+    },
+  });
+
+  const result = await runApprovedExecution({
+    env: {
+      AUDIT_ARTIFACT_PATH: artifactPath,
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      GITHUB_RUN_ID: '26627740733',
+      GITHUB_RUN_ATTEMPT: '8',
+      TENANT_REGISTRY_DIR: registryDir,
+      TENANT_REGISTRY_REF: 'main',
+    },
+    tokenInfo: {
+      token: 'pat-token',
+      source: 'ISSUEOPS_GITHUB_TOKEN',
+      token_kind: 'pat',
+      is_pat_backed: true,
+      supports_team_repo_access_mutation: true,
+    },
+    createApi: () => ({
+      getRepository: async () => ({
+        exists: true,
+        repository: { full_name: 'im-sandbox-himanshu/acme-platform-service', visibility: 'private' },
+      }),
+      getTeamRepositoryPermission: async () => ({ current_permission_api_value: 'admin' }),
+      createOrganizationRepository: async () => {
+        throw new Error('create should not run for noop path');
+      },
+      addOrUpdateTeamRepositoryPermission: async () => {
+        throw new Error('grant should not run for noop path');
+      },
+      listIssueLabels: async () => [
+        'issueops:create-tenant-repos:executed',
+        'issueops:create-tenant:executed',
+        'issueops:create-tenant:failed',
+        'issueops:unrelated:label',
+      ],
+      removeIssueLabel: async ({ label }) => {
+        removedLabels.push(label);
+        return { removed: true, label };
+      },
+      addIssueLabels: async ({ labels }) => {
+        addedLabels.push(...labels);
+        return labels;
+      },
+    }),
+    teamApi: buildValidationApi(),
+    setProcessExitCode: false,
+  });
+
+  assert.equal(result.request.request_status, 'executed');
+  assert.deepEqual(removedLabels.sort(), ['issueops:create-tenant:executed', 'issueops:create-tenant:failed']);
+  assert.deepEqual(addedLabels, ['issueops:create-tenant-repos:executed']);
+});
+
 test('approved execution is fail-closed when ISSUEOPS_GITHUB_TOKEN is absent', async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'create-tenant-repos-no-token-'));
   const artifactPath = path.join(workspace, 'audit.json');
