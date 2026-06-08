@@ -64,19 +64,20 @@ A requester submits a repository creation request whose primary or secondary con
 
 ---
 
-### User Story 4 - Carry Contact Metadata Through Execution and Audit (Priority: P4)
+### User Story 4 - Persist Contacts as Repository Custom Properties (Priority: P4)
 
-After approval and execution, both contact values from the original validated request appear in the execution summary and retained audit artifact. Repository creation and governance-team assignment behaviour are unchanged from the predecessor workflow.
+After approval and execution, both contact values from the original validated request appear in the execution summary and retained audit artifact, and are written to repository custom properties as `primary_business_contact` and `secondary_business_contact`. Repository creation and governance-team assignment behaviour remain unchanged from the predecessor workflow.
 
-**Why this priority**: Business contact fields are request-time metadata. They must survive the full workflow lifecycle and be present in every output record so downstream systems and operators can consume them without re-reading the issue.
+**Why this priority**: Business contact fields must be discoverable directly on the repository and also survive the full workflow lifecycle in audit records, so downstream systems and operators do not need to re-read the issue.
 
-**Independent Test**: Can be fully tested by running a full approved happy-path request with both contacts provided and verifying the audit artifact and step summary each contain `primary_contact` and `secondary_contact` values matching the submitted request.
+**Independent Test**: Can be fully tested by running a full approved happy-path request with both contacts provided and verifying that repository custom properties are updated with those values, and that the audit artifact and step summary each contain `primary_contact` and `secondary_contact` values matching the submitted request.
 
 **Acceptance Scenarios**:
 
-1. **Given** a fully approved and executed request that provided both contacts, **When** execution completes, **Then** the audit artifact and workflow step summary each contain both `primary_contact` and `secondary_contact` values exactly as submitted in the validated request.
-2. **Given** a fully approved and executed request that provided only the primary contact, **When** execution completes, **Then** the audit artifact contains the primary contact value and explicitly records the secondary contact as absent.
-3. **Given** an approved request whose repository already exists and all governance state is already satisfied (no-op path), **When** execution records the no-op outcome, **Then** the audit artifact still captures both contact values from the current request for traceability.
+1. **Given** a fully approved and executed request that provided both contacts, **When** execution completes, **Then** the audit artifact and workflow step summary each contain both `primary_contact` and `secondary_contact` values exactly as submitted in the validated request, and the repository custom properties `primary_business_contact` and `secondary_business_contact` are updated accordingly.
+2. **Given** a fully approved and executed request that provided only the primary contact, **When** execution completes, **Then** the audit artifact contains the primary contact value and explicitly records the secondary contact as absent, and the repository custom properties are set with `primary_business_contact` populated and `secondary_business_contact` blank.
+3. **Given** an approved request whose repository already exists and all governance state is already satisfied (no-op path), **When** execution records the no-op outcome, **Then** the audit artifact still captures both contact values from the current request for traceability and repository custom properties are updated from the current request values.
+4. **Given** an approved request where one or both required custom property definitions are missing from organization schema, **When** execution prepares repository custom-property mutation, **Then** the workflow creates missing definitions first and then sets repository values in the same execution run.
 
 ---
 
@@ -88,7 +89,7 @@ After approval and execution, both contact values from the original validated re
 - Work email contains an `+` alias or subdomain (e.g., `alice+repo@mail.example.com`); must be accepted as a valid email.
 - Both contacts are set to the same GitHub handle or email; this must not be rejected as a duplicate.
 - The `secondary_contact` field is included in the issue form but left blank; must be treated as absent (not invalid).
-- The repository already exists and the contacts in the new request differ from the contacts stored in the previous audit artifact; contacts are request-time metadata only and must not trigger repository mutation.
+- The repository already exists and the contacts in the new request differ from the contacts stored in the previous audit artifact; repository custom properties must still be updated to current-request values without triggering any additional team or authorization mutation.
 - GitHub Issue Forms do not natively support a searchable user-picker typeahead for GitHub usernames; a plain `input` field is used and a future enhancement could integrate an IssueOps bot that validates the handle via the GitHub Users API after submission.
 
 ---
@@ -112,9 +113,11 @@ After approval and execution, both contact values from the original validated re
 - **FR-013**: Both contact values MUST be carried through the full workflow lifecycle: parsed request → validation output → approval artifact → execution → audit artifact and step summary.
 - **FR-014**: Repository creation, governance-team permission grant, tenant boundary enforcement, approval binding, and dry-run behaviour defined in predecessor specs MUST remain unchanged by this enhancement.
 - **FR-015**: Contact fields MUST appear in all machine-readable audit artifacts and human-readable step summaries for every run that processes a request.
-- **FR-016**: If a repository already exists and the contact values in the current request differ from those in a prior audit artifact, the workflow MUST record the current request contacts in the new audit artifact and MUST NOT mutate the repository or any governance state on the basis of a contact change.
+- **FR-016**: During approved execution (non-dry-run), the workflow MUST set repository custom properties `primary_business_contact` and `secondary_business_contact` from the validated request contacts for both create and no-op repository paths.
 - **FR-017**: The issue form description for each contact field MUST note that a future enhancement may integrate automatic GitHub handle validation via the GitHub Users API; the current implementation uses a plain input field.
 - **FR-018**: The feature MUST be backward compatible; existing create-tenant-repos requests that were submitted before this enhancement was deployed MUST continue to be processed using the existing field set with contact fields treated as absent.
+- **FR-019**: Failure to set repository custom properties MUST be surfaced in execution outcome and audit summary as a partial failure signal while preserving existing repository creation and permission results.
+- **FR-020**: Before setting repository custom-property values, the workflow MUST verify organization-level schema definitions for `primary_business_contact` and `secondary_business_contact` exist, and MUST create missing definitions as `string` properties.
 
 ### Authorization Requirements *(mandatory)*
 
@@ -137,11 +140,12 @@ After approval and execution, both contact values from the original validated re
 
 ### Reconciliation Logic *(mandatory)*
 
-- **RL-001**: Desired state for this enhancement is defined solely as the contact values being present in the audit artifact; contacts are request-time metadata and do not represent a GitHub resource state that must be reconciled.
+- **RL-001**: Desired state for this enhancement includes both audit propagation of contact fields and repository custom properties aligned to the current validated request.
 - **RL-002**: Repository creation and governance-team admin grant desired state remain unchanged from the predecessor specs.
-- **RL-003**: If a repository already exists and contacts in the current request differ from a prior audit record, execution MUST record the new contacts in the current audit artifact without triggering any repository mutation.
-- **RL-004**: Re-runs MUST remain idempotent with respect to contacts: the contacts from the current request are recorded regardless of what prior audit artifacts contain.
-- **RL-005**: Audit record persistence for contact fields MUST be treated as part of the execution outcome and reported if it fails.
+- **RL-003**: If a repository already exists and contacts in the current request differ from a prior audit record, execution MUST still reconcile repository custom properties to the current request values.
+- **RL-004**: Re-runs MUST remain idempotent with respect to contacts: applying the same current-request custom-property values repeatedly must produce stable no-drift outcomes.
+- **RL-005**: Audit record persistence for contact fields and custom-property mutation results MUST be treated as part of the execution outcome and reported if they fail.
+- **RL-006**: Custom-property reconciliation MUST include organization schema reconciliation: missing required definitions are created prior to repository value mutation.
 
 ### Rollback Handling *(mandatory)*
 
@@ -174,7 +178,8 @@ After approval and execution, both contact values from the original validated re
 - **TE-006**: Validation tests MUST cover acceptance of `secondary_contact` being absent without error.
 - **TE-007**: Validation tests MUST cover handle normalisation: `@octocat` and `octocat` normalise to the same canonical value.
 - **TE-008**: Execution tests MUST verify that both contact values appear in audit artifacts and step summaries on a full happy-path run with both contacts.
-- **TE-009**: Execution tests MUST verify that a no-op run (repository already exists) still captures contact values in the current audit artifact.
+- **TE-009**: Execution tests MUST verify that approved execution sets repository custom properties `primary_business_contact` and `secondary_business_contact` from current request values.
+- **TE-014**: Execution tests MUST verify missing organization custom-property definitions are created before repository values are set.
 - **TE-010**: Contract tests MUST include updated issue-form payload fixtures with `primary_contact` and `secondary_contact` fields covering valid handle, valid email, missing primary, and invalid format scenarios.
 - **TE-011**: Contract tests for the parse step MUST include schema expectations for the two new fields in the parsed request data model.
 - **TE-012**: Regression tests MUST confirm that all existing create-tenant-repos test scenarios continue to pass when `primary_contact` and `secondary_contact` are absent from the payload (backward compatibility).
@@ -198,6 +203,7 @@ After approval and execution, both contact values from the original validated re
 - **SC-004**: 100% of existing create-tenant-repos test scenarios continue to pass without modification after this enhancement is deployed (no regression).
 - **SC-005**: GitHub handle values submitted with or without a leading `@` are recorded in audit artifacts in the same normalised form 100% of the time.
 - **SC-006**: Requesters who supply an invalid contact format receive an actionable validation finding before the request is routed for approval.
+- **SC-007**: 100% of approved non-dry-run executions attempt to set repository custom properties `primary_business_contact` and `secondary_business_contact` using the current validated request values.
 
 ---
 
@@ -205,7 +211,7 @@ After approval and execution, both contact values from the original validated re
 
 - GitHub Issue Forms do not currently provide a native searchable user-picker or typeahead dropdown that queries GitHub users in real time; plain `input` fields are used for both contact fields in this version.
 - A future enhancement may integrate an IssueOps bot or GitHub App that validates submitted GitHub handles against the GitHub Users API after issue submission; this is explicitly out of scope for the current version.
-- Contact fields are request-time metadata only and do not represent a GitHub resource property (such as a team membership or repository collaborator) that the workflow must reconcile against live GitHub state.
+- Repository custom properties `primary_business_contact` and `secondary_business_contact` already exist (or are configured) in the target organization so workflow writes succeed without schema provisioning in this feature.
 - The GitHub username format constraints used for validation (alphanumeric and hyphens, 1–39 characters, no leading or trailing hyphen) match the rules enforced by GitHub as of this specification date.
 - Work email addresses supplied as a fallback are not validated against any corporate directory or identity provider; only format validation (RFC 5322 simplified) is applied.
 - Both contact fields accept any combination of handle and email (e.g., primary as handle and secondary as email, or both as emails) without restriction beyond individual field format validation.
