@@ -118,7 +118,7 @@ function buildExecutionOutcome(input = {}) {
     pending_count: summary.pending.length,
     failure_count: summary.failed.length,
     granted_count: summary.mutated.length,
-    removed_count: summary.mutated.length,
+    removed_count: summary.mutated.filter((entry) => entry.result === 'removed').length,
     duplicate_row_count: input.duplicate_row_count ?? bulkCsvSubmission?.duplicate_row_count ?? 0,
     invalid_row_count: input.invalid_row_count ?? bulkCsvSubmission?.invalid_row_count ?? 0,
     attachment_rate_limit_snapshot: input.attachment_rate_limit_snapshot || null,
