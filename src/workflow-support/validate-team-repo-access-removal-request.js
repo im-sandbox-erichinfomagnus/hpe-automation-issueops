@@ -411,9 +411,12 @@ async function validateTeamRepoAccessRemovalRequest(input = {}, options = {}) {
 
   if (request.conflicting_repositories.length > 0) {
     const outsideOrganization = request.conflicting_repositories
+      .filter((entry) => !entry.conflict_reason || entry.conflict_reason === 'repository_outside_target_organization')
       .map((entry) => entry.repository_full_name)
       .join(', ');
-    errors.push(`Repositories outside the target organization were detected: ${outsideOrganization}`);
+    if (outsideOrganization) {
+      errors.push(`Repositories outside the target organization were detected: ${outsideOrganization}`);
+    }
 
     const normalizedConflicts = request.conflicting_repositories
       .filter((entry) => entry.conflict_reason === 'conflicting_repository_identifier')
