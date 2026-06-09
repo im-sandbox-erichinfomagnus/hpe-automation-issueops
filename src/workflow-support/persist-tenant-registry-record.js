@@ -32,11 +32,51 @@ function stripVolatileRegistryFields(record) {
   return stable;
 }
 
+function isLegacyTenantRecord(record) {
+  return Boolean(record && typeof record === 'object' && record.tenant_key && !record.tenantId);
+}
+
+function normalizeLifecycleStatus(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized || normalized === 'active') {
+    return 'active';
+  }
+  if (['blocked', 'inactive', 'suspended'].includes(normalized)) {
+    return 'blocked';
+  }
+  if (['partial_failure', 'partial-failure', 'failed_after_approved_execution', 'partially_executed'].includes(normalized)) {
+    return 'partial_failure';
+  }
+  if (['decommissioned', 'retired'].includes(normalized)) {
+    return 'decommissioned';
+  }
+  return 'active';
+}
+
 function buildTenantRegistryRecord(input = {}) {
   const request = input.request || {};
   const nowIso = new Date().toISOString();
 
   return {
+    tenantId: request.tenant_key,
+    tenantName: request.tenant_display_name,
+    tenantType: request.tenant_type || 'application',
+    topology: request.topology || null,
+    externalMappings: {
+      cmdbId: request.external_mappings && request.external_mappings.cmdb_id || null,
+      costCenter: request.external_mappings && request.external_mappings.cost_center || null,
+      businessUnit: request.external_mappings && request.external_mappings.business_unit || null,
+      environment: request.external_mappings && request.external_mappings.environment || 'nonprod',
+    },
+    metadata: {
+      primaryContact: request.primary_contact || '',
+      secondaryContact: request.secondary_contact || null,
+      createdBy: request.requester_login,
+      createdDate: request.submitted_at || nowIso,
+    },
+    lifecycleStatus: request.canonical_tenant_record && request.canonical_tenant_record.lifecycleStatus
+      ? request.canonical_tenant_record.lifecycleStatus
+      : normalizeLifecycleStatus(input.lifecycle_status || request.lifecycle_status),
     tenant_key: request.tenant_key,
     tenant_display_name: request.tenant_display_name,
     organization: request.organization,
@@ -119,6 +159,7 @@ function persistTenantRegistryRecord(input = {}) {
         throw readError;
       }
     }
+    const legacyMigrationDetected = isLegacyTenantRecord(existingRecord);
     const createdAt = existingRecord && existingRecord.created_at
       ? existingRecord.created_at
       : record.created_at;
@@ -148,6 +189,17 @@ function persistTenantRegistryRecord(input = {}) {
       mode,
       registry_path: registryFilePath,
       record: persistedRecord,
+      migration: legacyMigrationDetected
+        ? {
+            status: 'legacy_to_canonical_migrated',
+            from_schema: 'legacy',
+            to_schema: 'canonical',
+          }
+        : {
+            status: 'none',
+            from_schema: existingRecord ? 'canonical' : 'new',
+            to_schema: 'canonical',
+          },
     };
   } catch (error) {
     fs.mkdirSync(artifactDirectory, { recursive: true });

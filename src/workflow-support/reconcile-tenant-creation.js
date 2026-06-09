@@ -1,5 +1,48 @@
 'use strict';
 
+function normalizeSlug(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9_-]+/g, '')
+    .replace(/-{2,}/g, '-')
+    .replace(/^[-_]+|[-_]+$/g, '');
+}
+
+function buildCanonicalTopologyDraft(request = {}) {
+  if (request.topology && request.topology.teams && Array.isArray(request.topology.teams.structure)) {
+    return request.topology;
+  }
+
+  const tenantKey = normalizeSlug(request.tenant_key || request.tenant_display_name || 'tenant');
+  const rootSlug = `${tenantKey}-root`;
+
+  return {
+    organization: {
+      orgName: String(request.organization || '').toLowerCase(),
+    },
+    teams: {
+      tenantRootTeam: rootSlug,
+      structure: [
+        { team: rootSlug, parent: null, type: 'root' },
+        { team: `${tenantKey}-admin`, parent: rootSlug, type: 'admin' },
+        { team: `${tenantKey}-repo-admin`, parent: rootSlug, type: 'repo-admin' },
+      ],
+    },
+    repositories: {
+      owned: [],
+    },
+    runnerTopology: {
+      runnerGroups: [],
+    },
+    accessModel: {
+      enforcement: 'tenant-boundary',
+      roles: ['tenant-admin', 'repo-admin', 'developer', 'viewer'],
+    },
+  };
+}
+
 function reconcileTenantCreation(input = {}) {
   const request = input.request || {};
   const validatedTeams = input.validatedTeams || input.requested_teams || [];
@@ -38,52 +81,70 @@ function reconcileTenantCreation(input = {}) {
   }
 
   const tenantParentSlug = String(request.tenant_team_slug || request.parent_team_slug || '').toLowerCase();
-  const repoAdminSlug = String(request.repo_admin_team_slug || '').toLowerCase();
-
   const parentTeam = currentMap.get(tenantParentSlug) || null;
-  const childTeam = currentMap.get(repoAdminSlug) || null;
-  const childParentSlug = childTeam && childTeam.parent && childTeam.parent.slug
-    ? String(childTeam.parent.slug).toLowerCase()
-    : null;
 
-  const hierarchyAction = !childTeam || !parentTeam
-    ? 'pending_teams'
-    : childParentSlug === tenantParentSlug
-      ? 'noop'
-      : childParentSlug && childParentSlug !== tenantParentSlug
-        ? 'reparent_blocked'
-        : 'link_child';
+  const childLinksToApply = [];
+  const childLinksAlreadyPresent = [];
+  const childLinksRejected = [];
+  for (const requestedChildLink of request.requested_child_links || []) {
+    const childSlug = String(requestedChildLink.child_team_slug || '').toLowerCase();
+    const childTeam = currentMap.get(childSlug) || null;
+    const childParentSlug = childTeam && childTeam.parent && childTeam.parent.slug
+      ? String(childTeam.parent.slug).toLowerCase()
+      : null;
+
+    if (!parentTeam || !childTeam) {
+      continue;
+    }
+
+    if (childParentSlug === tenantParentSlug) {
+      childLinksAlreadyPresent.push({ child_team_slug: childSlug, parent_team_slug: tenantParentSlug });
+      continue;
+    }
+
+    if (childParentSlug && childParentSlug !== tenantParentSlug) {
+      childLinksRejected.push({ child_team_slug: childSlug, parent_team_slug: childParentSlug, failure_reason: 'reparent_blocked' });
+      continue;
+    }
+
+    childLinksToApply.push({ child_team_slug: childSlug, parent_team_slug: tenantParentSlug });
+  }
 
   const requesterMembership = input.requesterMembership || null;
   const requesterBootstrapAction = requesterMembership && requesterMembership.membership && requesterMembership.membership.role === 'maintainer'
     ? 'noop'
     : 'ensure_maintainer';
 
+  const canonicalTopologyDraft = buildCanonicalTopologyDraft(request);
+
   return {
     organization_exists: input.organization_exists !== false,
     teams_to_create: teamsToCreate,
     teams_already_present: teamsAlreadyPresent,
     teams_rejected: teamsRejected,
-    child_links_to_apply: hierarchyAction === 'link_child'
-      ? [{ child_team_slug: repoAdminSlug, parent_team_slug: tenantParentSlug }]
-      : [],
-    child_links_already_present: hierarchyAction === 'noop'
-      ? [{ child_team_slug: repoAdminSlug, parent_team_slug: tenantParentSlug }]
-      : [],
-    child_links_rejected: hierarchyAction === 'reparent_blocked'
-      ? [{ child_team_slug: repoAdminSlug, parent_team_slug: childParentSlug, failure_reason: 'reparent_blocked' }]
-      : [],
+    child_links_to_apply: childLinksToApply,
+    child_links_already_present: childLinksAlreadyPresent,
+    child_links_rejected: childLinksRejected,
     requester_bootstrap_action: requesterBootstrapAction,
     registry_persistence_action: 'write',
     intake_mode: request.intake_mode || 'manual',
+    canonical_topology_draft: canonicalTopologyDraft,
+    compatibility_mode: request.compatibility && request.compatibility.mode ? request.compatibility.mode : 'canonical',
+    canonical_topology_markers: {
+      root_team: canonicalTopologyDraft.teams ? canonicalTopologyDraft.teams.tenantRootTeam : null,
+      structure_node_count: canonicalTopologyDraft.teams && Array.isArray(canonicalTopologyDraft.teams.structure)
+        ? canonicalTopologyDraft.teams.structure.length
+        : 0,
+    },
     dry_run: Boolean(input.dry_run ?? request.dry_run),
     rate_limit_snapshot: input.rate_limit_snapshot || null,
-    state: teamsRejected.length > 0 || hierarchyAction === 'reparent_blocked'
+    state: teamsRejected.length > 0 || childLinksRejected.length > 0
       ? 'blocked'
       : 'approved_for_execution',
   };
 }
 
 module.exports = {
+  buildCanonicalTopologyDraft,
   reconcileTenantCreation,
 };

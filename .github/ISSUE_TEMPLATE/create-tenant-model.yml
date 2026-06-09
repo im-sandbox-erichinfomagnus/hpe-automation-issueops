@@ -23,6 +23,105 @@ body:
     validations:
       required: true
 
+  - type: dropdown
+    id: tenant_type
+    attributes:
+      label: Tenant type
+      description: Canonical tenant type used for topology governance.
+      options:
+        - application
+        - platform
+        - shared-services
+      default: 0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: governance_code_scanning_enabled
+    attributes:
+      label: Enable code scanning
+      options:
+        - "true"
+        - "false"
+      default: 0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: governance_secret_scanning_enabled
+    attributes:
+      label: Enable secret scanning
+      options:
+        - "true"
+        - "false"
+      default: 0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: governance_dependabot_enabled
+    attributes:
+      label: Enable dependabot
+      options:
+        - "true"
+        - "false"
+      default: 0
+    validations:
+      required: true
+
+  - type: input
+    id: cmdb_id
+    attributes:
+      label: CMDB ID
+      placeholder: CMDB-0001
+    validations:
+      required: true
+
+  - type: input
+    id: cost_center
+    attributes:
+      label: Cost center
+      placeholder: CC-0001
+    validations:
+      required: true
+
+  - type: input
+    id: business_unit
+    attributes:
+      label: Business unit
+      placeholder: platform
+    validations:
+      required: true
+
+  - type: dropdown
+    id: environment
+    attributes:
+      label: Environment
+      options:
+        - nonprod
+        - prod
+      default: 0
+    validations:
+      required: true
+
+  - type: input
+    id: primary_contact
+    attributes:
+      label: Primary contact
+      description: Required email contact for tenant ownership.
+      placeholder: owner@example.com
+    validations:
+      required: true
+
+  - type: input
+    id: secondary_contact
+    attributes:
+      label: Secondary contact (optional)
+      description: Optional backup email contact.
+      placeholder: backup@example.com
+    validations:
+      required: false
+
   - type: input
     id: designated_approver
     attributes:

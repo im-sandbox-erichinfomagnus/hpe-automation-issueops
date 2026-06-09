@@ -74,10 +74,30 @@ function readParsedRequestFromEnv(env = process.env) {
     parsed_repository_name: env.PARSED_REPOSITORY_NAME || '',
     tenant_name: env.PARSED_TENANT_NAME || '',
     tenant_display_name: env.PARSED_TENANT_NAME || '',
+    tenant_type: env.PARSED_TENANT_TYPE || '',
+    parsed_tenant_type: env.PARSED_TENANT_TYPE || '',
     target_team: env.PARSED_TARGET_TEAM || '',
     parent_team: env.PARSED_PARENT_TEAM || '',
     designated_hierarchy_approver: env.PARSED_DESIGNATED_HIERARCHY_APPROVER || '',
     designated_approver: env.PARSED_DESIGNATED_APPROVER || '',
+    primary_contact: env.PARSED_PRIMARY_CONTACT || '',
+    parsed_primary_contact: env.PARSED_PRIMARY_CONTACT || '',
+    secondary_contact: env.PARSED_SECONDARY_CONTACT || '',
+    parsed_secondary_contact: env.PARSED_SECONDARY_CONTACT || '',
+    cmdb_id: env.PARSED_CMDB_ID || '',
+    parsed_cmdb_id: env.PARSED_CMDB_ID || '',
+    cost_center: env.PARSED_COST_CENTER || '',
+    parsed_cost_center: env.PARSED_COST_CENTER || '',
+    business_unit: env.PARSED_BUSINESS_UNIT || '',
+    parsed_business_unit: env.PARSED_BUSINESS_UNIT || '',
+    environment: env.PARSED_ENVIRONMENT || '',
+    parsed_environment: env.PARSED_ENVIRONMENT || '',
+    governance_code_scanning_enabled: env.PARSED_GOVERNANCE_CODE_SCANNING_ENABLED || '',
+    parsed_governance_code_scanning_enabled: env.PARSED_GOVERNANCE_CODE_SCANNING_ENABLED || '',
+    governance_secret_scanning_enabled: env.PARSED_GOVERNANCE_SECRET_SCANNING_ENABLED || '',
+    parsed_governance_secret_scanning_enabled: env.PARSED_GOVERNANCE_SECRET_SCANNING_ENABLED || '',
+    governance_dependabot_enabled: env.PARSED_GOVERNANCE_DEPENDABOT_ENABLED || '',
+    parsed_governance_dependabot_enabled: env.PARSED_GOVERNANCE_DEPENDABOT_ENABLED || '',
     requested_repositories: env.PARSED_REQUESTED_REPOSITORIES || '',
     bulk_csv_requested_repositories: env.PARSED_BULK_CSV_REQUESTED_REPOSITORIES || '',
     permission_level: env.PARSED_PERMISSION_LEVEL || '',
@@ -157,10 +177,30 @@ function isTeamRepoAccessRemovalParsedRequest(parsedRequest = {}) {
 }
 
 function isTenantRepoCreationParsedRequest(parsedRequest = {}) {
-  return Boolean(
+  const repositoryNameCandidate =
     parsedRequest.repository_name ||
-    parsedRequest.parsed_repository_name
+    parsedRequest.parsed_repository_name ||
+    '';
+
+  const firstLineRepositoryName = String(repositoryNameCandidate)
+    .replace(/\r\n/g, '\n')
+    .split('\n')[0]
+    .trim();
+
+  const hasTenantModelSpecificSignals = Boolean(
+    parsedRequest.tenant_type ||
+    parsedRequest.parsed_tenant_type ||
+    parsedRequest.governance_code_scanning_enabled ||
+    parsedRequest.parsed_governance_code_scanning_enabled ||
+    parsedRequest.governance_secret_scanning_enabled ||
+    parsedRequest.parsed_governance_secret_scanning_enabled ||
+    parsedRequest.governance_dependabot_enabled ||
+    parsedRequest.parsed_governance_dependabot_enabled
   );
+
+  const looksLikeRepositoryName = /^[a-zA-Z0-9._-]{1,100}$/.test(firstLineRepositoryName);
+
+  return looksLikeRepositoryName && !hasTenantModelSpecificSignals;
 }
 
 function isTeamCreationParsedRequest(parsedRequest = {}) {
@@ -208,6 +248,101 @@ function buildCommentContextFromEnv(env = process.env) {
     id: env.COMMENT_ID || null,
     author_login: env.COMMENT_AUTHOR_LOGIN || '',
     body: env.COMMENT_BODY || '',
+  };
+}
+
+function mapLegacyLifecycleStatus(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized || normalized === 'active') {
+    return 'active';
+  }
+  if (['blocked', 'inactive', 'suspended'].includes(normalized)) {
+    return 'blocked';
+  }
+  if (['partial_failure', 'partial-failure', 'failed_after_approved_execution', 'partially_executed'].includes(normalized)) {
+    return 'partial_failure';
+  }
+  if (['decommissioned', 'retired'].includes(normalized)) {
+    return 'decommissioned';
+  }
+  return 'active';
+}
+
+function buildDefaultOrganizationRoleSpecifications(tenantKey) {
+  const normalizedTenantKey = String(tenantKey || 'tenant').trim().toLowerCase();
+
+  return [
+    {
+      role_key: 'tenant-admin',
+      role_name: `${normalizedTenantKey}-tenant-admin`,
+      permission_intent: 'create repos, create teams, manage repository access',
+    },
+    {
+      role_key: 'repo-admin',
+      role_name: `${normalizedTenantKey}-repo-admin`,
+      permission_intent: 'create repos and manage repository access',
+    },
+    {
+      role_key: 'developer',
+      role_name: `${normalizedTenantKey}-developer`,
+      permission_intent: 'contribute code to tenant repositories',
+    },
+    {
+      role_key: 'viewer',
+      role_name: `${normalizedTenantKey}-viewer`,
+      permission_intent: 'read-only access to tenant repositories',
+    },
+  ];
+}
+
+function buildCanonicalTenantRecordFromRequest(request = {}) {
+  const canonicalAccessModel = request.topology && request.topology.accessModel
+    ? request.topology.accessModel
+    : {
+      enforcement: 'tenant-boundary',
+      roles: ['tenant-admin', 'repo-admin', 'developer', 'viewer'],
+      organizationRoleSpecifications: buildDefaultOrganizationRoleSpecifications(request.tenant_key),
+    };
+
+  if (!Array.isArray(canonicalAccessModel.organizationRoleSpecifications) || canonicalAccessModel.organizationRoleSpecifications.length === 0) {
+    canonicalAccessModel.organizationRoleSpecifications = buildDefaultOrganizationRoleSpecifications(request.tenant_key);
+  }
+
+  return {
+    tenantId: request.tenant_key,
+    tenantName: request.tenant_display_name,
+    tenantType: request.tenant_type,
+    topology: request.topology
+      ? {
+        ...request.topology,
+        accessModel: canonicalAccessModel,
+      }
+      : null,
+    externalMappings: {
+      cmdbId: request.external_mappings && request.external_mappings.cmdb_id || null,
+      costCenter: request.external_mappings && request.external_mappings.cost_center || null,
+      businessUnit: request.external_mappings && request.external_mappings.business_unit || null,
+      environment: request.external_mappings && request.external_mappings.environment || 'nonprod',
+    },
+    metadata: {
+      primaryContact: request.primary_contact || '',
+      secondaryContact: request.secondary_contact || null,
+      createdBy: request.requester_login || '',
+      createdDate: request.submitted_at || new Date().toISOString(),
+    },
+    lifecycleStatus: mapLegacyLifecycleStatus(
+      request.compatibility && request.compatibility.lifecycle_status_equivalent
+        ? request.compatibility.lifecycle_status_equivalent
+        : request.lifecycle_status || 'active'
+    ),
+    policy: {
+      enforcement: canonicalAccessModel.enforcement,
+      roles: canonicalAccessModel.roles,
+      governanceMandatory: {
+        codeScanning: Boolean(request.governance && request.governance.code_scanning && request.governance.code_scanning.mandatory),
+        secretScanning: Boolean(request.governance && request.governance.secret_scanning && request.governance.secret_scanning.mandatory),
+      },
+    },
   };
 }
 
@@ -500,7 +635,17 @@ async function runRequestValidation(options = {}) {
       run_attempt: env.GITHUB_RUN_ATTEMPT,
       issue_number: env.ISSUE_NUMBER,
     },
+    legacyTenantRecord: parseJsonFromEnv(env.PARSED_LEGACY_TENANT_RECORD_JSON),
   });
+
+  if (isTenantCreation) {
+    request.lifecycle_status_equivalent = mapLegacyLifecycleStatus(
+      request.compatibility && request.compatibility.lifecycle_status_equivalent
+        ? request.compatibility.lifecycle_status_equivalent
+        : request.lifecycle_status || 'active'
+    );
+    request.canonical_tenant_record = buildCanonicalTenantRecordFromRequest(request);
+  }
 
   let validation;
   let reconciliationPlan = {};
@@ -1107,6 +1252,8 @@ if (require.main === module) {
 }
 
 module.exports = {
+  buildCanonicalTenantRecordFromRequest,
+  mapLegacyLifecycleStatus,
   deriveTerminalStatusFromIssueLabels,
   isTenantRepoCreationParsedRequest,
   isTenantCreationParsedRequest,

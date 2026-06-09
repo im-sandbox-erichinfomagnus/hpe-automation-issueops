@@ -12,6 +12,16 @@ function buildValidParsedRequest(overrides = {}) {
   return {
     organization: 'octo-org',
     tenant_name: 'Acme Platform',
+    tenant_type: 'application',
+    governance_code_scanning_enabled: 'true',
+    governance_secret_scanning_enabled: 'true',
+    governance_dependabot_enabled: 'true',
+    cmdb_id: 'CMDB-001',
+    cost_center: 'CC-001',
+    business_unit: 'platform',
+    environment: 'nonprod',
+    primary_contact: 'owner@example.com',
+    secondary_contact: 'secondary@example.com',
     designated_approver: 'org-owner-user',
     dry_run: 'true',
     justification: 'Bootstrap tenant',
@@ -131,6 +141,99 @@ test('validateTenantCreationRequest rejects re-parent precondition conflicts', a
   assert.equal(validation.is_valid, false);
   assert.equal(validation.validation_findings.hierarchy_precondition, 'reparent_blocked');
   assert.match(validation.errors.join('\n'), /re-parenting is blocked/i);
+});
+
+test('parseTenantCreationRequest normalizes tenant topology enhancement fields', () => {
+  const parsed = parseTenantCreationRequest({
+    parsedRequest: buildValidParsedRequest({
+      tenant_type: 'PLATFORM',
+      governance_code_scanning_enabled: 'false',
+      governance_secret_scanning_enabled: 'true',
+      governance_dependabot_enabled: '0',
+      environment: 'PROD',
+      primary_contact: 'primary@example.com',
+      secondary_contact: '',
+    }),
+    issue: { number: 906, user: { login: 'requester-user' } },
+    repository: 'octo-org/issueops-speckit',
+  });
+
+  assert.equal(parsed.tenant_type, 'platform');
+  assert.equal(parsed.external_mappings.environment, 'prod');
+  assert.equal(parsed.governance.code_scanning.enabled, false);
+  assert.equal(parsed.governance.secret_scanning.enabled, true);
+  assert.equal(parsed.governance.dependabot.enabled, false);
+  assert.equal(parsed.secondary_contact, null);
+  assert.equal(parsed.topology.teams.tenantRootTeam, 'acme-platform-root');
+  assert.equal(parsed.topology.teams.structure.length, 3);
+});
+
+test('validateTenantCreationRequest rejects invalid tenant topology enhancement fields', async () => {
+  const request = parseTenantCreationRequest({
+    parsedRequest: buildValidParsedRequest({
+      primary_contact: 'not-an-email',
+      secondary_contact: 'invalid',
+    }),
+    issue: { number: 907, user: { login: 'requester-user' } },
+    repository: 'octo-org/issueops-speckit',
+  });
+  request.tenant_type = 'unknown';
+  request.external_mappings.environment = 'qa';
+
+  const validation = await validateTenantCreationRequest(request, baseValidationOptions());
+
+  assert.equal(validation.is_valid, false);
+  assert.match(validation.errors.join('\n'), /tenant_type must be one of/i);
+  assert.match(validation.errors.join('\n'), /environment must be one of/i);
+  assert.match(validation.errors.join('\n'), /primary_contact is required/i);
+  assert.match(validation.errors.join('\n'), /secondary_contact is optional/i);
+  assert.equal(validation.validation_findings.tenant_type_validation, 'invalid');
+  assert.equal(validation.validation_findings.environment_validation, 'invalid');
+});
+
+test('validateTenantCreationRequest rejects non-mandatory governance policy flags', async () => {
+  const request = parseTenantCreationRequest({
+    parsedRequest: buildValidParsedRequest(),
+    issue: { number: 908, user: { login: 'requester-user' } },
+    repository: 'octo-org/issueops-speckit',
+  });
+  request.governance.code_scanning.mandatory = false;
+
+  const validation = await validateTenantCreationRequest(request, baseValidationOptions());
+
+  assert.equal(validation.is_valid, false);
+  assert.match(validation.errors.join('\n'), /must remain true/i);
+  assert.equal(validation.validation_findings.governance_mandatory_validation, 'invalid');
+});
+
+test('validateTenantCreationRequest rejects non-canonical accessModel enforcement', async () => {
+  const request = parseTenantCreationRequest({
+    parsedRequest: buildValidParsedRequest(),
+    issue: { number: 909, user: { login: 'requester-user' } },
+    repository: 'octo-org/issueops-speckit',
+  });
+  request.topology.accessModel.enforcement = 'org-wide';
+
+  const validation = await validateTenantCreationRequest(request, baseValidationOptions());
+
+  assert.equal(validation.is_valid, false);
+  assert.match(validation.errors.join('\n'), /accessModel must enforce tenant-boundary/i);
+  assert.equal(validation.validation_findings.access_model_validation, 'invalid');
+});
+
+test('validateTenantCreationRequest rejects missing organization role specifications', async () => {
+  const request = parseTenantCreationRequest({
+    parsedRequest: buildValidParsedRequest(),
+    issue: { number: 9091, user: { login: 'requester-user' } },
+    repository: 'octo-org/issueops-speckit',
+  });
+  request.topology.accessModel.organizationRoleSpecifications = [];
+
+  const validation = await validateTenantCreationRequest(request, baseValidationOptions());
+
+  assert.equal(validation.is_valid, false);
+  assert.match(validation.errors.join('\n'), /organizationRoleSpecifications/i);
+  assert.equal(validation.validation_findings.organization_role_spec_validation, 'invalid');
 });
 
 test('evaluateApprovalGate approves tenant creation only for designated active target-org owner', async () => {
