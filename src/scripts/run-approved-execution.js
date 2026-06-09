@@ -277,6 +277,7 @@ function buildPreMutationFailureArtifact(options = {}) {
     runContext: {
       run_id: env.GITHUB_RUN_ID || auditArtifact.metadata && auditArtifact.metadata.run_id,
       run_attempt: env.GITHUB_RUN_ATTEMPT || auditArtifact.metadata && auditArtifact.metadata.run_attempt,
+      operation: auditArtifact.metadata && auditArtifact.metadata.operation,
     },
   });
 
