@@ -125,12 +125,14 @@ test('parser normalizes dropdown-style image source values', () => {
   assert.equal(request.runner_image_source, 'github');
 });
 
-test('CI/CD admin team derivation follows the 014 tenant naming convention', () => {
+test('tenant admin team derivation follows the 022 canonical topology naming', () => {
+  // The CI/CD administration authority is the tenant topology admin team (type "admin",
+  // <tenant-slug>-admin) per specs/022-enhance-tenant-topology, not a separate CICDAdmins team.
   const derived = deriveCicdAdminTeam('ContosoUK');
-  assert.equal(derived.cicd_admin_team_name, 'ContosoUK_CICDAdmins');
-  assert.equal(derived.cicd_admin_team_slug, 'contosouk_cicdadmins');
+  assert.equal(derived.cicd_admin_team_name, 'contosouk-admin');
+  assert.equal(derived.cicd_admin_team_slug, 'contosouk-admin');
 
   const derivedWithSpace = deriveCicdAdminTeam('Contoso UK');
-  assert.equal(derivedWithSpace.cicd_admin_team_name, 'Contoso_UK_CICDAdmins');
-  assert.equal(derivedWithSpace.cicd_admin_team_slug, 'contoso_uk_cicdadmins');
+  assert.equal(derivedWithSpace.cicd_admin_team_name, 'contoso-uk-admin');
+  assert.equal(derivedWithSpace.cicd_admin_team_slug, 'contoso-uk-admin');
 });

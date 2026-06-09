@@ -4,7 +4,7 @@ purpose: >-
   Contract for the tenant-scoped GitHub-hosted runner deletion IssueOps
   workflow that resolves canonical tenant context from tenant-registry plus
   live governance state, authorizes the requester through active membership in
-  the derived tenant CI/CD admin team (TenantName_CICDAdmins), derives the
+  the tenant topology admin team (type "admin", read from the canonical tenant topology), derives the
   tenant-prefixed runner name, resolves the live runner identifier, deletes
   the runner only when present after designated active-org-owner approval, and
   emits durable audit evidence.
@@ -107,8 +107,8 @@ authorization:
   approver_model: designated currently authorized target-organization approver
   requester_tenant_requirements:
     - requester tenant name must resolve to exactly one registry record for the target organization
-    - derived TenantName_CICDAdmins team must exist in the target organization
-    - requester must be an active member (member or maintainer) of TenantName_CICDAdmins
+    - the tenant topology admin team (type "admin", <tenant-slug>-admin) must exist in the target organization
+    - requester must be an active member (member or maintainer) of the tenant topology admin team
   execution_identity:
     credential: ISSUEOPS_GITHUB_TOKEN
     token_kind: pat
@@ -126,8 +126,8 @@ tenant_resolution:
     - ambiguous tenant match
     - missing or malformed registry record
     - missing tenant team in live state
-    - missing derived CICDAdmins team
-    - requester not an active member of derived CICDAdmins team
+    - missing tenant topology admin team
+    - requester not an active member of the tenant topology admin team
 
 context_marker:
   format: "tenant-runner-context:{16-char-sha256-hex}"
@@ -150,7 +150,7 @@ validation_rules:
   - tenant_name_input is required; validation fails immediately if absent or empty.
   - Runner name must derive deterministically into a valid tenant-prefixed hosted-runner name.
   - Canonical tenant CI/CD context must resolve to exactly one authorized match.
-  - Requester must be an active member of the derived TenantName_CICDAdmins team.
+  - Requester must be an active member of the tenant topology admin team (type "admin").
   - Designated approver must be currently authorized (active admin) for the target organization.
   - An absent target runner keeps the request valid and marks no-op convergence.
   - Dry-run requests pass validation and produce mutation intent but must not execute any mutation.
@@ -159,8 +159,8 @@ reconciliation:
   current_state_reads:
     - organization visibility
     - authoritative tenant-registry record from main branch
-    - live tenant team and derived CICDAdmins team existence
-    - requester membership on derived CICDAdmins team
+    - live tenant root team and tenant topology admin team existence
+    - requester membership on the tenant topology admin team
     - organization hosted-runner listing (derived-name resolution to runner id)
   mutation_rule:
     - delete hosted runner by resolved id only when present (deletion_action = delete_hosted_runner)
@@ -247,6 +247,6 @@ rate_limit_handling:
   non_retryable_conditions:
     - ambiguous tenant resolution
     - unauthorized approver
-    - missing derived CICDAdmins team
-    - requester not an active CICDAdmins member
+    - missing tenant topology admin team
+    - requester not an active tenant topology admin team member
     - boundary mismatch at execution time

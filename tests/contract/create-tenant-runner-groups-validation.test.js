@@ -13,21 +13,32 @@ const {
 } = require('../../src/workflow-support/parse-runner-group-request');
 const { validateRunnerGroupRequest } = require('../../src/workflow-support/validate-runner-group-request');
 
+function canonicalTopologyRecord({ tenantId, tenantName, organization }) {
+  const slug = tenantId;
+  return {
+    tenantId,
+    tenantName,
+    tenantType: 'application',
+    organization,
+    topology: {
+      organization: { orgName: organization },
+      teams: {
+        tenantRootTeam: `${slug}-root`,
+        structure: [
+          { team: `${slug}-root`, parent: null, type: 'root' },
+          { team: `${slug}-admin`, parent: `${slug}-root`, type: 'admin' },
+          { team: `${slug}-repo-admin`, parent: `${slug}-root`, type: 'repo-admin' },
+        ],
+      },
+      runnerTopology: { runnerGroups: [] },
+    },
+  };
+}
+
 function buildRegistry() {
   const registryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runner-group-registry-'));
-  fs.writeFileSync(
-    path.join(registryDir, 'contosouk.json'),
-    JSON.stringify({
-      tenant_key: 'contosouk',
-      tenant_display_name: 'ContosoUK',
-      organization: 'octo-org',
-      tenant_team_name: 'ContosoUK_Tenant',
-      tenant_team_slug: 'contosouk_tenant',
-      repo_admin_team_name: 'ContosoUK_RepoAdmins',
-      repo_admin_team_slug: 'contosouk_repoadmins',
-    }, null, 2),
-    'utf8'
-  );
+  const record = canonicalTopologyRecord({ tenantId: 'contosouk', tenantName: 'ContosoUK', organization: 'octo-org' });
+  fs.writeFileSync(path.join(registryDir, 'contosouk.json'), JSON.stringify(record, null, 2), 'utf8');
   return registryDir;
 }
 
@@ -57,12 +68,12 @@ function buildOptions(registryDir, overrides = {}) {
     registryRef: 'main',
     getOrganization: async () => ({ exists: true }),
     listTeams: async () => ([
-      { slug: 'contosouk_tenant', parent: null },
-      { slug: 'contosouk_repoadmins', parent: { slug: 'contosouk_tenant' } },
-      { slug: 'contosouk_cicdadmins', parent: null },
+      { slug: 'contosouk-root', parent: null },
+      { slug: 'contosouk-admin', parent: { slug: 'contosouk-root' } },
+      { slug: 'contosouk-repo-admin', parent: { slug: 'contosouk-root' } },
     ]),
     getMembershipForUser: async ({ teamSlug, username }) => {
-      if (teamSlug === 'contosouk_cicdadmins' && username === 'tenant-cicd-admin') {
+      if (teamSlug === 'contosouk-admin' && username === 'tenant-cicd-admin') {
         return { state: 'active', membership: { role: 'member' } };
       }
       return { state: 'absent', membership: null };
@@ -194,32 +205,16 @@ test('contract yaml references the expected modules', () => {
   assert.match(contract, /github-runner-api\.js/);
   assert.match(contract, /resolve-tenant-cicd-context-from-registry\.js/);
   assert.match(contract, /runner-group-policy/);
-  assert.match(contract, /TenantName_CICDAdmins/);
+  assert.match(contract, /tenant topology admin team/);
 });
 
 test('cross-tenant runner group creation via prefix collision is rejected', async () => {
   const registryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runner-group-xtenant-'));
   for (const record of [
-    {
-      tenant_key: 'contoso',
-      tenant_display_name: 'Contoso',
-      organization: 'octo-org',
-      tenant_team_name: 'Contoso_Tenant',
-      tenant_team_slug: 'contoso_tenant',
-      repo_admin_team_name: 'Contoso_RepoAdmins',
-      repo_admin_team_slug: 'contoso_repoadmins',
-    },
-    {
-      tenant_key: 'contoso-uk',
-      tenant_display_name: 'Contoso UK',
-      organization: 'octo-org',
-      tenant_team_name: 'Contoso_UK_Tenant',
-      tenant_team_slug: 'contoso_uk_tenant',
-      repo_admin_team_name: 'Contoso_UK_RepoAdmins',
-      repo_admin_team_slug: 'contoso_uk_repoadmins',
-    },
+    canonicalTopologyRecord({ tenantId: 'contoso', tenantName: 'Contoso', organization: 'octo-org' }),
+    canonicalTopologyRecord({ tenantId: 'contoso-uk', tenantName: 'Contoso UK', organization: 'octo-org' }),
   ]) {
-    fs.writeFileSync(path.join(registryDir, `${record.tenant_key}.json`), JSON.stringify(record, null, 2), 'utf8');
+    fs.writeFileSync(path.join(registryDir, `${record.tenantId}.json`), JSON.stringify(record, null, 2), 'utf8');
   }
 
   const result = await validateRunnerGroupRequest(
@@ -231,12 +226,14 @@ test('cross-tenant runner group creation via prefix collision is rejected', asyn
     }),
     buildOptions(registryDir, {
       listTeams: async () => ([
-        { slug: 'contoso_tenant', parent: null },
-        { slug: 'contoso_repoadmins', parent: { slug: 'contoso_tenant' } },
-        { slug: 'contoso_cicdadmins', parent: null },
+        { slug: 'contoso-root', parent: null },
+        { slug: 'contoso-admin', parent: { slug: 'contoso-root' } },
+        { slug: 'contoso-repo-admin', parent: { slug: 'contoso-root' } },
+        { slug: 'contoso-uk-root', parent: null },
+        { slug: 'contoso-uk-admin', parent: { slug: 'contoso-uk-root' } },
       ]),
       getMembershipForUser: async ({ teamSlug, username }) => {
-        if (teamSlug === 'contoso_cicdadmins' && username === 'tenant-cicd-admin') {
+        if (teamSlug === 'contoso-admin' && username === 'tenant-cicd-admin') {
           return { state: 'active', membership: { role: 'member' } };
         }
         return { state: 'absent', membership: null };

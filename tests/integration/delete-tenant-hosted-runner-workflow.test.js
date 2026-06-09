@@ -30,13 +30,22 @@ function buildRunnerRegistry(workspace) {
   fs.writeFileSync(
     path.join(registryDir, 'contosouk.json'),
     JSON.stringify({
-      tenant_key: 'contosouk',
-      tenant_display_name: 'ContosoUK',
+      tenantId: 'contosouk',
+      tenantName: 'ContosoUK',
+      tenantType: 'application',
       organization: 'octo-org',
-      tenant_team_name: 'ContosoUK_Tenant',
-      tenant_team_slug: 'contosouk_tenant',
-      repo_admin_team_name: 'ContosoUK_RepoAdmins',
-      repo_admin_team_slug: 'contosouk_repoadmins',
+      topology: {
+        organization: { orgName: 'octo-org' },
+        teams: {
+          tenantRootTeam: 'contosouk-root',
+          structure: [
+            { team: 'contosouk-root', parent: null, type: 'root' },
+            { team: 'contosouk-admin', parent: 'contosouk-root', type: 'admin' },
+            { team: 'contosouk-repo-admin', parent: 'contosouk-root', type: 'repo-admin' },
+          ],
+        },
+        runnerTopology: { runnerGroups: [] },
+      },
     }, null, 2),
     'utf8'
   );
@@ -77,12 +86,12 @@ function buildTeamApi(options = {}) {
       },
     }),
     listOrgTeams: async () => ([
-      { slug: 'contosouk_tenant', parent: null },
-      { slug: 'contosouk_repoadmins', parent: { slug: 'contosouk_tenant' } },
-      { slug: 'contosouk_cicdadmins', parent: null },
+      { slug: 'contosouk-root', parent: null },
+      { slug: 'contosouk-admin', parent: { slug: 'contosouk-root' } },
+      { slug: 'contosouk-repo-admin', parent: { slug: 'contosouk-root' } },
     ]),
     getMembershipForUser: async ({ teamSlug, username }) => {
-      if (teamSlug === 'contosouk_cicdadmins' && username === 'tenant-cicd-admin') {
+      if (teamSlug === 'contosouk-admin' && username === 'tenant-cicd-admin') {
         return cicdMembershipState === 'active'
           ? { state: 'active', membership: { role: 'member' } }
           : { state: cicdMembershipState, membership: null };

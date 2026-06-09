@@ -1,5 +1,12 @@
 # Research: Tenant Runner Group Creation IssueOps Workflow
 
+## Decision 0: Read tenant context from the canonical tenant topology (supersedes the CICDAdmins derivation)
+
+- Decision: Resolve tenant context from the canonical tenant topology that `specs/022-enhance-tenant-topology` stores in `tenant-registry/` (record carries `tenantName`, `tenantId`, and `topology.teams.structure[]` with team types root/admin/repo-admin; legacy flat records are projected to the same `<tenant-slug>-root`/`-admin`/`-repo-admin` naming). Authorize the requester against the topology **admin** team (structure type "admin", the `tenant-admin` role), which is the tenant CI/CD administration authority in the new model.
+- Rationale: The new topology has no dedicated `CICDAdmins` team or role; the `admin` team (tenant-admin: create repos, create teams, manage repository access) is the tenant governance authority that runner administration sits under. Reading the topology directly keeps these ops consistent with create-tenant-model and removes the invented `TenantName_CICDAdmins` naming.
+- Alternatives considered: a dedicated cicd-admin team/role (does not exist in the topology, would require a 022 schema change); the repo-admin team (too narrow - repo-scoped, not org Actions administration).
+
+
 ## Decision 1: Isolation-preserving defaults for visibility and public repositories
 
 - Decision: Default the runner-group visibility to `selected` (no repositories attached at creation) and `allows_public_repositories` to false; accept only `selected`, `all`, or `private` visibility values.

@@ -9,6 +9,9 @@
 
 **Tenant Model Dependency**: This feature consumes the tenant model defined in `specs/014-create-tenant-model`. Tenant context is resolved from durable per-tenant registry records under `tenant-registry/` in this repository, and tenant team naming follows the same deterministic derivation used by tenant bootstrap (`TenantName_Tenant`, `TenantName_RepoAdmins`). This feature derives the tenant CI/CD administration team as `TenantName_CICDAdmins` using identical normalization rules.
 
+
+> **Topology update (2026-06-05):** Tenant context is now read from the canonical tenant topology in `tenant-registry/` defined by `specs/022-enhance-tenant-topology` (camelCase `tenantName`/`topology.teams.structure[]` with team types root/admin/repo-admin, plus a legacy-flat projection). The requester CI/CD authorization team is the tenant topology **admin** team (structure type "admin", `<tenant-slug>-admin`, carrying the `tenant-admin` role), not a separately-derived `TenantName_CICDAdmins` team. Inline references below to `TenantName_CICDAdmins` derivation are superseded by this note.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Submit and Validate Tenant Runner Creation Requests (Priority: P1)

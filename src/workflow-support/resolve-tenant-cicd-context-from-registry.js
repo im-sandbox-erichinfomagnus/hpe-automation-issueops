@@ -23,14 +23,84 @@ function normalizeSlug(value) {
     .slice(0, 100);
 }
 
-function deriveCicdAdminTeam(tenantDisplayName) {
-  const normalizedName = String(tenantDisplayName || '').trim().replace(/\s+/g, '_');
-  const cicdAdminTeamName = `${normalizedName}_CICDAdmins`;
-
+// Mirrors specs/022-enhance-tenant-topology team derivation: a tenant's teams are
+// <tenant-slug>-root, <tenant-slug>-admin, <tenant-slug>-repo-admin. The admin team
+// (type "admin", carrying the tenant-admin role) is the tenant CI/CD administration
+// authority that runner operations authorize against.
+function deriveCanonicalTenantTeams(tenantDisplayName) {
+  const slug = normalizeSlug(tenantDisplayName);
   return {
-    cicd_admin_team_name: cicdAdminTeamName,
-    cicd_admin_team_slug: normalizeSlug(cicdAdminTeamName),
+    tenant_root_team_slug: slug ? `${slug}-root` : '',
+    admin_team_slug: slug ? `${slug}-admin` : '',
+    repo_admin_team_slug: slug ? `${slug}-repo-admin` : '',
   };
+}
+
+// Backwards-compatible alias: callers asking for the tenant CI/CD admin team get the
+// topology admin team derived from the tenant name.
+function deriveCicdAdminTeam(tenantDisplayName) {
+  const teams = deriveCanonicalTenantTeams(tenantDisplayName);
+  return {
+    cicd_admin_team_name: teams.admin_team_slug,
+    cicd_admin_team_slug: teams.admin_team_slug,
+  };
+}
+
+// Normalizes a registry record (canonical topology, legacy flat, or the persisted
+// superset that carries both) into one view. Canonical topology wins when present;
+// legacy records are projected to the canonical team naming the same way
+// create-tenant-model migrates them.
+function readTopologyView(record = {}) {
+  const topology = record.topology && typeof record.topology === 'object' ? record.topology : null;
+
+  if (topology && topology.teams && Array.isArray(topology.teams.structure)) {
+    const byType = {};
+    for (const node of topology.teams.structure) {
+      if (node && node.type && node.team) {
+        byType[String(node.type).toLowerCase()] = normalizeLogin(node.team);
+      }
+    }
+    const orgName = record.organization
+      || (topology.organization && topology.organization.orgName)
+      || '';
+    return {
+      schema: 'canonical',
+      tenant_key: normalizeLogin(record.tenantId || record.tenant_key),
+      tenant_display_name: String(record.tenantName || record.tenant_display_name || ''),
+      organization: normalizeLogin(orgName),
+      tenant_root_team_slug: byType.root || normalizeLogin(topology.teams.tenantRootTeam),
+      admin_team_slug: byType.admin || '',
+      repo_admin_team_slug: byType['repo-admin'] || '',
+    };
+  }
+
+  // Legacy record: project to canonical team naming so authorization is consistent
+  // with the migrated topology that create-tenant-model now produces.
+  const displayName = String(record.tenant_display_name || record.tenantName || '');
+  const derived = deriveCanonicalTenantTeams(displayName);
+  return {
+    schema: 'legacy_projection',
+    tenant_key: normalizeLogin(record.tenant_key || record.tenantId),
+    tenant_display_name: displayName,
+    organization: normalizeLogin(record.organization),
+    tenant_root_team_slug: derived.tenant_root_team_slug,
+    admin_team_slug: derived.admin_team_slug,
+    repo_admin_team_slug: derived.repo_admin_team_slug,
+  };
+}
+
+function recordOrganization(record = {}) {
+  if (record.organization) {
+    return normalizeLogin(record.organization);
+  }
+  if (record.topology && record.topology.organization && record.topology.organization.orgName) {
+    return normalizeLogin(record.topology.organization.orgName);
+  }
+  return '';
+}
+
+function recordDisplayName(record = {}) {
+  return String(record.tenantName || record.tenant_display_name || '');
 }
 
 function buildTenantNamespacePrefix(tenantDisplayName) {
@@ -80,10 +150,10 @@ async function resolveTenantCicdContextFromRegistry(input = {}, options = {}) {
 
   const registryResult = readTenantRegistryRecords({ registryDirectory: options.registryDirectory });
   const recordsForOrganization = registryResult.records.filter(
-    (record) => normalizeLogin(record.organization) === organization
+    (record) => recordOrganization(record) === organization
   );
   const recordsForTenantName = requestedTenantNameNormalized
-    ? recordsForOrganization.filter((record) => normalizeTenantName(record.tenant_display_name) === requestedTenantNameNormalized)
+    ? recordsForOrganization.filter((record) => normalizeTenantName(recordDisplayName(record)) === requestedTenantNameNormalized)
     : recordsForOrganization;
 
   const teams = typeof listTeams === 'function'
@@ -97,16 +167,16 @@ async function resolveTenantCicdContextFromRegistry(input = {}, options = {}) {
 
   const candidates = [];
   for (const record of recordsForTenantName) {
-    const tenantTeamSlug = normalizeLogin(record.tenant_team_slug);
-    const derivedCicdTeam = deriveCicdAdminTeam(record.tenant_display_name);
-    const cicdAdminTeamSlug = derivedCicdTeam.cicd_admin_team_slug;
-    const tenantTeam = tenantTeamSlug ? teamBySlug.get(tenantTeamSlug) || null : null;
-    const cicdAdminTeam = cicdAdminTeamSlug ? teamBySlug.get(cicdAdminTeamSlug) || null : null;
+    const view = readTopologyView(record);
+    const tenantRootTeamSlug = view.tenant_root_team_slug;
+    const adminTeamSlug = view.admin_team_slug;
+    const tenantRootTeam = tenantRootTeamSlug ? teamBySlug.get(tenantRootTeamSlug) || null : null;
+    const adminTeam = adminTeamSlug ? teamBySlug.get(adminTeamSlug) || null : null;
 
     let governanceRelationStatus = 'valid';
-    if (!tenantTeam || !tenantTeamSlug) {
+    if (!tenantRootTeam || !tenantRootTeamSlug) {
       governanceRelationStatus = 'missing_tenant_team';
-    } else if (!cicdAdminTeam || !cicdAdminTeamSlug) {
+    } else if (!adminTeam || !adminTeamSlug) {
       governanceRelationStatus = 'missing_cicd_admin_team';
     }
 
@@ -114,12 +184,12 @@ async function resolveTenantCicdContextFromRegistry(input = {}, options = {}) {
     let authorizationStatus = 'blocked';
     if (
       typeof getMembershipForUser === 'function' &&
-      cicdAdminTeamSlug &&
+      adminTeamSlug &&
       governanceRelationStatus === 'valid'
     ) {
       const cicdMembership = await getMembershipForUser({
         organization,
-        teamSlug: cicdAdminTeamSlug,
+        teamSlug: adminTeamSlug,
         username: requesterLogin,
       });
 
@@ -149,15 +219,17 @@ async function resolveTenantCicdContextFromRegistry(input = {}, options = {}) {
     }
 
     candidates.push({
-      tenant_key: normalizeLogin(record.tenant_key),
-      tenant_display_name: String(record.tenant_display_name || ''),
+      tenant_key: view.tenant_key,
+      tenant_display_name: view.tenant_display_name,
       organization,
       registry_ref: registryRef,
-      tenant_team_name: String(record.tenant_team_name || ''),
-      tenant_team_slug: tenantTeamSlug,
-      cicd_admin_team_name: derivedCicdTeam.cicd_admin_team_name,
-      cicd_admin_team_slug: cicdAdminTeamSlug,
-      cicd_admin_team_exists: Boolean(cicdAdminTeam),
+      topology_schema: view.schema,
+      tenant_team_name: tenantRootTeamSlug,
+      tenant_team_slug: tenantRootTeamSlug,
+      repo_admin_team_slug: view.repo_admin_team_slug,
+      cicd_admin_team_name: adminTeamSlug,
+      cicd_admin_team_slug: adminTeamSlug,
+      cicd_admin_team_exists: Boolean(adminTeam),
       governance_relation_status: governanceRelationStatus,
       requester_cicd_membership_state: requesterCicdMembershipState,
       authorization_status: authorizationStatus,
@@ -197,7 +269,7 @@ async function resolveTenantCicdContextFromRegistry(input = {}, options = {}) {
     requested_tenant_name_normalized: requestedTenantNameNormalized,
     candidate_registry_record_count: recordsForTenantName.length,
     available_tenant_display_names: [...new Set(recordsForOrganization
-      .map((record) => String(record.tenant_display_name || '').split(/[\r\n]+/)[0].trim())
+      .map((record) => recordDisplayName(record).split(/[\r\n]+/)[0].trim())
       .filter(Boolean))],
     tenant_match_count: authorizedCandidates.length,
     tenant_resolution_status: tenantResolutionStatus,
@@ -214,7 +286,9 @@ async function resolveTenantCicdContextFromRegistry(input = {}, options = {}) {
 module.exports = {
   buildCicdContextMarker,
   buildTenantNamespacePrefix,
+  deriveCanonicalTenantTeams,
   deriveCicdAdminTeam,
+  readTopologyView,
   resolveNamespaceOwner,
   resolveTenantCicdContextFromRegistry,
 };

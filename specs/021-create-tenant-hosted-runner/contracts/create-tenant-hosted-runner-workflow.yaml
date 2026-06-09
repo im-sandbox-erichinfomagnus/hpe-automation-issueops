@@ -164,8 +164,8 @@ authorization:
   approver_model: designated currently authorized target-organization approver
   requester_tenant_requirements:
     - requester tenant name must resolve to exactly one registry record for the target organization
-    - derived TenantName_CICDAdmins team must exist in the target organization
-    - requester must be an active member (member or maintainer) of TenantName_CICDAdmins
+    - the tenant topology admin team (type "admin", <tenant-slug>-admin) must exist in the target organization
+    - requester must be an active member (member or maintainer) of the tenant topology admin team
   central_assignment_semantics: >-
     routing only; central assignment never authorizes hosted-runner mutation
   execution_identity:
@@ -186,17 +186,19 @@ tenant_resolution:
     - target organization
     - tenant_name_normalized
     - registry record
-    - live team existence for tenant team and derived CICDAdmins team
-    - live requester membership on derived CICDAdmins team
+    - live team existence for the tenant root team and the tenant topology admin team
+    - live requester membership on the tenant topology admin team
   resolution_algorithm: >-
     1. Load all .json records from tenant-registry/ whose organization matches
        the target organization.
     2. Filter to records whose tenant_display_name normalizes to the requested
        tenant name.
-    3. For each remaining record, derive the CI/CD admin team name as
-       TenantName_CICDAdmins (014 normalization rules), verify the tenant team
-       and CI/CD admin team exist, and verify the requester holds active
-       membership on the CI/CD admin team.
+    3. Read the canonical tenant topology (spec 022-enhance-tenant-topology):
+       resolve the tenant root team (structure type "root") and the tenant
+       admin team (structure type "admin", carrying the tenant-admin role).
+       Legacy flat records are projected to the same <tenant-slug>-root /
+       <tenant-slug>-admin / <tenant-slug>-repo-admin naming. Verify both teams
+       exist and the requester holds active membership on the admin team.
     4. Resolution outcome is 'resolved' (exactly 1 authorized), 'ambiguous'
        (>1 authorized), or 'no_match' (0 authorized).
   fail_closed_conditions:
@@ -205,8 +207,8 @@ tenant_resolution:
     - missing registry record
     - malformed registry record
     - missing tenant team in live state
-    - missing derived CICDAdmins team
-    - requester not an active member of derived CICDAdmins team
+    - missing tenant topology admin team
+    - requester not an active member of the tenant topology admin team
     - tenant_name_input field missing or empty
 
 context_marker:
@@ -239,7 +241,7 @@ validation_rules:
   - tenant_name_input is required; validation fails immediately if absent or empty.
   - Runner base name must derive deterministically into a valid hosted-runner name (1-64 chars, [A-Za-z0-9._-], tenant prefix).
   - Canonical tenant CI/CD context must resolve to exactly one authorized match from registry and live org state.
-  - Requester must be an active member of the derived TenantName_CICDAdmins team.
+  - Requester must be an active member of the tenant topology admin team (type "admin").
   - Runner image id, image source, and machine size are required inputs.
   - Explicit runner group names must carry the tenant prefix and resolve to an existing organization runner group.
   - When no runner group is provided, the organization default runner group must resolve.
@@ -251,8 +253,8 @@ reconciliation:
   current_state_reads:
     - organization visibility
     - authoritative tenant-registry record from main branch
-    - live tenant team and derived CICDAdmins team existence
-    - requester membership on derived CICDAdmins team
+    - live tenant root team and tenant topology admin team existence
+    - requester membership on the tenant topology admin team
     - organization hosted-runner listing (derived-name existence check)
     - organization runner-group listing (target group resolution)
   mutation_rule:
@@ -378,8 +380,8 @@ rate_limit_handling:
     - ambiguous tenant resolution
     - unauthorized approver
     - invalid runner-name derivation
-    - missing derived CICDAdmins team
-    - requester not an active CICDAdmins member
+    - missing tenant topology admin team
+    - requester not an active tenant topology admin team member
     - unresolved runner group
     - missing or insufficient credential for boundary-critical reads
     - boundary mismatch at execution time
