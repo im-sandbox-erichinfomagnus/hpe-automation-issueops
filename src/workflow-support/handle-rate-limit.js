@@ -133,6 +133,26 @@ function buildTenantRepoCreationRateLimitContext(error = {}, options = {}) {
   });
 }
 
+function buildTopologyRegistryReadRateLimitContext(error = {}, options = {}) {
+  return buildRateLimitContext(error, {
+    operation: options.operation || 'tenant_topology_registry_read',
+    attempt: options.attempt || 1,
+    maxRetries: options.maxRetries || 3,
+    baseDelayMs: options.baseDelayMs,
+    maxDelayMs: options.maxDelayMs,
+  });
+}
+
+function buildOwnedTopologyPersistenceRateLimitContext(error = {}, options = {}) {
+  return buildRateLimitContext(error, {
+    operation: options.operation || 'tenant_topology_owned_persistence',
+    attempt: options.attempt || 1,
+    maxRetries: options.maxRetries || 3,
+    baseDelayMs: options.baseDelayMs,
+    maxDelayMs: options.maxDelayMs,
+  });
+}
+
 async function executeWithBoundedRetry(operation, options = {}) {
   const maxRetries = options.maxRetries || 3;
   const sleep = options.sleep || ((delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)));
@@ -210,6 +230,8 @@ module.exports = {
   buildTenantRepoCreationRateLimitContext,
   buildTenantBootstrapRateLimitContext,
   buildRateLimitContext,
+  buildOwnedTopologyPersistenceRateLimitContext,
+  buildTopologyRegistryReadRateLimitContext,
   computeRetryDelayMs,
   createRetryPlan,
   executeWithBoundedRetry,

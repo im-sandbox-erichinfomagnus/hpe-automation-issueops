@@ -17,10 +17,13 @@ const { createGitHubTeamApi } = require('../workflow-support/github-team-api');
 const { createGitHubTeamRepoApi } = require('../workflow-support/github-team-repo-api');
 const { executeWithBoundedRetry } = require('../workflow-support/handle-rate-limit');
 const { buildTenantBootstrapRateLimitContext } = require('../workflow-support/handle-rate-limit');
+const { buildTopologyRegistryReadRateLimitContext } = require('../workflow-support/handle-rate-limit');
+const { buildOwnedTopologyPersistenceRateLimitContext } = require('../workflow-support/handle-rate-limit');
 const { persistTenantRegistryRecord } = require('../workflow-support/persist-tenant-registry-record');
 const { commitRegistryRecord } = require('../workflow-support/commit-registry-record');
 const { reconcileTenantCreation } = require('../workflow-support/reconcile-tenant-creation');
 const { reconcileTenantRepoCreation } = require('../workflow-support/reconcile-tenant-repo-creation');
+const { persistOwnedRepositoryEntry } = require('../workflow-support/reconcile-tenant-repo-creation');
 const { reconcileTeamHierarchy } = require('../workflow-support/reconcile-team-hierarchy');
 const { reconcileTeamCreation } = require('../workflow-support/reconcile-team-creation');
 const { reconcileTeamMembers } = require('../workflow-support/reconcile-team-members');
@@ -584,6 +587,7 @@ async function runApprovedExecution(options = {}) {
   const teamApi = options.teamApi || createGitHubTeamApi({ token: mutationDecision.tokenInfo.token });
   let repoAccessValidation = auditArtifact.validation;
   let tenantRepoValidation = auditArtifact.validation;
+  let tenantValidationRateLimitSnapshot = null;
   if (
     isTeamRepoAccess &&
     typeof api.getOrganization === 'function' &&
@@ -635,16 +639,59 @@ async function runApprovedExecution(options = {}) {
     typeof api.getRepository === 'function' &&
     typeof api.getTeamRepositoryPermission === 'function'
   ) {
+    const executeTenantReadWithRetry = async (operation, operationName) => {
+      const result = await executeWithBoundedRetry(operation, {
+        maxRetries: options.maxRetries || 2,
+        sleep: options.sleep,
+      });
+
+      tenantValidationRateLimitSnapshot = result.retry_plan && result.retry_plan.rate_limit_snapshot
+        ? result.retry_plan.rate_limit_snapshot
+        : tenantValidationRateLimitSnapshot;
+
+      if (!result.ok) {
+        const rateContext = buildTopologyRegistryReadRateLimitContext(result.error || {}, {
+          operation: operationName,
+          maxRetries: options.maxRetries || 2,
+        });
+        tenantValidationRateLimitSnapshot = rateContext.rate_limit_snapshot || tenantValidationRateLimitSnapshot;
+        throw Object.assign(result.error || new Error('Tenant topology read failed.'), {
+          rate_limit_snapshot: tenantValidationRateLimitSnapshot,
+        });
+      }
+
+      return result.value;
+    };
+
     tenantRepoValidation = await validateTenantRepoRequest(auditArtifact.request, {
-      getOrganization: ({ organization }) => teamApi.getOrganization({ organization }),
-      listTeams: ({ organization }) => teamApi.listOrgTeams({ organization }),
+      getOrganization: ({ organization }) => executeTenantReadWithRetry(
+        () => teamApi.getOrganization({ organization }),
+        'tenant_topology_get_organization'
+      ),
+      listTeams: ({ organization }) => executeTenantReadWithRetry(
+        () => teamApi.listOrgTeams({ organization }),
+        'tenant_topology_list_teams'
+      ),
       getMembershipForUser: ({ organization, teamSlug, username }) =>
-        teamApi.getMembershipForUser({ organization, teamSlug, username }),
+        executeTenantReadWithRetry(
+          () => teamApi.getMembershipForUser({ organization, teamSlug, username }),
+          'tenant_topology_membership_lookup'
+        ),
       getOrganizationMembership: ({ organization, username }) =>
-        teamApi.getOrganizationMembership({ organization, username }),
-      getRepository: ({ owner, repo }) => api.getRepository({ owner, repo }),
+        executeTenantReadWithRetry(
+          () => teamApi.getOrganizationMembership({ organization, username }),
+          'tenant_topology_org_membership_lookup'
+        ),
+      getRepository: ({ owner, repo }) => executeTenantReadWithRetry(
+        () => api.getRepository({ owner, repo }),
+        'tenant_topology_repository_lookup'
+      ),
       getTeamRepositoryPermission: ({ organization, teamSlug, owner, repo }) =>
-        api.getTeamRepositoryPermission({ organization, teamSlug, owner, repo }),
+        executeTenantReadWithRetry(
+          () => api.getTeamRepositoryPermission({ organization, teamSlug, owner, repo }),
+          'tenant_topology_permission_lookup'
+        ),
+      allowOwnedDuplicateWhenRepositoryExists: true,
       registryRef: env.TENANT_REGISTRY_REF || 'main',
       registryDirectory: env.TENANT_REGISTRY_DIR || 'tenant-registry',
     });
@@ -673,7 +720,7 @@ async function runApprovedExecution(options = {}) {
       username: auditArtifact.request.requester_login,
     });
   }
-  let latestRateLimitSnapshot = auditArtifact.reconciliation && auditArtifact.reconciliation.rate_limit_snapshot || null;
+  let latestRateLimitSnapshot = tenantValidationRateLimitSnapshot || auditArtifact.reconciliation && auditArtifact.reconciliation.rate_limit_snapshot || null;
   let currentMembers = [];
   if (!isTenantCreation && !isTeamCreation && !isTeamHierarchy && !isTeamRepoAccess && !isTeamRepoAccessRemoval && !isTenantRepoCreation) {
     const currentMembersResult = await executeWithBoundedRetry(
@@ -720,6 +767,7 @@ async function runApprovedExecution(options = {}) {
         organization_visible: tenantRepoValidation.organization_visible,
         repository_state: tenantRepoValidation.repository_state,
         current_repo_admin_permission: tenantRepoValidation.current_repo_admin_permission,
+        duplicate_owned_repository_conflict: tenantRepoValidation.validation_findings && tenantRepoValidation.validation_findings.duplicate_owned_repository_conflict,
         dry_run: auditArtifact.request.dry_run,
         boundary_revalidation_status: tenantRepoValidation && tenantRepoValidation.is_valid ? 'matched' : 'mismatched',
       })
@@ -1016,6 +1064,121 @@ async function runApprovedExecution(options = {}) {
             execution_result: 'failed',
             failure_reason: reconciliationPlan.blocked_reason || 'permission_rejected',
           });
+        }
+
+        const mutationFailed = executionResults.some((result) =>
+          result.repository_full_name === reconciliationPlan.repository_full_name &&
+          result.execution_result === 'failed'
+        );
+
+        if (!mutationFailed && reconciliationPlan.owned_topology_action === 'append_owned_entry') {
+          const persistOwnedTopology = typeof options.persistOwnedTopology === 'function'
+            ? options.persistOwnedTopology
+            : (persistenceInput) => persistOwnedRepositoryEntry({
+              request: persistenceInput.request,
+              tenantContext: persistenceInput.tenant_context,
+              ownedEntry: persistenceInput.owned_entry_candidate,
+              registryDirectory: persistenceInput.registry_directory,
+            });
+
+          if (typeof persistOwnedTopology === 'function') {
+            const persistenceResult = await executeWithBoundedRetry(
+              () => persistOwnedTopology({
+                request: tenantRepoValidation.request || auditArtifact.request,
+                tenant_context: tenantRepoValidation.canonical_tenant_context,
+                owned_entry_candidate: reconciliationPlan.owned_entry_candidate,
+                topology_mode: reconciliationPlan.topology_mode,
+                registry_directory: env.TENANT_REGISTRY_DIR || 'tenant-registry',
+                registry_ref: env.TENANT_REGISTRY_REF || 'main',
+              }),
+              {
+                maxRetries: options.maxRetries || 2,
+                sleep: options.sleep,
+              }
+            );
+
+            latestRateLimitSnapshot = persistenceResult.retry_plan && persistenceResult.retry_plan.rate_limit_snapshot
+              ? persistenceResult.retry_plan.rate_limit_snapshot
+              : latestRateLimitSnapshot;
+
+            if (persistenceResult.ok) {
+              reconciliationPlan.topology_persistence_result = persistenceResult.value || { status: 'appended' };
+
+              const appendedRegistryPath = reconciliationPlan.topology_persistence_result && reconciliationPlan.topology_persistence_result.registry_path
+                ? reconciliationPlan.topology_persistence_result.registry_path
+                : null;
+              const shouldCommitOwnedTopology =
+                options.commitOwnedTopology === true ||
+                (options.commitOwnedTopology !== false && String(env.GITHUB_ACTIONS || '').toLowerCase() === 'true');
+
+              if (
+                shouldCommitOwnedTopology &&
+                appendedRegistryPath &&
+                reconciliationPlan.topology_persistence_result.status === 'appended'
+              ) {
+                const commitResult = commitRegistryRecord({
+                  registryFilePath: appendedRegistryPath,
+                  tenantKey:
+                    auditArtifact.request.tenant_key ||
+                    tenantRepoValidation && tenantRepoValidation.canonical_tenant_context && (tenantRepoValidation.canonical_tenant_context.tenant_key || tenantRepoValidation.canonical_tenant_context.tenant_id) ||
+                    'tenant',
+                  issueNumber: auditArtifact.request.issue_number,
+                  repoRoot: process.cwd(),
+                }, {
+                  env,
+                });
+
+                reconciliationPlan.topology_persistence_result.commit_result = commitResult;
+
+                if (commitResult.status === 'failed') {
+                  reconciliationPlan.topology_persistence_result = {
+                    ...reconciliationPlan.topology_persistence_result,
+                    status: 'failed',
+                    failure_reason: 'owned_topology_commit_failed',
+                    detail: commitResult.message || 'Failed to commit owned topology changes to repository.',
+                  };
+
+                  executionResults.push({
+                    repository_full_name: reconciliationPlan.repository_full_name,
+                    execution_result: 'failed',
+                    failure_reason: 'owned_topology_commit_failed',
+                    execution_stage: 'topology_persistence',
+                  });
+                }
+              }
+            } else {
+              const persistenceRateContext = buildOwnedTopologyPersistenceRateLimitContext(
+                persistenceResult.error || {},
+                {
+                  operation: 'tenant_owned_topology_persistence',
+                  maxRetries: options.maxRetries || 2,
+                }
+              );
+              latestRateLimitSnapshot = persistenceRateContext.rate_limit_snapshot || latestRateLimitSnapshot;
+              reconciliationPlan.topology_persistence_result = {
+                status: 'failed',
+                failure_reason: classifyFailureReason(persistenceResult.error),
+                detail: persistenceResult.error && persistenceResult.error.message
+                  ? persistenceResult.error.message
+                  : 'owned_topology_persistence_failed',
+              };
+              executionResults.push({
+                repository_full_name: reconciliationPlan.repository_full_name,
+                execution_result: 'failed',
+                failure_reason: 'owned_topology_persistence_failed',
+                execution_stage: 'topology_persistence',
+              });
+            }
+          } else {
+            reconciliationPlan.topology_persistence_result = {
+              status: 'pending_implementation',
+              detail: 'owned topology persistence hook is not configured',
+            };
+          }
+        } else if (reconciliationPlan.owned_topology_action === 'noop_already_owned') {
+          reconciliationPlan.topology_persistence_result = { status: 'noop' };
+        } else if (reconciliationPlan.owned_topology_action === 'blocked_duplicate') {
+          reconciliationPlan.topology_persistence_result = { status: 'duplicate_blocked' };
         }
       }
     } else if (isTenantCreation || isTeamCreation) {
@@ -1571,6 +1734,7 @@ async function runApprovedExecution(options = {}) {
   const tenantRepoPermissionExecutionResult = isTenantRepoCreation
     ? [...executionResults].reverse().find((result) =>
         result.repository_full_name === reconciliationPlan.repository_full_name &&
+        result.execution_stage !== 'topology_persistence' &&
         (result.execution_result === 'granted' || result.execution_result === 'failed' || result.execution_result === 'noop')
       )
     : null;
@@ -1613,10 +1777,45 @@ async function runApprovedExecution(options = {}) {
           ? 'failed'
           : 'noop'
       : null,
+    owned_topology_action: isTenantRepoCreation
+      ? reconciliationPlan.owned_topology_action || 'not_applicable'
+      : null,
+    approved_context_marker: isTenantRepoCreation
+      ? auditArtifact.approval && auditArtifact.approval.approved_context_marker || null
+      : null,
+    latest_context_marker: isTenantRepoCreation
+      ? auditArtifact.approval && auditArtifact.approval.latest_context_marker || null
+      : null,
+    execution_context_marker: isTenantRepoCreation
+      ? tenantRepoValidation && tenantRepoValidation.canonical_tenant_context && tenantRepoValidation.canonical_tenant_context.context_marker || auditArtifact.request && auditArtifact.request.context_marker || null
+      : null,
+    topology_mode: isTenantRepoCreation
+      ? tenantRepoValidation && tenantRepoValidation.validation_findings && tenantRepoValidation.validation_findings.topology_mode || null
+      : null,
+    tenant_id: isTenantRepoCreation
+      ? tenantRepoValidation && tenantRepoValidation.canonical_tenant_context && (tenantRepoValidation.canonical_tenant_context.tenant_id || tenantRepoValidation.canonical_tenant_context.tenant_key) || null
+      : null,
+    tenant_team_slug: isTenantRepoCreation
+      ? tenantRepoValidation && tenantRepoValidation.canonical_tenant_context && tenantRepoValidation.canonical_tenant_context.tenant_team_slug || null
+      : null,
+    repo_admin_team_slug: isTenantRepoCreation
+      ? tenantRepoValidation && tenantRepoValidation.canonical_tenant_context && tenantRepoValidation.canonical_tenant_context.repo_admin_team_slug || null
+      : null,
+    topology_persistence_result: isTenantRepoCreation
+      ? reconciliationPlan.topology_persistence_result || null
+      : null,
     audit_persistence_result: isTenantRepoCreation ? 'pending' : null,
     artifact_path: artifactPath,
     rate_limit_snapshot: latestRateLimitSnapshot,
   });
+  if (
+    isTenantRepoCreation &&
+    executionOutcome.topology_persistence_result &&
+    executionOutcome.topology_persistence_result.status === 'failed'
+  ) {
+    executionOutcome.rollback_status = 'manual_remediation_required';
+    executionOutcome.summary = `${executionOutcome.summary} Topology owned-entry persistence failed after repository mutation; compensating action or manual remediation is required.`;
+  }
   const requestStatus = deriveApprovedExecutionTerminalState(executionOutcome, {
     operation,
     intakeMode: auditArtifact.request && auditArtifact.request.intake_mode,

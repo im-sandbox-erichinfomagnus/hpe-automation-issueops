@@ -2,13 +2,14 @@
 
 const ALLOWED_REPOSITORY_VISIBILITIES = ['private', 'internal', 'public'];
 
-function normalizeRepositoryVisibility(value) {
+function normalizeRepositoryVisibility(value, options = {}) {
+  const allowDefault = options.allowDefault !== false;
   // issue-ops/parser wraps dropdown values in brackets (e.g. "[internal]"); strip them.
   const normalized = String(value || '').trim().toLowerCase().replace(/^\[|\]$/g, '');
   if (!normalized) {
     return {
-      visibility: 'private',
-      source: 'default',
+      visibility: allowDefault ? 'private' : '',
+      source: allowDefault ? 'default' : 'not_provided',
     };
   }
 

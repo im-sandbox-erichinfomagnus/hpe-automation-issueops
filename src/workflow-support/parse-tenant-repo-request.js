@@ -86,7 +86,10 @@ function parseTenantRepoRequest(input = {}) {
     true
   );
   const repositoryVisibilityInput = readField(parsed, ['repository_visibility', 'parsed_repository_visibility']) || input.repositoryVisibility || input.repository_visibility;
-  const { visibility: repositoryVisibility, source: repositoryVisibilitySource } = normalizeRepositoryVisibility(repositoryVisibilityInput);
+  const { visibility: repositoryVisibility, source: repositoryVisibilitySource } = normalizeRepositoryVisibility(
+    repositoryVisibilityInput,
+    { allowDefault: false }
+  );
   const justification = normalizeText(
     readField(parsed, ['justification', 'parsed_justification', 'business_justification']) || input.justification
   );

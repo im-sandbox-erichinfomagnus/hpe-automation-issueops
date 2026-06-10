@@ -74,6 +74,46 @@ function buildRemediationInstructions(summary) {
   ];
 }
 
+function deriveOwnedTopologyAction(input = {}) {
+  const explicit = input.owned_topology_action || input.ownedTopologyAction;
+  if (explicit) {
+    return explicit;
+  }
+
+  const result = input.topology_persistence_result || input.topologyPersistenceResult || null;
+  const status = result && result.status ? String(result.status) : '';
+  if (status === 'noop') {
+    return 'noop_already_owned';
+  }
+  if (status === 'appended') {
+    return 'append_owned_entry';
+  }
+  if (status === 'duplicate_blocked') {
+    return 'blocked_duplicate';
+  }
+
+  return 'not_applicable';
+}
+
+function deriveContextBindingStatus(input = {}) {
+  const approvedContextMarker = input.approved_context_marker || input.approvedContextMarker || null;
+  const latestContextMarker = input.latest_context_marker || input.latestContextMarker || null;
+  const executionContextMarker = input.execution_context_marker || input.executionContextMarker || latestContextMarker || null;
+
+  if (!approvedContextMarker || !latestContextMarker || !executionContextMarker) {
+    return 'unknown';
+  }
+
+  if (
+    String(approvedContextMarker) === String(latestContextMarker) &&
+    String(latestContextMarker) === String(executionContextMarker)
+  ) {
+    return 'matched';
+  }
+
+  return 'mismatched';
+}
+
 function buildExecutionOutcome(input = {}) {
   const executionResults = input.executionResults || input.execution_results || [];
   const runContext = input.runContext || input.run_context || {};
@@ -83,6 +123,8 @@ function buildExecutionOutcome(input = {}) {
   });
   const remediationInstructions = buildRemediationInstructions(summary);
   const rollbackStatus = deriveRollbackStatus(summary);
+  const ownedTopologyAction = deriveOwnedTopologyAction(input);
+  const contextBindingStatus = deriveContextBindingStatus(input);
   const processedLabel = summary.operation_label === 'membership'
     ? 'member(s)'
     : `${summary.operation_label}(ies)`;
@@ -118,9 +160,19 @@ function buildExecutionOutcome(input = {}) {
     noop_teams: summary.noop,
     failed_teams: summary.failed,
     rollback_status: rollbackStatus,
+    owned_topology_action: ownedTopologyAction,
+    approved_context_marker: input.approved_context_marker || input.approvedContextMarker || null,
+    latest_context_marker: input.latest_context_marker || input.latestContextMarker || null,
+    execution_context_marker: input.execution_context_marker || input.executionContextMarker || null,
+    context_binding_status: contextBindingStatus,
+    topology_mode: input.topology_mode || input.topologyMode || null,
+    tenant_id: input.tenant_id || input.tenantId || null,
+    tenant_team_slug: input.tenant_team_slug || input.tenantTeamSlug || null,
+    repo_admin_team_slug: input.repo_admin_team_slug || input.repoAdminTeamSlug || null,
     repository_creation_result: input.repository_creation_result || null,
     repo_admin_grant_result: input.repo_admin_grant_result || null,
     audit_persistence_result: input.audit_persistence_result || null,
+    topology_persistence_result: input.topology_persistence_result || input.topologyPersistenceResult || null,
     failed_subset: summary.failed,
     rejected_subset: summary.rejected,
     mutated_repositories: summary.mutated.map((entry) => entry.repository_full_name).filter(Boolean),
@@ -146,6 +198,8 @@ function buildExecutionOutcome(input = {}) {
 module.exports = {
   buildExecutionOutcome,
   buildRemediationInstructions,
+  deriveContextBindingStatus,
+  deriveOwnedTopologyAction,
   deriveRollbackStatus,
   normalizeExecutionResult,
   summarizeResults,
