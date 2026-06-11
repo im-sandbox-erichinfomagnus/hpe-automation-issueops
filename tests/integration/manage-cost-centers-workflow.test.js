@@ -23,6 +23,10 @@ test('manage-cost-centers workflow wires validation, approval, and execution scr
   assert.match(workflow, /run-manage-cost-centers-execution\.js/);
   assert.match(workflow, /PARSED_COST_CENTERS/);
   assert.match(workflow, /steps\.approval_gate\.outputs\['approval-status'\]\s*==\s*'approved'/);
+  assert.match(workflow, /AUDIT_ARTIFACT_PATH:\s+artifacts\/manage-cost-centers-validation-/);
+  assert.match(workflow, /name:\s+Post audit summary comment/);
+  assert.match(workflow, /github\.rest\.issues\.createComment/);
+  assert.match(workflow, /steps\.request_scope\.outputs\.matches-request\s*==\s*'true'/);
 });
 
 function buildState() {

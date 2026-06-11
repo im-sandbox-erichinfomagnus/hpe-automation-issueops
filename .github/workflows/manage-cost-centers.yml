@@ -38,9 +38,10 @@ jobs:
         shell: bash
     env:
       ISSUE_NUMBER: ${{ github.event.issue.number || inputs.issue-number || '' }}
+      AUDIT_ARTIFACT_PATH: artifacts/manage-cost-centers-validation-${{ github.event.issue.number || inputs.issue-number || 'manual' }}.json
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -87,11 +88,30 @@ jobs:
           body: ${{ steps.issue_context.outputs.issue_body }}
           issue-form-template: manage-cost-centers.yml
 
+      - name: Check request applicability
+        id: request_scope
+        env:
+          PARSED_ENTERPRISE: ${{ steps.parse_request.outputs.parsed_enterprise }}
+          PARSED_DESIGNATED_APPROVER: ${{ steps.parse_request.outputs.parsed_designated_approver }}
+        run: |
+          set -euo pipefail
+
+          matches_request=false
+          if [ -n "${PARSED_ENTERPRISE:-}" ] && [ -n "${PARSED_DESIGNATED_APPROVER:-}" ]; then
+            matches_request=true
+          fi
+
+          echo "matches-request=$matches_request" >> "$GITHUB_OUTPUT"
+
+      - name: Skip unrelated issue form
+        if: ${{ steps.request_scope.outputs.matches-request != 'true' }}
+        run: |
+          echo 'This issue does not match the manage-cost-centers form. Exiting without validation.' >> "$GITHUB_STEP_SUMMARY"
+
       - name: Run request validation
         id: request_validation
-        continue-on-error: true
+        if: ${{ steps.request_scope.outputs.matches-request == 'true' }}
         env:
-          ISSUE_NUMBER: ${{ steps.issue_context.outputs.issue_number }}
           REQUESTER_LOGIN: ${{ steps.issue_context.outputs.requester_login }}
           PARSED_ENTERPRISE: ${{ steps.parse_request.outputs.parsed_enterprise }}
           PARSED_DESIGNATED_APPROVER: ${{ steps.parse_request.outputs.parsed_designated_approver }}
@@ -104,23 +124,20 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p artifacts
-          artifact_path="artifacts/manage-cost-centers-validation-${ISSUE_NUMBER:-manual}.json"
-          echo "AUDIT_ARTIFACT_PATH=$artifact_path" >> "$GITHUB_ENV"
-          AUDIT_ARTIFACT_PATH="$artifact_path" node src/scripts/run-manage-cost-centers-validation.js
-          echo "artifact_path=$artifact_path" >> "$GITHUB_OUTPUT"
+          node src/scripts/run-manage-cost-centers-validation.js
 
       - name: Run approval gate
         id: approval_gate
-        continue-on-error: true
+        if: ${{ always() && steps.request_scope.outputs.matches-request == 'true' && steps.request_validation.outcome != 'skipped' }}
         env:
-          AUDIT_ARTIFACT_PATH: ${{ steps.request_validation.outputs['audit-artifact-path'] || steps.request_validation.outputs.artifact_path }}
+          ISSUEOPS_GITHUB_TOKEN: ${{ secrets.ISSUEOPS_GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           node src/scripts/run-manage-cost-centers-approval.js
 
       - name: Ensure terminal state labels exist
-        if: ${{ steps.approval_gate.outputs['approval-status'] == 'approved' }}
+        if: ${{ always() && steps.approval_gate.outputs['approval-status'] == 'approved' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -136,10 +153,8 @@ jobs:
 
       - name: Run approved execution
         id: approved_execution
-        if: ${{ steps.approval_gate.outputs['approval-status'] == 'approved' }}
-        continue-on-error: true
+        if: ${{ always() && steps.request_scope.outputs.matches-request == 'true' && steps.approval_gate.outputs['approval-status'] == 'approved' }}
         env:
-          AUDIT_ARTIFACT_PATH: ${{ steps.approval_gate.outputs['audit-artifact-path'] || steps.request_validation.outputs['audit-artifact-path'] || steps.request_validation.outputs.artifact_path }}
           ISSUEOPS_GITHUB_TOKEN: ${{ secrets.ISSUEOPS_GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ github.token }}
           AUDIT_ARTIFACT_RETENTION_DAYS: 30
@@ -147,22 +162,21 @@ jobs:
           set -euo pipefail
           node src/scripts/run-manage-cost-centers-execution.js
 
-      - name: Post plan comment on the issue
-        if: ${{ always() && steps.issue_context.outputs.issue_number != '' && steps.request_validation.outcome != 'skipped' }}
+      - name: Post audit summary comment
+        if: ${{ always() && steps.request_scope.outputs.matches-request == 'true' && steps.request_validation.outcome != 'skipped' }}
         uses: actions/github-script@v7
-        env:
-          AUDIT_ARTIFACT_PATH: ${{ steps.approved_execution.outputs['audit-artifact-path'] || steps.approval_gate.outputs['audit-artifact-path'] || steps.request_validation.outputs['audit-artifact-path'] || steps.request_validation.outputs.artifact_path }}
-          ISSUE_NUMBER: ${{ steps.issue_context.outputs.issue_number }}
         with:
           script: |
             const fs = require('fs');
             const artifactPath = process.env.AUDIT_ARTIFACT_PATH;
-            if (!artifactPath || !fs.existsSync(artifactPath)) {
+            if (!fs.existsSync(artifactPath)) {
               return;
             }
             const { formatCostCenterSummary } = require('./src/scripts/emit-manage-cost-centers-summary');
             const artifact = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
-            const body = formatCostCenterSummary(artifact);
+            const body = artifact.audit_summary_markdown
+              || formatCostCenterSummary(artifact)
+              || 'Manage cost centers workflow ran but produced no summary.';
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -171,10 +185,10 @@ jobs:
             });
 
       - name: Upload audit artifact
-        if: always()
+        if: ${{ always() && steps.request_scope.outputs.matches-request == 'true' && steps.request_validation.outcome != 'skipped' }}
         uses: actions/upload-artifact@v7
         with:
-          name: manage-cost-centers-execution-${{ steps.issue_context.outputs.issue_number || 'manual' }}-${{ github.run_attempt }}
-          path: ${{ steps.approved_execution.outputs['audit-artifact-path'] || steps.approval_gate.outputs['audit-artifact-path'] || steps.request_validation.outputs['audit-artifact-path'] || steps.request_validation.outputs.artifact_path }}
-          if-no-files-found: warn
+          name: manage-cost-centers-execution-${{ env.ISSUE_NUMBER || github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.AUDIT_ARTIFACT_PATH }}
+          if-no-files-found: error
           retention-days: 30
