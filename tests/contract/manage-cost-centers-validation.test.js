@@ -183,3 +183,17 @@ test('without live access the plan is unverified and approval-ready (fail-soft)'
   assert.equal(result.requested_changes[0].validation_status, 'unverified');
   assert.equal(result.warnings.some((w) => /Could not list live cost centers/i.test(w)), true);
 });
+
+test('fail-soft when the live listing errors (under-scoped token) yields an unverified plan', async () => {
+  const throwingOptions = {
+    listCostCenters: async () => { const e = new Error('Forbidden'); e.status = 403; throw e; },
+  };
+  const result = await validateCostCenterRequest(
+    buildRequest('cost_center,action\nPlatform Engineering,create'),
+    throwingOptions
+  );
+  assert.equal(result.is_valid, true, JSON.stringify(result.errors));
+  assert.equal(result.live_access, false);
+  assert.equal(result.requested_changes[0].validation_status, 'unverified');
+  assert.equal(result.warnings.some((w) => /HTTP 403/.test(w)), true, JSON.stringify(result.warnings));
+});
