@@ -23,6 +23,7 @@ function buildCostCenterArtifact(input = {}) {
       dry_run: request.dry_run,
       business_justification: request.business_justification,
       intake_mode: request.intake_mode || 'manual',
+      attachment_provenance: request.attachment_provenance || null,
       request_status: request.request_status,
       csv_header: request.csv_header || [],
       csv_schema_status: request.csv_schema_status || null,

@@ -7,6 +7,9 @@ const { parseCostCenterRequest } = require('../workflow-support/parse-cost-cente
 const { validateCostCenterRequest } = require('../workflow-support/validate-cost-center-request');
 const { reconcileCostCenterChanges } = require('../workflow-support/reconcile-cost-center-changes');
 const { createGitHubCostCenterApi } = require('../workflow-support/github-cost-center-api');
+const { createGitHubTeamApi } = require('../workflow-support/github-team-api');
+const { resolveCsvAttachmentComment } = require('../workflow-support/resolve-csv-attachment-comment');
+const { downloadCsvAttachment } = require('../workflow-support/download-csv-attachment');
 const { loadWorkflowToken } = require('../workflow-support/load-workflow-token');
 const { executeWithBoundedRetry } = require('../workflow-support/handle-rate-limit');
 const { buildCostCenterArtifact, toCostCenterArtifactJson } = require('../workflow-support/build-cost-center-artifact');
@@ -37,8 +40,9 @@ async function runCostCenterValidation(options = {}) {
       path.join('artifacts', `manage-cost-centers-validation-${env.ISSUE_NUMBER || 'manual'}.json`)
   );
 
-  const request = parseCostCenterRequest({
-    parsedRequest: readParsedRequestFromEnv(env),
+  const parsedEnv = readParsedRequestFromEnv(env);
+  let request = parseCostCenterRequest({
+    parsedRequest: parsedEnv,
     issue: { number: env.ISSUE_NUMBER, user: { login: env.REQUESTER_LOGIN || '' } },
     repository: env.GITHUB_REPOSITORY || '',
     runContext: {
@@ -49,6 +53,65 @@ async function runCostCenterValidation(options = {}) {
   });
 
   const tokenInfo = loadWorkflowToken({ env, required: false });
+
+  // When the inline spreadsheet field is left blank (shadow text only), fall back to
+  // a CSV file attached by the issue author in a comment, the same intake mode the
+  // team operations use.
+  let attachmentProvenance = null;
+  let waitingForAttachment = false;
+  let attachmentRejection = null;
+  if (request.csv_schema_status === 'empty') {
+    if (request.issue_number != null && tokenInfo.token) {
+      const commentsApi = options.commentsApi || createGitHubTeamApi({ token: tokenInfo.token });
+      let comments = [];
+      try {
+        comments = await commentsApi.listIssueComments({
+          repository: request.repository,
+          issueNumber: request.issue_number,
+        });
+      } catch (error) {
+        comments = [];
+      }
+      const resolution = resolveCsvAttachmentComment({
+        issueComments: comments,
+        requesterLogin: request.requester_login,
+      });
+      if (resolution.resolution_status === 'attachment_candidate_selected') {
+        const candidate = resolution.candidate;
+        try {
+          const download = options.downloadAttachment
+            ? await options.downloadAttachment({ attachmentUrl: candidate.attachment_url, token: tokenInfo.token })
+            : await downloadCsvAttachment({ attachmentUrl: candidate.attachment_url, token: tokenInfo.token, fetchImpl: options.fetchImpl, sleep: options.sleep });
+          request = parseCostCenterRequest({
+            parsedRequest: { ...parsedEnv, cost_centers: download.text },
+            issue: { number: env.ISSUE_NUMBER, user: { login: env.REQUESTER_LOGIN || '' } },
+            repository: env.GITHUB_REPOSITORY || '',
+            runContext: { run_id: env.GITHUB_RUN_ID, run_attempt: env.GITHUB_RUN_ATTEMPT, issue_number: env.ISSUE_NUMBER },
+          });
+          request.intake_mode = 'csv_attachment';
+          attachmentProvenance = {
+            comment_id: candidate.comment_id,
+            attachment_url: candidate.attachment_url,
+            filename: candidate.filename,
+            byte_size: download.byte_size,
+          };
+        } catch (error) {
+          waitingForAttachment = true;
+          attachmentRejection = { reason: 'download_failed', detail: error.message };
+        }
+      } else if (resolution.resolution_status === 'attachment_rejected') {
+        waitingForAttachment = true;
+        attachmentRejection = {
+          reason: (resolution.candidate && resolution.candidate.rejection_reason) || 'attachment_rejected',
+          detail: 'The attached file was not accepted (must be a single .csv file uploaded by the issue author).',
+        };
+      } else {
+        waitingForAttachment = true; // waiting_for_attachment
+      }
+    } else {
+      waitingForAttachment = true;
+    }
+  }
   let validationOptions = {};
   if (tokenInfo.token) {
     const api = options.costCenterApi || createGitHubCostCenterApi({ token: tokenInfo.token });
@@ -79,19 +142,41 @@ async function runCostCenterValidation(options = {}) {
   }
 
   let validation;
-  try {
-    validation = await validateCostCenterRequest(request, validationOptions);
-  } catch (error) {
+  if (waitingForAttachment) {
+    const note = attachmentRejection
+      ? `Attached file was not accepted (${attachmentRejection.reason}). Attach a single .csv file in a new comment, as the issue author.`
+      : 'No spreadsheet was provided inline. Attach a .csv file in a comment on this issue (as the issue author) and the plan will be generated.';
+    request.intake_mode = 'csv_attachment';
+    request.request_status = 'waiting_for_attachment';
     validation = {
       is_valid: false,
-      request_status: 'validation_failed',
-      errors: [`Validation could not complete: ${error.message}`],
-      warnings: [],
-      live_access: false,
-      requested_changes: request.requested_changes || [],
+      request_status: 'waiting_for_attachment',
+      errors: [],
+      warnings: [note],
+      live_access: null,
+      requested_changes: [],
       counts: { create: 0, rename: 0, delete: 0, noop: 0, rejected: 0 },
-      request: { ...request, request_status: 'validation_failed' },
+      request: { ...request, request_status: 'waiting_for_attachment' },
     };
+  } else {
+    try {
+      validation = await validateCostCenterRequest(request, validationOptions);
+    } catch (error) {
+      validation = {
+        is_valid: false,
+        request_status: 'validation_failed',
+        errors: [`Validation could not complete: ${error.message}`],
+        warnings: [],
+        live_access: false,
+        requested_changes: request.requested_changes || [],
+        counts: { create: 0, rename: 0, delete: 0, noop: 0, rejected: 0 },
+        request: { ...request, request_status: 'validation_failed' },
+      };
+    }
+    if (attachmentProvenance) {
+      validation.request = { ...(validation.request || request), intake_mode: 'csv_attachment', attachment_provenance: attachmentProvenance };
+      validation.warnings = [...(validation.warnings || []), `Spreadsheet read from attached file ${attachmentProvenance.filename || 'comment.csv'} (${attachmentProvenance.byte_size} bytes).`];
+    }
   }
 
   const reconciliation = reconcileCostCenterChanges({

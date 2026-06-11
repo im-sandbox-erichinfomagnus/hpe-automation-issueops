@@ -182,3 +182,91 @@ test('policy guard blocks execution without a PAT-backed token', () => {
   });
   assert.equal(ok.allowed, true);
 });
+
+test('blank inline field uses a CSV attached by the issue author in a comment', async () => {
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-attach-'));
+  const artifactPath = path.join(ws, 'audit.json');
+  const state = buildState();
+  const commentsApi = {
+    listIssueComments: async () => ([
+      { id: 9, created_at: '2026-06-11T09:00:00Z', user: { login: 'requester' },
+        body: 'sheet attached [centers.csv](https://github.com/user-attachments/files/123/centers.csv)' },
+    ]),
+    addIssueLabels: async () => ([]),
+  };
+  const downloadAttachment = async () => ({ text: 'cost_center,action\nPlatform Engineering,create\nRetired Sandbox,delete', byte_size: 60 });
+
+  await runCostCenterValidation({
+    env: baseEnv(artifactPath, '', { PARSED_DRY_RUN: 'true', GITHUB_REPOSITORY: 'o/r' }),
+    costCenterApi: costCenterApi(state),
+    commentsApi,
+    downloadAttachment,
+    setProcessExitCode: false,
+  });
+  const artifact = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
+  assert.equal(artifact.request.intake_mode, 'csv_attachment');
+  assert.equal(artifact.request.attachment_provenance.filename, 'centers.csv');
+  assert.equal(artifact.validation.is_valid, true, JSON.stringify(artifact.validation.errors));
+  assert.equal(artifact.request.request_status, 'awaiting_approval');
+  assert.equal(artifact.request.requested_changes.length, 2);
+});
+
+test('blank inline field with no attachment waits for one', async () => {
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-wait-'));
+  const artifactPath = path.join(ws, 'audit.json');
+  const commentsApi = { listIssueComments: async () => ([]), addIssueLabels: async () => ([]) };
+
+  await runCostCenterValidation({
+    env: baseEnv(artifactPath, '', { PARSED_DRY_RUN: 'true', GITHUB_REPOSITORY: 'o/r' }),
+    costCenterApi: costCenterApi(buildState()),
+    commentsApi,
+    setProcessExitCode: false,
+  });
+  const artifact = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
+  assert.equal(artifact.request.request_status, 'waiting_for_attachment');
+  assert.equal(artifact.validation.is_valid, false);
+  assert.match(artifact.validation.warnings.join(' '), /attach a .csv file/i);
+});
+
+test('a non-requester attachment is not accepted (still waiting)', async () => {
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-nonreq-'));
+  const artifactPath = path.join(ws, 'audit.json');
+  const commentsApi = {
+    listIssueComments: async () => ([
+      { id: 9, created_at: '2026-06-11T09:00:00Z', user: { login: 'someone-else' },
+        body: 'sheet [centers.csv](https://github.com/user-attachments/files/123/centers.csv)' },
+    ]),
+    addIssueLabels: async () => ([]),
+  };
+  await runCostCenterValidation({
+    env: baseEnv(artifactPath, '', { PARSED_DRY_RUN: 'true', GITHUB_REPOSITORY: 'o/r' }),
+    costCenterApi: costCenterApi(buildState()),
+    commentsApi,
+    downloadAttachment: async () => { throw new Error('download must not run for a non-requester attachment'); },
+    setProcessExitCode: false,
+  });
+  const artifact = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
+  assert.equal(artifact.request.request_status, 'waiting_for_attachment');
+});
+
+test('inline CSV present is used and comment attachments are ignored', async () => {
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-inline-wins-'));
+  const artifactPath = path.join(ws, 'audit.json');
+  const commentsApi = {
+    listIssueComments: async () => ([
+      { id: 9, created_at: '2026-06-11T09:00:00Z', user: { login: 'requester' },
+        body: '[x.csv](https://github.com/user-attachments/files/9/x.csv)' },
+    ]),
+    addIssueLabels: async () => ([]),
+  };
+  await runCostCenterValidation({
+    env: baseEnv(artifactPath, 'cost_center,action\nInline Only,create', { PARSED_DRY_RUN: 'true', GITHUB_REPOSITORY: 'o/r' }),
+    costCenterApi: costCenterApi(buildState()),
+    commentsApi,
+    downloadAttachment: async () => { throw new Error('download must not run when inline CSV is present'); },
+    setProcessExitCode: false,
+  });
+  const artifact = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
+  assert.equal(artifact.request.intake_mode, 'manual');
+  assert.equal(artifact.request.requested_changes.length, 1);
+});

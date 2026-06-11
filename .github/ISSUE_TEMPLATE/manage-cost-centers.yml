@@ -28,19 +28,20 @@ body:
     attributes:
       label: Cost centers spreadsheet (CSV)
       description: >-
-        One row per change. Header must include at least cost_center and action.
-        Columns: cost_center, action (create/rename/delete), new_name (rename only),
-        cost_center_id (optional, to disambiguate same-named cost centers),
-        force (optional, set to true to delete a cost center that still has resources).
-        A row only needs the columns its action uses.
-      value: |
+        Paste the CSV here, or leave this blank and attach a .csv file in a comment
+        on the issue (the comment must be from you, the issue author). Header must
+        include at least cost_center and action. Columns: cost_center, action
+        (create/rename/delete), new_name (rename only), cost_center_id (optional, to
+        disambiguate same-named cost centers), force (optional, set true to delete a
+        cost center that still has resources). A row only needs the columns its
+        action uses.
+      placeholder: |
         cost_center,action,new_name,cost_center_id,force
         Platform Engineering,create,,,
         AI Model Routing,rename,AI Platform Routing,,
         Retired Sandbox,delete,,,false
-      render: csv
     validations:
-      required: true
+      required: false
 
   - type: dropdown
     id: dry_run

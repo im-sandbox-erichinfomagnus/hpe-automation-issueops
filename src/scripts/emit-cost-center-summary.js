@@ -70,13 +70,16 @@ function formatCostCenterSummary(artifact = {}) {
     }
   }
 
+  const isWaiting = request.request_status === 'waiting_for_attachment';
   lines.push('', execution && execution.summary
     ? execution.summary
-    : validation.is_valid
-      ? approval.approval_status === 'approved'
-        ? 'Request is approved and eligible for cost-center execution.'
-        : 'Request is validated and ready for approval. No cost-center mutation was attempted.'
-      : 'Request validation failed. No cost-center mutation was attempted.');
+    : isWaiting
+      ? 'Waiting for a CSV attachment. Attach a single .csv file in a comment on this issue, as the issue author, and the plan will be generated.'
+      : validation.is_valid
+        ? approval.approval_status === 'approved'
+          ? 'Request is approved and eligible for cost-center execution.'
+          : 'Request is validated and ready for approval. No cost-center mutation was attempted.'
+        : 'Request validation failed. No cost-center mutation was attempted.');
 
   return lines.join('\n');
 }

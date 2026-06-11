@@ -42,19 +42,10 @@ async function validateCostCenterRequest(input = {}, options = {}) {
     errors.push('The spreadsheet has a header but no data rows.');
   }
 
-  let liveAccess = typeof options.listCostCenters === 'function';
+  const liveAccess = typeof options.listCostCenters === 'function';
   let activeCostCenters = [];
   if (liveAccess) {
-    try {
-      activeCostCenters = await options.listCostCenters({ enterprise: request.enterprise, state: 'active' });
-    } catch (error) {
-      // Fail soft: a missing or under-scoped token (e.g. the Actions GITHUB_TOKEN,
-      // which cannot read enterprise billing) degrades to a spreadsheet-only plan
-      // rather than failing the whole request.
-      liveAccess = false;
-      const reason = error && error.status ? `HTTP ${error.status}` : (error && error.message) || 'access error';
-      warnings.push(`Could not list live cost centers (${reason}); the plan below is computed from the spreadsheet and will be verified at execution.`);
-    }
+    activeCostCenters = await options.listCostCenters({ enterprise: request.enterprise, state: 'active' });
   } else {
     warnings.push('Could not list live cost centers (no enterprise billing access); the plan below is computed from the spreadsheet and will be verified at execution.');
   }
