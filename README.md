@@ -130,6 +130,9 @@ This list should be updated as new IssueOps workflows are added.
 	enterprise cost centers and adding or removing user assignments from a
 	spreadsheet, with dry-run by default. See
 	[`docs/cost-center-reallocation.md`](docs/cost-center-reallocation.md).
+- `manage-cost-centers`: Request, validate, approve, and reconcile bulk
+	create/rename/delete of GitHub Enterprise billing cost centers from a CSV
+	spreadsheet, with delete blocked on non-empty cost centers unless forced.
 
 Detailed design and operator guidance for the current operation live in:
 
