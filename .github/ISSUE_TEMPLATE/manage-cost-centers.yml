@@ -1,0 +1,64 @@
+name: Manage cost centers
+description: Bulk create, rename, and delete GitHub Enterprise cost centers from a spreadsheet.
+title: "[manage-cost-centers] <enterprise>: <summary>"
+labels:
+  - issueops
+  - manage-cost-centers
+body:
+  - type: input
+    id: enterprise
+    attributes:
+      label: Enterprise slug
+      description: The GitHub Enterprise account slug that owns the cost centers.
+      placeholder: octo-enterprise
+    validations:
+      required: true
+
+  - type: input
+    id: designated_approver
+    attributes:
+      label: Designated approver
+      description: GitHub login of the enterprise owner or billing manager who will comment to approve. They must be the one who comments `approved`.
+      placeholder: enterprise-billing-manager
+    validations:
+      required: true
+
+  - type: textarea
+    id: cost_centers
+    attributes:
+      label: Cost centers spreadsheet (CSV)
+      description: >-
+        One row per change. Header must include at least cost_center and action.
+        Columns: cost_center, action (create/rename/delete), new_name (rename only),
+        cost_center_id (optional, to disambiguate same-named cost centers),
+        force (optional, set to true to delete a cost center that still has resources).
+        A row only needs the columns its action uses.
+      value: |
+        cost_center,action,new_name,cost_center_id,force
+        Platform Engineering,create,,,
+        AI Model Routing,rename,AI Platform Routing,,
+        Retired Sandbox,delete,,,false
+      render: csv
+    validations:
+      required: true
+
+  - type: dropdown
+    id: dry_run
+    attributes:
+      label: Dry-run mode
+      description: Dry-run validates and posts the full plan without creating, renaming, or deleting anything.
+      options:
+        - "true"
+        - "false"
+      default: 0
+    validations:
+      required: true
+
+  - type: textarea
+    id: justification
+    attributes:
+      label: Business justification
+      description: Why these cost-center changes are needed.
+      placeholder: Quarterly cost center cleanup for the platform business unit.
+    validations:
+      required: true

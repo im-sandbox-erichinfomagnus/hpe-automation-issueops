@@ -3,38 +3,29 @@
 const fs = require('fs');
 const path = require('path');
 
-const { assertCostCenterAllowed } = require('../actions/cost-center-policy');
-const { buildCostCenterArtifact, toCostCenterArtifactJson } = require('../workflow-support/cost-center-artifact');
-const { buildCostCenterOutcome } = require('../workflow-support/build-cost-center-outcome');
+const { validateCostCenterRequest } = require('../workflow-support/validate-cost-center-request');
+const { reconcileCostCenterChanges } = require('../workflow-support/reconcile-cost-center-changes');
 const { createGitHubCostCenterApi } = require('../workflow-support/github-cost-center-api');
+const { createGitHubTeamApi } = require('../workflow-support/github-team-api');
+const { assertCostCenterMutationAllowed } = require('../actions/cost-center-policy');
+const { loadWorkflowToken } = require('../workflow-support/load-workflow-token');
 const { executeWithBoundedRetry } = require('../workflow-support/handle-rate-limit');
-const { formatCostCenterSummary } = require('../workflow-support/format-cost-center-summary');
-const { reconcileCostCenter } = require('../workflow-support/reconcile-cost-center');
-
-function readAuditArtifact(filePath) {
-  return JSON.parse(fs.readFileSync(path.resolve(filePath), 'utf8'));
-}
+const { buildCostCenterArtifact, toCostCenterArtifactJson } = require('../workflow-support/build-cost-center-artifact');
+const { emitCostCenterSummary } = require('./emit-cost-center-summary');
 
 function writeGitHubOutput(key, value, outputPath = process.env.GITHUB_OUTPUT) {
   if (!outputPath) {
     return;
   }
-
   fs.appendFileSync(outputPath, `${key}=${value}\n`, 'utf8');
 }
 
-function writeStepSummary(summary, summaryPath = process.env.GITHUB_STEP_SUMMARY) {
-  if (summaryPath) {
-    fs.writeFileSync(summaryPath, `${summary}\n`, 'utf8');
-  }
+function readArtifact(filePath) {
+  return JSON.parse(fs.readFileSync(path.resolve(filePath), 'utf8'));
 }
 
-function classifyFailureReason(error = {}) {
+function classifyFailure(error = {}) {
   if (error.status === 429) {
-    return 'rate_limited';
-  }
-  const message = String(error.payload && error.payload.message ? error.payload.message : error.message || '').toLowerCase();
-  if (message.includes('secondary rate limit')) {
     return 'rate_limited';
   }
   if (error.status) {
@@ -43,248 +34,168 @@ function classifyFailureReason(error = {}) {
   return 'unknown_error';
 }
 
-function normalizeName(value) {
-  return String(value || '').trim().toLowerCase();
-}
-
-function deriveRequestStatus(outcome) {
-  if (outcome.failure_count === 0) {
-    return 'executed';
-  }
-  if (outcome.mutation_count > 0 || outcome.noop_count > 0) {
-    return 'partially_executed';
-  }
-  return 'failed';
-}
-
 async function runCostCenterExecution(options = {}) {
   const env = options.env || process.env;
   const shouldSetExitCode = options.setProcessExitCode === true;
   const artifactPath = path.resolve(
     env.AUDIT_ARTIFACT_PATH ||
-      path.join('artifacts', `cost-center-reallocation-validation-${env.ISSUE_NUMBER || 'manual'}.json`)
+      path.join('artifacts', `manage-cost-centers-validation-${env.ISSUE_NUMBER || 'manual'}.json`)
   );
-  const artifact = readAuditArtifact(artifactPath);
+  const artifact = readArtifact(artifactPath);
+
+  const finish = (executionStatus) => {
+    writeGitHubOutput('execution-status', executionStatus, env.GITHUB_OUTPUT);
+    writeGitHubOutput('audit-artifact-path', artifactPath, env.GITHUB_OUTPUT);
+    emitCostCenterSummary(artifact, { summaryPath: env.GITHUB_STEP_SUMMARY });
+  };
 
   if (!artifact.validation || artifact.validation.is_valid !== true) {
-    writeGitHubOutput('execution-status', 'not_requested', env.GITHUB_OUTPUT);
-    writeStepSummary(formatCostCenterSummary(artifact), env.GITHUB_STEP_SUMMARY);
+    finish('not_requested');
     return artifact;
   }
-
   if (!artifact.approval || artifact.approval.approval_status !== 'approved') {
-    writeGitHubOutput('execution-status', artifact.approval && artifact.approval.approval_status || 'pending', env.GITHUB_OUTPUT);
-    writeStepSummary(formatCostCenterSummary(artifact), env.GITHUB_STEP_SUMMARY);
+    finish(artifact.approval && artifact.approval.approval_status || 'pending');
     return artifact;
   }
 
   let mutationDecision;
   try {
-    mutationDecision = assertCostCenterAllowed({
+    mutationDecision = assertCostCenterMutationAllowed({
       approval_status: artifact.approval.approval_status,
-      approver_login: artifact.approval.approver_login,
-      intended_approver_login: artifact.request.intended_approver_login,
+      approver_role: artifact.approval.approver_role,
       dry_run: artifact.request.dry_run,
       tokenInfo: options.tokenInfo,
     });
   } catch (error) {
     artifact.request.request_status = 'failed';
-    const outcome = buildCostCenterOutcome({
-      executionResults: [],
-      intake_mode: artifact.request.intake_mode,
-      artifact_path: artifactPath,
-    });
-    outcome.failure_count = 1;
-    outcome.rollback_status = 'manual_follow_up_required';
-    outcome.summary = `${error.message}. No cost center changes were attempted.`;
-    artifact.execution = outcome;
-    const blockedSummary = formatCostCenterSummary(artifact);
+    artifact.execution = {
+      created_count: 0, renamed_count: 0, deleted_count: 0, noop_count: 0,
+      failure_count: 1, executed_count: 0, rollback_status: 'manual_follow_up_required',
+      summary: `${error.message}. No cost-center mutation was attempted.`,
+      results: [],
+    };
     fs.writeFileSync(artifactPath, toCostCenterArtifactJson({
-      request: artifact.request,
-      validation: artifact.validation,
-      approval: artifact.approval,
-      reconciliationPlan: artifact.reconciliation,
-      executionOutcome: outcome,
-      runContext: artifact.metadata,
-      audit_summary_markdown: blockedSummary,
+      request: artifact.request, validation: artifact.validation, approval: artifact.approval,
+      reconciliation: artifact.reconciliation, execution: artifact.execution, runContext: artifact.metadata,
     }), 'utf8');
-    writeStepSummary(blockedSummary, env.GITHUB_STEP_SUMMARY);
-    writeGitHubOutput('execution-status', 'failed', env.GITHUB_OUTPUT);
+    finish('failed');
     if (shouldSetExitCode) {
       process.exitCode = 1;
     }
     return artifact;
   }
 
-  // Dry-run: keep the validated plan, attempt no mutations.
   if (!mutationDecision.allowed) {
-    const summary = formatCostCenterSummary(artifact);
+    artifact.execution = {
+      created_count: 0, renamed_count: 0, deleted_count: 0, noop_count: 0,
+      failure_count: 0, executed_count: 0, rollback_status: 'not_needed',
+      summary: 'Approved execution remains blocked because the request is dry-run only. No cost-center mutation was attempted.',
+      results: [],
+    };
     fs.writeFileSync(artifactPath, toCostCenterArtifactJson({
-      request: artifact.request,
-      validation: artifact.validation,
-      approval: artifact.approval,
-      reconciliationPlan: artifact.reconciliation,
-      executionOutcome: artifact.execution || {},
-      runContext: artifact.metadata,
-      audit_summary_markdown: summary,
+      request: artifact.request, validation: artifact.validation, approval: artifact.approval,
+      reconciliation: artifact.reconciliation, execution: artifact.execution, runContext: artifact.metadata,
     }), 'utf8');
-    writeStepSummary(summary, env.GITHUB_STEP_SUMMARY);
-    writeGitHubOutput('execution-status', mutationDecision.reason, env.GITHUB_OUTPUT);
+    finish(mutationDecision.reason);
     return artifact;
   }
 
-  const api = options.api || createGitHubCostCenterApi({ token: mutationDecision.tokenInfo.token });
+  const api = options.costCenterApi || createGitHubCostCenterApi({ token: mutationDecision.tokenInfo.token });
+
+  // Re-validate with live access so the executed plan reflects current state.
+  const liveValidation = await validateCostCenterRequest(artifact.request, {
+    listCostCenters: ({ enterprise, state }) =>
+      executeWithBoundedRetry(() => api.listCostCenters({ enterprise, state }), { maxRetries: options.maxRetries || 2, sleep: options.sleep })
+        .then((r) => { if (!r.ok) { throw r.error || new Error('list failed'); } return r.value; }),
+    getCostCenter: ({ enterprise, costCenterId }) =>
+      executeWithBoundedRetry(() => api.getCostCenter({ enterprise, costCenterId }), { maxRetries: options.maxRetries || 2, sleep: options.sleep })
+        .then((r) => { if (!r.ok) { throw r.error || new Error('get failed'); } return r.value; }),
+  });
+  const plan = reconcileCostCenterChanges({ requested_changes: liveValidation.requested_changes, dry_run: false });
+
+  const results = [];
   const enterprise = artifact.request.enterprise;
-
-  const currentCostCenters = await api.listCostCenters({ enterprise });
-  const plan = reconcileCostCenter({
-    request: artifact.request,
-    validatedAssignments: artifact.validation.requested_assignments,
-    currentCostCenters,
-    enterprise_exists: true,
-    live_state_verified: true,
-    dry_run: false,
-  });
-
-  const executionResults = [];
-  let latestRateLimitSnapshot = null;
-  const costCenterIdByName = new Map(
-    currentCostCenters
-      .filter((costCenter) => costCenter.name)
-      .map((costCenter) => [normalizeName(costCenter.name), costCenter.id])
-  );
-
-  for (const assignment of plan.assignments_rejected) {
-    executionResults.push({
-      cost_center: assignment.cost_center,
-      login: assignment.login,
-      source_row_number: assignment.source_row_number || null,
-      execution_result: 'rejected',
-      failure_reason: assignment.failure_reason || 'rejected',
+  const apply = async (row, fn, successResult) => {
+    const attempt = await executeWithBoundedRetry(fn, { maxRetries: options.maxRetries || 2, sleep: options.sleep });
+    results.push({
+      ...row,
+      execution_result: attempt.ok ? successResult : 'failed',
+      failure_reason: attempt.ok ? null : classifyFailure(attempt.error),
     });
+  };
+
+  for (const row of plan.creates) {
+    await apply(row, () => api.createCostCenter({ enterprise, name: row.cost_center_input }), 'created');
   }
-  for (const assignment of plan.assignments_already_satisfied) {
-    executionResults.push({
-      cost_center: assignment.cost_center,
-      login: assignment.login,
-      source_row_number: assignment.source_row_number || null,
-      execution_result: 'noop',
-      failure_reason: null,
-    });
+  for (const row of plan.renames) {
+    await apply(row, () => api.renameCostCenter({ enterprise, costCenterId: row.resolved_cost_center_id, name: row.new_name_input }), 'renamed');
+  }
+  for (const row of plan.deletes) {
+    await apply(row, () => api.deleteCostCenter({ enterprise, costCenterId: row.resolved_cost_center_id }), 'deleted');
+  }
+  for (const row of plan.noops) {
+    results.push({ ...row, execution_result: 'noop', failure_reason: null });
   }
 
-  for (const name of plan.cost_centers_to_create) {
-    const attempt = await executeWithBoundedRetry(
-      () => api.createCostCenter({ enterprise, name }),
-      { maxRetries: options.maxRetries || 2, sleep: options.sleep }
-    );
-    latestRateLimitSnapshot = attempt.retry_plan.rate_limit_snapshot || latestRateLimitSnapshot;
-    if (attempt.ok) {
-      costCenterIdByName.set(normalizeName(name), attempt.value && attempt.value.id);
-      executionResults.push({ cost_center: name, execution_result: 'created', failure_reason: null });
-    } else {
-      executionResults.push({
-        cost_center: name,
-        execution_result: 'failed',
-        failure_reason: classifyFailureReason(attempt.error),
-      });
-    }
-  }
+  const createdCount = results.filter((r) => r.execution_result === 'created').length;
+  const renamedCount = results.filter((r) => r.execution_result === 'renamed').length;
+  const deletedCount = results.filter((r) => r.execution_result === 'deleted').length;
+  const noopCount = results.filter((r) => r.execution_result === 'noop').length;
+  const failureCount = results.filter((r) => r.execution_result === 'failed').length;
+  const executedCount = createdCount + renamedCount + deletedCount;
 
-  for (const assignment of plan.assignments_to_add) {
-    const costCenterId = assignment.cost_center_id || costCenterIdByName.get(normalizeName(assignment.cost_center));
-    if (!costCenterId) {
-      executionResults.push({
-        cost_center: assignment.cost_center,
-        login: assignment.login,
-        source_row_number: assignment.source_row_number || null,
-        execution_result: 'failed',
-        failure_reason: 'cost_center_unavailable',
-      });
-      continue;
-    }
-    const attempt = await executeWithBoundedRetry(
-      () => api.addResource({ enterprise, costCenterId, users: [assignment.login] }),
-      { maxRetries: options.maxRetries || 2, sleep: options.sleep }
-    );
-    latestRateLimitSnapshot = attempt.retry_plan.rate_limit_snapshot || latestRateLimitSnapshot;
-    executionResults.push({
-      cost_center: assignment.cost_center,
-      cost_center_id: costCenterId,
-      login: assignment.login,
-      source_row_number: assignment.source_row_number || null,
-      execution_result: attempt.ok ? 'added' : 'failed',
-      failure_reason: attempt.ok ? null : classifyFailureReason(attempt.error),
-    });
-  }
-
-  for (const assignment of plan.assignments_to_remove) {
-    const costCenterId = assignment.cost_center_id || costCenterIdByName.get(normalizeName(assignment.cost_center));
-    if (!costCenterId) {
-      executionResults.push({
-        cost_center: assignment.cost_center,
-        login: assignment.login,
-        source_row_number: assignment.source_row_number || null,
-        execution_result: 'noop',
-        failure_reason: null,
-      });
-      continue;
-    }
-    const attempt = await executeWithBoundedRetry(
-      () => api.removeResource({ enterprise, costCenterId, users: [assignment.login] }),
-      { maxRetries: options.maxRetries || 2, sleep: options.sleep }
-    );
-    latestRateLimitSnapshot = attempt.retry_plan.rate_limit_snapshot || latestRateLimitSnapshot;
-    executionResults.push({
-      cost_center: assignment.cost_center,
-      cost_center_id: costCenterId,
-      login: assignment.login,
-      source_row_number: assignment.source_row_number || null,
-      execution_result: attempt.ok ? 'removed' : 'failed',
-      failure_reason: attempt.ok ? null : classifyFailureReason(attempt.error),
-    });
-  }
-
-  const outcome = buildCostCenterOutcome({
-    executionResults,
-    intake_mode: artifact.request.intake_mode,
-    artifact_path: artifactPath,
-    rate_limit_snapshot: latestRateLimitSnapshot,
-    runContext: { run_id: env.GITHUB_RUN_ID, run_attempt: env.GITHUB_RUN_ATTEMPT },
-  });
-  const requestStatus = deriveRequestStatus(outcome);
-  const prefix =
-    requestStatus === 'executed'
-      ? 'Approved cost center execution completed.'
-      : requestStatus === 'partially_executed'
-        ? 'Approved cost center execution completed with partial failure.'
-        : 'Approved cost center execution failed.';
-  outcome.summary = `${prefix} ${outcome.summary}`;
+  const requestStatus = failureCount === 0
+    ? 'executed'
+    : (executedCount > 0 || noopCount > 0) ? 'partially_executed' : 'failed';
 
   artifact.request.request_status = requestStatus;
-  artifact.reconciliation = plan;
-  artifact.execution = outcome;
-  const summary = formatCostCenterSummary(artifact);
+  // Merge execution_result back onto the validated rows for the summary table.
+  const resultByRow = new Map(results.map((r) => [r.source_row_number, r]));
+  artifact.validation.requested_changes = (artifact.validation.requested_changes || []).map((row) => {
+    const hit = resultByRow.get(row.source_row_number);
+    return hit ? { ...row, execution_result: hit.execution_result, failure_reason: hit.failure_reason } : row;
+  });
+  artifact.execution = {
+    created_count: createdCount,
+    renamed_count: renamedCount,
+    deleted_count: deletedCount,
+    noop_count: noopCount,
+    failure_count: failureCount,
+    executed_count: executedCount,
+    rollback_status: failureCount === 0 ? 'not_needed' : 'manual_follow_up_required',
+    summary: `Cost-center execution ${requestStatus}: ${createdCount} created, ${renamedCount} renamed, ${deletedCount} deleted, ${noopCount} no-op, ${failureCount} failed.`,
+    results,
+  };
 
+  const rebuilt = buildCostCenterArtifact(artifact);
   fs.writeFileSync(artifactPath, toCostCenterArtifactJson({
-    request: artifact.request,
-    validation: artifact.validation,
-    approval: artifact.approval,
-    reconciliationPlan: plan,
-    executionOutcome: outcome,
-    runContext: artifact.metadata,
-    audit_summary_markdown: summary,
+    request: artifact.request, validation: artifact.validation, approval: artifact.approval,
+    reconciliation: artifact.reconciliation, execution: artifact.execution, runContext: artifact.metadata,
   }), 'utf8');
 
-  writeStepSummary(summary, env.GITHUB_STEP_SUMMARY);
+  if (artifact.request.issue_number != null) {
+    const labelsApi = options.labelsApi
+      || (mutationDecision.tokenInfo.token ? createGitHubTeamApi({ token: mutationDecision.tokenInfo.token }) : null);
+    if (labelsApi && typeof labelsApi.addIssueLabels === 'function') {
+      try {
+        await labelsApi.addIssueLabels({
+          repository: artifact.request.repository,
+          issueNumber: artifact.request.issue_number,
+          labels: [`issueops:manage-cost-centers:${requestStatus}`],
+        });
+      } catch (labelError) {
+        console.warn(`[warn] Failed to add terminal state label: ${labelError.message}`);
+      }
+    }
+  }
+
+  emitCostCenterSummary(rebuilt, { summaryPath: env.GITHUB_STEP_SUMMARY });
   writeGitHubOutput('execution-status', requestStatus, env.GITHUB_OUTPUT);
   writeGitHubOutput('audit-artifact-path', artifactPath, env.GITHUB_OUTPUT);
-
   if (shouldSetExitCode && requestStatus !== 'executed') {
     process.exitCode = 1;
   }
-
-  return artifact;
+  return rebuilt;
 }
 
 if (require.main === module) {
@@ -295,7 +206,5 @@ if (require.main === module) {
 }
 
 module.exports = {
-  classifyFailureReason,
-  deriveRequestStatus,
   runCostCenterExecution,
 };

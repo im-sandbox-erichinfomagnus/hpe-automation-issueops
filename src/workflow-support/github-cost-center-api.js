@@ -1,5 +1,16 @@
 'use strict';
 
+// Thin, dependency-free client for the GitHub Enterprise billing cost-center
+// REST endpoints. Mirrors the fetch-wrapper conventions of github-team-api.js.
+//
+// Endpoints (enterprise-scoped, require a classic PAT with manage_billing:enterprise
+// held by an enterprise owner or billing manager):
+//   GET    /enterprises/{enterprise}/settings/billing/cost-centers
+//   POST   /enterprises/{enterprise}/settings/billing/cost-centers           {name}
+//   GET    /enterprises/{enterprise}/settings/billing/cost-centers/{id}
+//   PATCH  /enterprises/{enterprise}/settings/billing/cost-centers/{id}       {name}
+//   DELETE /enterprises/{enterprise}/settings/billing/cost-centers/{id}
+
 function getGlobalFetch() {
   if (typeof fetch !== 'function') {
     throw new Error('A fetch implementation is required to call the GitHub API');
@@ -43,47 +54,38 @@ function getHeader(headers, name) {
   return headers[name] || headers[name.toLowerCase()];
 }
 
-function mapCostCenter(raw = {}) {
+function mapCostCenterState(costCenter = {}) {
   return {
-    id: raw.id ?? null,
-    name: raw.name ?? '',
-    state: raw.state ?? 'active',
-    resources: Array.isArray(raw.resources)
-      ? raw.resources.map((resource) => ({
-          type: resource.type ?? '',
-          name: resource.name ?? '',
+    id: costCenter.id != null ? String(costCenter.id) : null,
+    name: costCenter.name || '',
+    state: costCenter.state || 'active',
+    resources: Array.isArray(costCenter.resources)
+      ? costCenter.resources.map((resource) => ({
+          type: resource && resource.type ? String(resource.type) : '',
+          name: resource && resource.name ? String(resource.name) : '',
         }))
       : [],
   };
-}
-
-function buildResourceBody({ users = [], organizations = [], repositories = [] }) {
-  const body = {};
-  if (Array.isArray(users) && users.length > 0) {
-    body.users = users;
-  }
-  if (Array.isArray(organizations) && organizations.length > 0) {
-    body.organizations = organizations;
-  }
-  if (Array.isArray(repositories) && repositories.length > 0) {
-    body.repositories = repositories;
-  }
-  return body;
 }
 
 function createGitHubCostCenterApi(options = {}) {
   const token = options.token;
   const fetchImpl = options.fetchImpl || getGlobalFetch();
   const apiBaseUrl = options.apiBaseUrl || 'https://api.github.com';
+  // Cost-center endpoints are documented under a newer API version; default to the
+  // repository-standard version and allow an override for environments that require it.
+  const apiVersion = options.apiVersion || process.env.COST_CENTER_API_VERSION || '2022-11-28';
 
   if (!token) {
-    throw new Error('GitHub cost center API requires a workflow token');
+    throw new Error('GitHub cost-center API requires a workflow token');
   }
+
+  const enc = (value) => encodeURIComponent(String(value));
 
   async function request(path, requestOptions = {}) {
     const response = await fetchImpl(`${apiBaseUrl}${path}`, {
       method: requestOptions.method || 'GET',
-      headers: createHeaders(token, requestOptions.headers),
+      headers: createHeaders(token, { 'X-GitHub-Api-Version': apiVersion, ...requestOptions.headers }),
       body: requestOptions.body ? JSON.stringify(requestOptions.body) : undefined,
     });
 
@@ -96,88 +98,89 @@ function createGitHubCostCenterApi(options = {}) {
     };
   }
 
-  function basePath(enterprise) {
-    return `/enterprises/${enterprise}/settings/billing/cost-centers`;
-  }
-
   return {
-    async listCostCenters({ enterprise, state }) {
-      const query = state ? `?state=${state}` : '';
-      const result = await request(`${basePath(enterprise)}${query}`);
+    async listCostCenters({ enterprise, state = 'active' }) {
+      const stateQuery = state ? `?state=${encodeURIComponent(state)}` : '';
+      const result = await request(
+        `/enterprises/${enc(enterprise)}/settings/billing/cost-centers${stateQuery}`
+      );
       if (!result.ok) {
         throw Object.assign(new Error('Failed to list cost centers'), result);
       }
-
-      const payload = result.payload;
-      const costCenters = Array.isArray(payload)
-        ? payload
-        : (payload && (payload.costCenters || payload.cost_centers)) || [];
-
-      return costCenters.map(mapCostCenter);
+      const list = result.payload && Array.isArray(result.payload.costCenters)
+        ? result.payload.costCenters
+        : Array.isArray(result.payload)
+          ? result.payload
+          : result.payload && Array.isArray(result.payload.cost_centers)
+            ? result.payload.cost_centers
+            : [];
+      return list.map(mapCostCenterState);
     },
 
     async getCostCenter({ enterprise, costCenterId }) {
-      const result = await request(`${basePath(enterprise)}/${costCenterId}`);
+      const result = await request(
+        `/enterprises/${enc(enterprise)}/settings/billing/cost-centers/${enc(costCenterId)}`
+      );
       if (result.status === 404) {
-        return { exists: false, costCenter: null };
+        return { exists: false, cost_center: null };
       }
       if (!result.ok) {
         throw Object.assign(new Error('Failed to load cost center'), result);
       }
-      return {
-        exists: true,
-        costCenter: mapCostCenter(result.payload || {}),
-      };
+      return { exists: true, cost_center: mapCostCenterState(result.payload || {}) };
     },
 
     async createCostCenter({ enterprise, name }) {
-      const result = await request(basePath(enterprise), {
+      const result = await request(`/enterprises/${enc(enterprise)}/settings/billing/cost-centers`, {
         method: 'POST',
         body: { name },
       });
-
       if (!result.ok) {
         throw Object.assign(new Error('Failed to create cost center'), result, {
           retry_after: getHeader(result.headers, 'retry-after'),
         });
       }
-
-      return mapCostCenter(result.payload || {});
+      return mapCostCenterState(result.payload || {});
     },
 
-    async addResource({ enterprise, costCenterId, users = [], organizations = [], repositories = [] }) {
-      const result = await request(`${basePath(enterprise)}/${costCenterId}/resource`, {
-        method: 'POST',
-        body: buildResourceBody({ users, organizations, repositories }),
-      });
-
+    async renameCostCenter({ enterprise, costCenterId, name }) {
+      const result = await request(
+        `/enterprises/${enc(enterprise)}/settings/billing/cost-centers/${enc(costCenterId)}`,
+        {
+          method: 'PATCH',
+          body: { name },
+        }
+      );
       if (!result.ok) {
-        throw Object.assign(new Error('Failed to add cost center resource'), result, {
+        throw Object.assign(new Error('Failed to rename cost center'), result, {
           retry_after: getHeader(result.headers, 'retry-after'),
         });
       }
-
-      return { ok: true, status: result.status, payload: result.payload };
+      return mapCostCenterState(result.payload || {});
     },
 
-    async removeResource({ enterprise, costCenterId, users = [], organizations = [], repositories = [] }) {
-      const result = await request(`${basePath(enterprise)}/${costCenterId}/resource`, {
-        method: 'DELETE',
-        body: buildResourceBody({ users, organizations, repositories }),
-      });
-
+    async deleteCostCenter({ enterprise, costCenterId }) {
+      const result = await request(
+        `/enterprises/${enc(enterprise)}/settings/billing/cost-centers/${enc(costCenterId)}`,
+        {
+          method: 'DELETE',
+        }
+      );
+      if (result.status === 404) {
+        return { deleted: false, not_found: true };
+      }
       if (!result.ok) {
-        throw Object.assign(new Error('Failed to remove cost center resource'), result, {
+        throw Object.assign(new Error('Failed to delete cost center'), result, {
           retry_after: getHeader(result.headers, 'retry-after'),
         });
       }
-
-      return { ok: true, status: result.status, payload: result.payload };
+      return { deleted: true, not_found: false };
     },
   };
 }
 
 module.exports = {
   createGitHubCostCenterApi,
-  mapCostCenter,
+  getHeader,
+  mapCostCenterState,
 };

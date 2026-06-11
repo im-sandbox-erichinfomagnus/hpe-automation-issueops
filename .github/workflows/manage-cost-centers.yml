@@ -1,0 +1,157 @@
+name: manage-cost-centers
+
+on:
+  issues:
+    types:
+      - opened
+      - edited
+      - reopened
+      - labeled
+  issue_comment:
+    types:
+      - created
+      - edited
+      - deleted
+  workflow_dispatch:
+    inputs:
+      issue-number:
+        description: Existing issue number to replay for validation or execution.
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+  issues: write
+
+concurrency:
+  group: manage-cost-centers-${{ github.event.issue.number || inputs.issue-number || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  intake:
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'issues' || github.event_name == 'issue_comment'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    env:
+      ISSUE_NUMBER: ${{ github.event.issue.number || inputs.issue-number || '' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Resolve issue context
+        id: issue_context
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          ISSUE_NUMBER: ${{ env.ISSUE_NUMBER }}
+        run: |
+          set -euo pipefail
+
+          if [ "$EVENT_NAME" = "issues" ] || [ "$EVENT_NAME" = "issue_comment" ]; then
+            issue_json=$(jq -c '.issue' "$GITHUB_EVENT_PATH")
+          else
+            issue_json=$(curl --silent --show-error --fail \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/repos/$REPOSITORY/issues/$ISSUE_NUMBER")
+          fi
+
+          issue_body=$(printf '%s' "$issue_json" | jq -r '.body // ""')
+          issue_number=$(printf '%s' "$issue_json" | jq -r '.number // ""')
+          requester_login=$(printf '%s' "$issue_json" | jq -r '.user.login // ""')
+
+          {
+            echo 'issue_body<<EOF'
+            printf '%s\n' "$issue_body"
+            echo EOF
+            echo "issue_number=$issue_number"
+            echo "requester_login=$requester_login"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Parse issue body
+        id: parse_request
+        uses: issue-ops/parser@v5
+        with:
+          body: ${{ steps.issue_context.outputs.issue_body }}
+          issue-form-template: manage-cost-centers.yml
+
+      - name: Run request validation
+        id: request_validation
+        continue-on-error: true
+        env:
+          ISSUE_NUMBER: ${{ steps.issue_context.outputs.issue_number }}
+          REQUESTER_LOGIN: ${{ steps.issue_context.outputs.requester_login }}
+          PARSED_ENTERPRISE: ${{ steps.parse_request.outputs.parsed_enterprise }}
+          PARSED_DESIGNATED_APPROVER: ${{ steps.parse_request.outputs.parsed_designated_approver }}
+          PARSED_COST_CENTERS: ${{ steps.parse_request.outputs.parsed_cost_centers }}
+          PARSED_DRY_RUN: ${{ steps.parse_request.outputs.parsed_dry_run }}
+          PARSED_JUSTIFICATION: ${{ steps.parse_request.outputs.parsed_justification }}
+          ISSUEOPS_GITHUB_TOKEN: ${{ secrets.ISSUEOPS_GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+          AUDIT_ARTIFACT_RETENTION_DAYS: 30
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          artifact_path="artifacts/manage-cost-centers-validation-${ISSUE_NUMBER:-manual}.json"
+          echo "AUDIT_ARTIFACT_PATH=$artifact_path" >> "$GITHUB_ENV"
+          AUDIT_ARTIFACT_PATH="$artifact_path" node src/scripts/run-cost-center-validation.js
+          echo "artifact_path=$artifact_path" >> "$GITHUB_OUTPUT"
+
+      - name: Run approval gate
+        id: approval_gate
+        continue-on-error: true
+        env:
+          AUDIT_ARTIFACT_PATH: ${{ steps.request_validation.outputs['audit-artifact-path'] || steps.request_validation.outputs.artifact_path }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node src/scripts/run-cost-center-approval.js
+
+      - name: Ensure terminal state labels exist
+        if: ${{ steps.approval_gate.outputs['approval-status'] == 'approved' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for label in \
+            "issueops:manage-cost-centers:executed" \
+            "issueops:manage-cost-centers:failed" \
+            "issueops:manage-cost-centers:partially_executed"; do
+            gh label create "$label" \
+              --repo "${{ github.repository }}" \
+              --force 2>/dev/null || true
+          done
+
+      - name: Run approved execution
+        id: approved_execution
+        if: ${{ steps.approval_gate.outputs['approval-status'] == 'approved' }}
+        continue-on-error: true
+        env:
+          AUDIT_ARTIFACT_PATH: ${{ steps.approval_gate.outputs['audit-artifact-path'] || steps.request_validation.outputs['audit-artifact-path'] || steps.request_validation.outputs.artifact_path }}
+          ISSUEOPS_GITHUB_TOKEN: ${{ secrets.ISSUEOPS_GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+          AUDIT_ARTIFACT_RETENTION_DAYS: 30
+        run: |
+          set -euo pipefail
+          node src/scripts/run-cost-center-execution.js
+
+      - name: Upload audit artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: manage-cost-centers-execution-${{ steps.issue_context.outputs.issue_number || 'manual' }}-${{ github.run_attempt }}
+          path: ${{ steps.approved_execution.outputs['audit-artifact-path'] || steps.approval_gate.outputs['audit-artifact-path'] || steps.request_validation.outputs['audit-artifact-path'] || steps.request_validation.outputs.artifact_path }}
+          if-no-files-found: warn
+          retention-days: 30

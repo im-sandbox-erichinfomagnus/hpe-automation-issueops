@@ -3,81 +3,48 @@
 const fs = require('fs');
 const path = require('path');
 
-const { findLatestApprovalComment } = require('../workflow-support/approval-gate');
-const { buildCostCenterArtifact, toCostCenterArtifactJson } = require('../workflow-support/cost-center-artifact');
+const { findLatestApprovalComment, APPROVAL_COMMAND } = require('../workflow-support/approval-gate');
+const { resolveCostCenterApprover } = require('../workflow-support/resolve-cost-center-approver');
 const { createGitHubTeamApi } = require('../workflow-support/github-team-api');
-const { formatCostCenterSummary } = require('../workflow-support/format-cost-center-summary');
 const { loadWorkflowToken } = require('../workflow-support/load-workflow-token');
-
-function readAuditArtifact(filePath) {
-  return JSON.parse(fs.readFileSync(path.resolve(filePath), 'utf8'));
-}
+const { buildCostCenterArtifact, toCostCenterArtifactJson } = require('../workflow-support/build-cost-center-artifact');
+const { emitCostCenterSummary } = require('./emit-cost-center-summary');
 
 function writeGitHubOutput(key, value, outputPath = process.env.GITHUB_OUTPUT) {
   if (!outputPath) {
     return;
   }
-
   fs.appendFileSync(outputPath, `${key}=${value}\n`, 'utf8');
 }
 
-function writeStepSummary(summary, summaryPath = process.env.GITHUB_STEP_SUMMARY) {
-  if (summaryPath) {
-    fs.writeFileSync(summaryPath, `${summary}\n`, 'utf8');
-  }
+function readArtifact(filePath) {
+  return JSON.parse(fs.readFileSync(path.resolve(filePath), 'utf8'));
 }
 
-function evaluateCostCenterApproval(input = {}) {
-  const intendedApprover = String(input.intendedApproverLogin || '').toLowerCase();
-  const priorApprovalStatus = input.priorApprovalStatus || 'pending';
-  const approvalComment = findLatestApprovalComment(input.issueComments || []);
-
-  if (!approvalComment) {
-    return {
-      approval_status: priorApprovalStatus === 'approved' ? 'invalidated' : 'pending',
-      approver_login: '',
-      approver_role: 'other',
-      decision_source: 'comment',
-      decision_note: priorApprovalStatus === 'approved'
-        ? 'The approval comment "approved" is no longer present and execution must remain blocked.'
-        : `Add an issue comment containing exactly "approved" from ${input.intendedApproverLogin || 'the named approver'} to authorize execution.`,
-    };
-  }
-
-  const approverLogin = String(approvalComment.user && approvalComment.user.login || '').toLowerCase();
-
-  if (!intendedApprover || approverLogin !== intendedApprover) {
-    return {
-      approval_status: 'denied',
-      approver_login: approverLogin,
-      approver_role: 'other',
-      approved_at: approvalComment.created_at || null,
-      decision_source: 'comment',
-      decision_note: 'The approval comment "approved" was not added by the named intended approver and does not authorize cost center changes.',
-    };
-  }
-
-  return {
-    approval_status: 'approved',
-    approver_login: approverLogin,
-    approver_role: 'named_approver',
-    approved_at: approvalComment.created_at || null,
-    decision_source: 'comment',
-    decision_note: 'The approval comment "approved" was added by the named intended approver.',
-  };
+function persist(artifactPath, artifact, env) {
+  fs.writeFileSync(artifactPath, toCostCenterArtifactJson({
+    request: artifact.request,
+    validation: artifact.validation,
+    approval: artifact.approval,
+    reconciliation: artifact.reconciliation,
+    execution: artifact.execution,
+    runContext: artifact.metadata,
+  }), 'utf8');
+  emitCostCenterSummary(artifact, { summaryPath: env.GITHUB_STEP_SUMMARY });
 }
 
 async function runCostCenterApproval(options = {}) {
   const env = options.env || process.env;
   const artifactPath = path.resolve(
     env.AUDIT_ARTIFACT_PATH ||
-      path.join('artifacts', `cost-center-reallocation-validation-${env.ISSUE_NUMBER || 'manual'}.json`)
+      path.join('artifacts', `manage-cost-centers-validation-${env.ISSUE_NUMBER || 'manual'}.json`)
   );
-  const artifact = readAuditArtifact(artifactPath);
+  const artifact = readArtifact(artifactPath);
 
   if (!artifact.validation || artifact.validation.is_valid !== true) {
-    writeGitHubOutput('approval-status', artifact.approval && artifact.approval.approval_status || 'not_requested', env.GITHUB_OUTPUT);
-    writeStepSummary(formatCostCenterSummary(artifact), env.GITHUB_STEP_SUMMARY);
+    artifact.approval = { ...(artifact.approval || {}), approval_status: 'not_requested' };
+    persist(artifactPath, buildCostCenterArtifact(artifact), env);
+    writeGitHubOutput('approval-status', 'not_requested', env.GITHUB_OUTPUT);
     return artifact;
   }
 
@@ -93,46 +60,49 @@ async function runCostCenterApproval(options = {}) {
     };
   } else {
     const api = options.api || createGitHubTeamApi({ token: tokenInfo.token });
-    const issueComments = await api.listIssueComments({
+    const comments = await api.listIssueComments({
       repository: artifact.request.repository,
       issueNumber: artifact.request.issue_number,
     });
-    approval = evaluateCostCenterApproval({
-      intendedApproverLogin: artifact.request.intended_approver_login,
-      issueComments,
-      priorApprovalStatus: artifact.approval && artifact.approval.approval_status,
-    });
+    const approvalComment = findLatestApprovalComment(comments, APPROVAL_COMMAND);
+    if (!approvalComment) {
+      approval = {
+        approval_status: 'pending',
+        approver_login: '',
+        approver_role: 'other',
+        decision_source: 'comment',
+        decision_note: `Add an issue comment containing exactly '${APPROVAL_COMMAND}' from the designated approver (${artifact.request.designated_approver_login}) to authorize execution.`,
+      };
+    } else {
+      const approver = resolveCostCenterApprover({
+        approverLogin: approvalComment.user && approvalComment.user.login,
+        designatedApproverLogin: artifact.request.designated_approver_login,
+      });
+      const approved = approver.approver_role === 'designated_approver';
+      approval = {
+        approval_status: approved ? 'approved' : 'denied',
+        approver_login: approver.approver_login,
+        approver_role: approver.approver_role,
+        approved_at: approvalComment.created_at || null,
+        decision_source: 'comment',
+        decision_note: approved
+          ? `The approval comment '${APPROVAL_COMMAND}' was added by the designated approver.`
+          : `The approval comment '${APPROVAL_COMMAND}' was not added by the designated approver and does not authorize cost-center mutation.`,
+      };
+    }
   }
 
   artifact.approval = approval;
-  artifact.request.request_status =
-    approval.approval_status === 'approved' ? 'approved' : 'awaiting_approval';
-
-  const summary = formatCostCenterSummary(artifact);
-  const updated = buildCostCenterArtifact({
-    request: artifact.request,
-    validation: artifact.validation,
-    approval: artifact.approval,
-    reconciliationPlan: artifact.reconciliation,
-    executionOutcome: artifact.execution,
-    runContext: artifact.metadata,
-    audit_summary_markdown: summary,
-  });
-
-  fs.writeFileSync(artifactPath, toCostCenterArtifactJson({
-    request: updated.request,
-    validation: updated.validation,
-    approval: updated.approval,
-    reconciliationPlan: updated.reconciliation,
-    executionOutcome: updated.execution,
-    runContext: updated.metadata,
-    audit_summary_markdown: summary,
-  }), 'utf8');
-
-  writeStepSummary(summary, env.GITHUB_STEP_SUMMARY);
+  artifact.request.request_status = approval.approval_status === 'approved' ? 'approved' : 'awaiting_approval';
+  const rebuilt = buildCostCenterArtifact(artifact);
+  persist(artifactPath, rebuilt, env);
   writeGitHubOutput('approval-status', approval.approval_status, env.GITHUB_OUTPUT);
+  writeGitHubOutput('audit-artifact-path', artifactPath, env.GITHUB_OUTPUT);
 
-  return updated;
+  if (approval.approval_status === 'denied' && options.setProcessExitCode && env === process.env) {
+    process.exitCode = 1;
+  }
+  return rebuilt;
 }
 
 if (require.main === module) {
@@ -143,6 +113,5 @@ if (require.main === module) {
 }
 
 module.exports = {
-  evaluateCostCenterApproval,
   runCostCenterApproval,
 };

@@ -1,0 +1,320 @@
+name: manage-cost-centers-workflow-contract
+version: 1
+purpose: >-
+  Contract for the standalone cost-center-management IssueOps workflow that bulk
+  creates, renames, and deletes GitHub Enterprise billing cost centers from a CSV
+  spreadsheet, classifies each row fail-soft against live cost centers, gates
+  mutation behind a designated-approver comment plus an enterprise-billing PAT,
+  applies changes idempotently in a deterministic order, and emits durable audit
+  evidence. Owns cost-center entities only; resource and user allocation is a
+  separate operation.
+
+implementation_status: complete
+last_validated: 2026-06-11
+validated_against:
+  - issue_form: .github/ISSUE_TEMPLATE/manage-cost-centers.yml
+  - workflow: .github/workflows/manage-cost-centers.yml
+  - scripts:
+      - src/scripts/run-cost-center-validation.js
+      - src/scripts/run-cost-center-approval.js
+      - src/scripts/run-cost-center-execution.js
+      - src/scripts/emit-cost-center-summary.js
+  - modules:
+      - src/workflow-support/github-cost-center-api.js
+      - src/workflow-support/parse-cost-center-request.js
+      - src/workflow-support/validate-cost-center-request.js
+      - src/workflow-support/reconcile-cost-center-changes.js
+      - src/workflow-support/resolve-cost-center-approver.js
+      - src/workflow-support/build-cost-center-artifact.js
+      - src/actions/cost-center-policy/index.js
+  - tests:
+      - tests/contract/manage-cost-centers-parser-fixture.test.js
+      - tests/contract/manage-cost-centers-validation.test.js
+      - tests/integration/manage-cost-centers-workflow.test.js
+
+issue_form:
+  path: .github/ISSUE_TEMPLATE/manage-cost-centers.yml
+  required_fields:
+    - id: enterprise
+      type: input
+      parsed_env_key: PARSED_ENTERPRISE
+    - id: designated_approver
+      type: input
+      parsed_env_key: PARSED_DESIGNATED_APPROVER
+      note: >-
+        GitHub login of the enterprise owner or billing manager who must comment
+        exactly 'approved' to authorize execution.
+    - id: cost_centers
+      type: textarea
+      render: csv
+      parsed_env_key: PARSED_COST_CENTERS
+      note: >-
+        CSV spreadsheet, one row per change. Header must include at least
+        cost_center and action. Supports double-quoted fields and an optional
+        ```csv code fence.
+    - id: dry_run
+      type: dropdown
+      default: "true"
+      parsed_env_key: PARSED_DRY_RUN
+    - id: justification
+      type: textarea
+      parsed_env_key: PARSED_JUSTIFICATION
+
+parser:
+  action: issue-ops/parser@v5
+  outputs:
+    - json
+    - parsed_enterprise
+    - parsed_designated_approver
+    - parsed_cost_centers
+    - parsed_dry_run
+    - parsed_justification
+
+request_normalization:
+  enterprise: raw value from parsed_enterprise (trimmed)
+  enterprise_normalized: lowercased enterprise slug
+  designated_approver_login: lowercased login from parsed_designated_approver
+  dry_run: >-
+    boolean parsed from parsed_dry_run; true/1/yes/y are true, false/0/no/n are
+    false, default true when absent
+  cost_centers_csv: >-
+    raw CSV from parsed_cost_centers; an optional ```csv code fence is unwrapped,
+    CRLF is normalized, blank lines dropped, double-quoted fields honored, rows
+    deduped, data rows numbered 1-based excluding the header
+  csv_columns:
+    known: [cost_center, action, new_name, cost_center_id, force]
+    required_header: [cost_center, action]
+    note: unknown columns are ignored and reported as a warning
+
+workflow_entry_assumptions:
+  manage_cost_centers_workflow:
+    events:
+      issues:
+        - opened
+        - edited
+        - reopened
+        - labeled
+      issue_comment:
+        - created
+        - edited
+        - deleted
+      workflow_dispatch:
+        - issue-number
+    concurrency:
+      group: manage-cost-centers-{issue_number}
+      cancel_in_progress: false
+    execution_gate:
+      approval_output_key: approval-status
+      required_expression: steps.approval_gate.outputs['approval-status'] == 'approved'
+    workflow_permissions:
+      actions: read
+      contents: read
+      issues: write
+      note: >-
+        Cost-center reads and mutations use ISSUEOPS_GITHUB_TOKEN (classic PAT).
+        issues:write is required for terminal-state label application via the
+        workflow's own github.token. Workflow-level contents write is not
+        required because audit persistence uses retained workflow artifacts.
+    terminal_state_labels:
+      prefix: "issueops:manage-cost-centers:"
+      values:
+        - issueops:manage-cost-centers:executed
+        - issueops:manage-cost-centers:failed
+        - issueops:manage-cost-centers:partially_executed
+      ensure_step: >-
+        Labels are idempotently created via 'gh label create --force' before the
+        approved-execution step runs, guarded by the approval-status condition.
+      applied_on: approved execution completion (terminal request_status)
+
+authorization:
+  requester_identity: github.event.issue.user.login
+  approver_model: >-
+    the exact login named in the request's designated_approver field that
+    comments 'approved'; resolveCostCenterApprover maps commenter==designated to
+    approver_role designated_approver, everything else to other
+  enterprise_role_limitation: >-
+    there is no cheap REST check for a user's enterprise billing role, so neither
+    requester nor approver enterprise authority is verified by the workflow; the
+    hard mutation gate is the enterprise-billing-scoped classic PAT
+  execution_identity:
+    credential: ISSUEOPS_GITHUB_TOKEN
+    token_kind: classic_pat
+    required_scope: manage_billing:enterprise
+    held_by: enterprise owner or billing manager
+    rejected_token_kinds:
+      - github_app
+      - fine_grained_pat
+    least_privilege: true
+    fail_closed: >-
+      assertCostCenterMutationAllowed blocks mutation unless approval is
+      approved, approver_role is designated_approver, dry_run is off, and the
+      token is PAT-backed (tokenInfo.is_pat_backed)
+
+validation_rules:
+  - enterprise slug is required; absence fails the whole request structurally.
+  - designated approver is required; absence fails the whole request structurally.
+  - CSV must be non-empty and the header must include cost_center and action.
+  - a valid header with no data rows fails the whole request structurally.
+  - per row, action must be one of create, rename, delete (else invalid_action).
+  - per row, cost_center is required (else missing_cost_center).
+  - create -> noop if the name already exists, else create_cost_center.
+  - rename requires new_name (else missing_new_name); resolves by cost_center_id else name.
+  - rename to an ambiguous name with no id is rejected, listing candidate ids (ambiguous_cost_center).
+  - rename to a not-found target is rejected (not_found).
+  - rename to the current name is a noop.
+  - rename to a name used by another cost center is rejected (name_taken).
+  - delete resolves by id else name; not_found is a noop; ambiguous with no id is rejected.
+  - delete of a cost center with attached resources is rejected (delete_blocked) unless force=true.
+  - names must be at most 255 characters (else name_too_long).
+  - cross-row conflicts (same cost center, different actions) reject all involved rows (conflicting_rows).
+  - per-row rejections do not sink the sheet; the valid and unverified subset proceeds.
+  - dry-run requests pass validation and produce the plan but execute no mutation.
+  - fail-soft: without live access, actionable rows are marked unverified and the request stays approval-ready, dry-run only.
+
+reconciliation:
+  current_state_reads:
+    - list active enterprise cost centers (when live access is available)
+    - get a cost center's attached resources to evaluate delete safety
+  actionable_rows: rows whose validation_status is valid or unverified
+  buckets:
+    - creates (desired_action = create_cost_center)
+    - renames (desired_action = rename_cost_center)
+    - deletes (desired_action = delete_cost_center)
+    - noops (validation_status = noop)
+    - rejected (validation_status = rejected)
+  order: creates, then renames, then deletes
+  no_op_rule:
+    - create of an existing name: noop
+    - delete of a missing name: noop
+    - rename to the current name: noop
+  blocked_rule:
+    - plan has no rows: blocked_reason no_rows
+  rerun_rule: idempotent; existing create noop, missing delete noop, reruns converge
+  dry_run_rule: state = validated; emit plan; no mutation
+  state_values: [blocked, validated, approved_for_execution]
+
+execution:
+  policy_guards:
+    - assertCostCenterMutationAllowed: requires approval_status=approved, approver_role=designated_approver, dry_run=off, PAT-backed token
+  pre_mutation: re-validate the request against live cost centers so the executed plan reflects current state
+  mutation_order:
+    - 1. createCostCenter for each create row
+    - 2. renameCostCenter (PATCH name) for each rename row by resolved_cost_center_id
+    - 3. deleteCostCenter for each delete row by resolved_cost_center_id
+  retry: executeWithBoundedRetry (default maxRetries 2) around each live read and mutation
+  api_endpoints:
+    base: https://api.github.com
+    list: GET /enterprises/{enterprise}/settings/billing/cost-centers
+    create: POST /enterprises/{enterprise}/settings/billing/cost-centers  {name}
+    get: GET /enterprises/{enterprise}/settings/billing/cost-centers/{id}
+    rename: PATCH /enterprises/{enterprise}/settings/billing/cost-centers/{id}  {name}
+    delete: DELETE /enterprises/{enterprise}/settings/billing/cost-centers/{id}
+    object_shape: id, name, state (active|deleted), resources[]{type,name}
+    api_version_override: COST_CENTER_API_VERSION env (default 2022-11-28)
+  per_row_outcomes: [created, renamed, deleted, noop, failed]
+  failure_classification:
+    - 429 -> rate_limited
+    - other status -> http_<status>
+    - no status -> unknown_error
+  partial_failure_handling: >-
+    each mutation is attempted independently. request_status is executed when no
+    row failed, partially_executed when some rows applied or no-op'd while others
+    failed, and failed when nothing applied. rollback_status is
+    manual_follow_up_required on any failure; recovery is an idempotent re-run.
+
+observability:
+  persistence_model: retained workflow artifact plus github step summary
+  outputs:
+    - github_step_summary
+    - json_audit_artifact
+  artifact_requirements:
+    upload_on:
+      - validation
+      - approval
+      - approved_execution
+    upload_condition: always
+    retention_policy_source: AUDIT_ARTIFACT_RETENTION_DAYS env (default 30 days)
+    artifact_name_pattern: "manage-cost-centers-execution-{issue_number}-{run_attempt}"
+    validation_artifact_path: "artifacts/manage-cost-centers-validation-{issue_number}.json"
+  audit_artifact_fields:
+    request:
+      - request_id
+      - issue_number
+      - repository
+      - requester_login
+      - enterprise
+      - enterprise_normalized
+      - designated_approver_login
+      - dry_run
+      - business_justification
+      - intake_mode
+      - request_status
+      - csv_header
+      - csv_schema_status
+      - unsupported_columns
+      - duplicate_row_count
+      - requested_changes
+      - submitted_at
+    validation:
+      - is_valid
+      - errors
+      - warnings
+      - live_access
+      - counts (create, rename, delete, noop, rejected)
+      - requested_changes (per-row: source_row_number, cost_center_input, action, new_name_input, cost_center_id, force, resolved_cost_center_id, resolved_name, desired_action, validation_status, failure_reason, detail)
+    approval:
+      - approval_status
+      - approver_login
+      - approver_role
+      - approved_at
+      - decision_source
+      - decision_note
+    reconciliation:
+      - mutation_count
+      - noop_count
+      - rejected_count
+      - blocked_reason
+      - dry_run
+      - state
+    execution:
+      - created_count
+      - renamed_count
+      - deleted_count
+      - noop_count
+      - failure_count
+      - executed_count
+      - rollback_status
+      - summary
+      - results
+    metadata:
+      - operation (cost_center_management)
+      - run_id
+      - run_attempt
+      - generated_at
+      - artifact_name
+      - artifact_retention_days
+  lifecycle_states:
+    - submitted
+    - validation_failed
+    - awaiting_approval
+    - approved
+    - executed
+    - partially_executed
+    - failed
+
+rate_limit_handling:
+  strategy: bounded_retry
+  helper: executeWithBoundedRetry (default maxRetries 2)
+  inspect_headers:
+    - retry-after
+  retryable_conditions:
+    - transient API failures within the bounded retry budget
+    - secondary rate limit responses surfacing retry-after
+  non_retryable_conditions:
+    - invalid action or missing required row fields
+    - ambiguous cost-center resolution with no id
+    - name_taken rename collision
+    - delete_blocked without force
+    - conflicting cross-row actions
+    - missing or non-PAT credential at the mutation gate
+    - structural validation failure (missing enterprise, missing approver, empty or invalid-header CSV, no data rows)
