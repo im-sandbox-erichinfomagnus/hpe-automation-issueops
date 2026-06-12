@@ -22,6 +22,7 @@ function summarizeResults(results, options = {}) {
   const operationLabel = options.operationLabel || 'entity';
   const summary = {
     mutated: [],
+    removed: [],
     noop: [],
     rejected: [],
     pending: [],
@@ -32,6 +33,9 @@ function summarizeResults(results, options = {}) {
   for (const result of results.map(normalizeExecutionResult)) {
     if (['added', 'created', 'mutated', 'linked', 'removed'].includes(result.result)) {
       summary.mutated.push(result);
+      if (result.result === 'removed') {
+        summary.removed.push(result);
+      }
     } else if (result.result === 'granted') {
       summary.mutated.push(result);
     } else if (result.result === 'noop') {
@@ -110,7 +114,7 @@ function buildExecutionOutcome(input = {}) {
     pending_count: summary.pending.length,
     failure_count: summary.failed.length,
     granted_count: summary.mutated.length,
-    removed_count: summary.mutated.length,
+    removed_count: summary.removed.length,
     duplicate_row_count: input.duplicate_row_count ?? bulkCsvSubmission?.duplicate_row_count ?? 0,
     invalid_row_count: input.invalid_row_count ?? bulkCsvSubmission?.invalid_row_count ?? 0,
     attachment_rate_limit_snapshot: input.attachment_rate_limit_snapshot || null,
