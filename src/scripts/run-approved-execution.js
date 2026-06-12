@@ -201,31 +201,6 @@ function classifyFailureReason(error = {}) {
   return 'unknown_error';
 }
 
-function isOrganizationRoleApiUnavailable(error = {}) {
-  const status = Number(error.status || 0);
-  const message = String(
-    error.payload && error.payload.message
-      ? error.payload.message
-      : error.message || ''
-  ).toLowerCase();
-
-  if (status === 404 || status === 410 || status === 501) {
-    return true;
-  }
-
-  if (status === 403) {
-    return (
-      message.includes('resource not accessible') ||
-      message.includes('requires') ||
-      message.includes('insufficient') ||
-      message.includes('not enabled') ||
-      message.includes('not available')
-    );
-  }
-
-  return false;
-}
-
 function deriveRequestStatus(executionOutcome) {
   if (executionOutcome.failure_count === 0) {
     return 'executed';
