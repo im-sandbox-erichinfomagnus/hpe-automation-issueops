@@ -171,7 +171,6 @@ test('resolveTeamHierarchyApprover requires the designated approver to remain ma
 });
 
 test('resolveTeamHierarchyApprover accepts hyphen slug when team exists with underscore variant', async () => {
-  const fixture = loadFixture().approved;
   const decision = await resolveTeamHierarchyApprover(
     {
       organization: 'im-sandbox-himanshu',

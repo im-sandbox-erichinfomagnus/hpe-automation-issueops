@@ -55,7 +55,6 @@ test('mapLegacyLifecycleStatus preserves active semantics as active lifecycleSta
 // Phase 5 (US3) Non-Regression Tests
 
 const { validateTenantCreationRequest } = require('../../src/workflow-support/validate-tenant-creation-request');
-const { evaluateApprovalGate } = require('../../src/workflow-support/approval-gate');
 
 function buildValidParsedRequest(overrides = {}) {
   return {

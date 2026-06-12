@@ -95,6 +95,11 @@ function ensureTopologyStructureRelation(topology = {}, relation = null) {
     return topology;
   }
 
+  // Only persist a structure edge when the reconciliation actually applied it.
+  if (String(relation.relation_status || '').toLowerCase() !== 'applied') {
+    return topology;
+  }
+
   const nextTopology = topology && typeof topology === 'object' ? { ...topology } : {};
   const teams = nextTopology.teams && typeof nextTopology.teams === 'object' ? { ...nextTopology.teams } : {};
   const structure = Array.isArray(teams.structure) ? [...teams.structure] : [];
@@ -104,7 +109,11 @@ function ensureTopologyStructureRelation(topology = {}, relation = null) {
     String(entry.parent || '').toLowerCase() === String(relation.parent_team_slug).toLowerCase()
   );
 
-  if (!alreadyPresent) {
+  const childAlreadyMapped = structure.some((entry) =>
+    entry && String(entry.team || '').toLowerCase() === String(relation.child_team_slug).toLowerCase()
+  );
+
+  if (!alreadyPresent && !childAlreadyMapped) {
     structure.push({
       team: relation.child_team_slug,
       parent: relation.parent_team_slug,
