@@ -16,6 +16,7 @@ const { buildExecutionOutcome } = require('../workflow-support/build-execution-o
 const { createGitHubTeamApi } = require('../workflow-support/github-team-api');
 const { createGitHubTeamRepoApi } = require('../workflow-support/github-team-repo-api');
 const { executeWithBoundedRetry } = require('../workflow-support/handle-rate-limit');
+const { executeCapabilityOperationWithRetry } = require('../workflow-support/handle-rate-limit');
 const { buildTenantBootstrapRateLimitContext } = require('../workflow-support/handle-rate-limit');
 const { buildTopologyRegistryReadRateLimitContext } = require('../workflow-support/handle-rate-limit');
 const { buildOwnedTopologyPersistenceRateLimitContext } = require('../workflow-support/handle-rate-limit');
@@ -1242,67 +1243,19 @@ async function runApprovedExecution(options = {}) {
         reconciliationPlan.organization_roles_skipped = [];
 
         if (desiredOrganizationRoles.length > 0) {
-          const roleApiProviders = [];
-          if (typeof api.listOrganizationRoles === 'function') {
-            roleApiProviders.push({
-              kind: 'organization_role',
-              list: () => api.listOrganizationRoles({ organization: auditArtifact.request.organization }),
-              create: typeof api.createOrganizationRole === 'function'
-                ? (rolePlan) => api.createOrganizationRole({
-                  organization: auditArtifact.request.organization,
-                  name: rolePlan.role_name,
-                  description: rolePlan.permission_intent || undefined,
-                })
-                : null,
-            });
-          }
-          if (typeof api.listCustomRepositoryRoles === 'function') {
-            roleApiProviders.push({
-              kind: 'custom_repository_role',
-              list: () => api.listCustomRepositoryRoles({ organization: auditArtifact.request.organization }),
-              create: typeof api.createCustomRepositoryRole === 'function'
-                ? (rolePlan) => api.createCustomRepositoryRole({
-                  organization: auditArtifact.request.organization,
-                  name: rolePlan.role_name,
-                  description: rolePlan.permission_intent || undefined,
-                  base_role: rolePlan.repository_base_role,
-                  permissions: rolePlan.repository_permissions,
-                })
-                : null,
-            });
-          }
+          const cicdDecision = reconciliationPlan.cicd_capability_decision || {};
+          const cicdIntent = auditArtifact.request && auditArtifact.request.cicd_capability_intent
+            ? auditArtifact.request.cicd_capability_intent
+            : {};
+          const fallbackAllowed = Boolean(
+            (cicdIntent.fallback_path_available || cicdIntent.fallbackPathAvailable) &&
+            (cicdIntent.fallback_policy_approved || cicdIntent.fallbackPolicyApproved) &&
+            (cicdIntent.tenant_scope_resolvable || cicdIntent.tenantScopeResolvable)
+          );
 
-          let selectedProvider = null;
-          let existingRoleByName = null;
-          let lastRoleApiError = null;
-          for (const provider of roleApiProviders) {
-            const existingRolesResult = await executeWithBoundedRetry(provider.list, {
-              maxRetries: options.maxRetries || 2,
-              sleep: options.sleep,
-            });
-
-            latestRateLimitSnapshot = existingRolesResult.retry_plan.rate_limit_snapshot || latestRateLimitSnapshot;
-
-            if (existingRolesResult.ok) {
-              selectedProvider = provider;
-              existingRoleByName = new Map(
-                (existingRolesResult.value || [])
-                  .filter((entry) => entry && entry.name)
-                  .map((entry) => [normalizeRoleMapKey(entry.name), entry])
-              );
-              break;
-            }
-
-            lastRoleApiError = existingRolesResult.error;
-          }
-
-          if (!selectedProvider) {
-            const failureReason = lastRoleApiError
-              ? classifyFailureReason(lastRoleApiError)
-              : 'api_unsupported';
-            const skipReason = lastRoleApiError
-              ? `organization_role_provisioning_skipped_${failureReason}`
-              : 'organization_role_api_unsupported';
+          if (cicdDecision.status === 'blocked' || cicdDecision.status === 'unavailable' || cicdDecision.status === 'skipped') {
+            const reasonCode = cicdDecision.reason_code || 'capability_unavailable';
+            const skipReason = `cicd_capability_${cicdDecision.status}_${reasonCode}`;
             for (const rolePlan of desiredOrganizationRoles) {
               executionResults.push({
                 role_name: rolePlan.role_name,
@@ -1316,28 +1269,181 @@ async function runApprovedExecution(options = {}) {
               });
             }
           } else {
-            for (const rolePlan of desiredOrganizationRoles) {
-              const existingRole = existingRoleByName.get(normalizeRoleMapKey(rolePlan.role_name));
-              if (existingRole) {
+            const roleApiProviders = [];
+            const selectedPath = String(cicdDecision.selected_path || 'primary').toLowerCase();
+            const includePrimary = selectedPath === 'primary' || selectedPath === 'none';
+            const includeFallback = selectedPath === 'fallback';
+
+            if (includePrimary && typeof api.listOrganizationRoles === 'function') {
+              roleApiProviders.push({
+                kind: 'organization_role',
+                list: () => api.listOrganizationRoles({ organization: auditArtifact.request.organization }),
+                create: typeof api.createOrganizationRole === 'function'
+                  ? (rolePlan) => api.createOrganizationRole({
+                    organization: auditArtifact.request.organization,
+                    name: rolePlan.role_name,
+                    description: rolePlan.permission_intent || undefined,
+                  })
+                  : null,
+              });
+            }
+
+            if (includeFallback && typeof api.listCustomRepositoryRoles === 'function') {
+              roleApiProviders.push({
+                kind: 'custom_repository_role',
+                list: () => api.listCustomRepositoryRoles({ organization: auditArtifact.request.organization }),
+                create: typeof api.createCustomRepositoryRole === 'function'
+                  ? (rolePlan) => api.createCustomRepositoryRole({
+                    organization: auditArtifact.request.organization,
+                    name: rolePlan.role_name,
+                    description: rolePlan.permission_intent || undefined,
+                    base_role: rolePlan.repository_base_role,
+                    permissions: rolePlan.repository_permissions,
+                  })
+                  : null,
+              });
+            }
+
+            if (selectedPath === 'primary' && fallbackAllowed && typeof api.listCustomRepositoryRoles === 'function') {
+              roleApiProviders.push({
+                kind: 'custom_repository_role',
+                list: () => api.listCustomRepositoryRoles({ organization: auditArtifact.request.organization }),
+                create: typeof api.createCustomRepositoryRole === 'function'
+                  ? (rolePlan) => api.createCustomRepositoryRole({
+                    organization: auditArtifact.request.organization,
+                    name: rolePlan.role_name,
+                    description: rolePlan.permission_intent || undefined,
+                    base_role: rolePlan.repository_base_role,
+                    permissions: rolePlan.repository_permissions,
+                  })
+                  : null,
+              });
+            }
+
+            let selectedProvider = null;
+            let existingRoleByName = null;
+            let lastRoleApiError = null;
+            for (const provider of roleApiProviders) {
+              const existingRolesResult = await executeCapabilityOperationWithRetry(provider.list, {
+                maxRetries: options.maxRetries || 2,
+                sleep: options.sleep,
+              });
+
+              latestRateLimitSnapshot = existingRolesResult.retry_plan.rate_limit_snapshot || latestRateLimitSnapshot;
+
+              if (existingRolesResult.ok) {
+                selectedProvider = provider;
+                existingRoleByName = new Map(
+                  (existingRolesResult.value || [])
+                    .filter((entry) => entry && entry.name)
+                    .map((entry) => [normalizeRoleMapKey(entry.name), entry])
+                );
+                break;
+              }
+
+              lastRoleApiError = existingRolesResult.error;
+            }
+
+            if (!selectedProvider) {
+              const failureReason = lastRoleApiError
+                ? classifyFailureReason(lastRoleApiError)
+                : 'api_unsupported';
+              const skipReason = lastRoleApiError
+                ? `organization_role_provisioning_skipped_${failureReason}`
+                : 'organization_role_api_unsupported';
+              reconciliationPlan.cicd_capability_decision = {
+                ...cicdDecision,
+                selected_path: 'none',
+                status: 'unavailable',
+                reason_code: 'capability_unavailable',
+                reason_message: 'No safe CI/CD capability provider was available at execution time.',
+              };
+              reconciliationPlan.cicd_capability_action = 'unavailable';
+              for (const rolePlan of desiredOrganizationRoles) {
                 executionResults.push({
                   role_name: rolePlan.role_name,
                   requested_name: rolePlan.role_name,
                   execution_result: 'noop',
                   failure_reason: null,
                 });
-                reconciliationPlan.organization_roles_already_present.push({
+                reconciliationPlan.organization_roles_skipped.push({
                   ...rolePlan,
-                  role_id: existingRole.id || null,
-                  role_api_provider: selectedProvider.kind,
+                  skip_reason: skipReason,
                 });
-                continue;
+              }
+            } else {
+              if (selectedProvider.kind === 'custom_repository_role' && selectedPath !== 'fallback') {
+                reconciliationPlan.cicd_capability_decision = {
+                  ...cicdDecision,
+                  selected_path: 'fallback',
+                  status: 'applied',
+                  reason_code: null,
+                  reason_message: 'Primary capability path unavailable; fallback repository-scoped path selected.',
+                };
+                reconciliationPlan.cicd_capability_action = 'apply_fallback';
               }
 
-              if (typeof selectedProvider.create !== 'function') {
+              for (const rolePlan of desiredOrganizationRoles) {
+                const existingRole = existingRoleByName.get(normalizeRoleMapKey(rolePlan.role_name));
+                if (existingRole) {
+                  executionResults.push({
+                    role_name: rolePlan.role_name,
+                    requested_name: rolePlan.role_name,
+                    execution_result: 'noop',
+                    failure_reason: null,
+                  });
+                  reconciliationPlan.organization_roles_already_present.push({
+                    ...rolePlan,
+                    role_id: existingRole.id || null,
+                    role_api_provider: selectedProvider.kind,
+                  });
+                  continue;
+                }
+
+                if (typeof selectedProvider.create !== 'function') {
+                  reconciliationPlan.organization_roles_skipped.push({
+                    ...rolePlan,
+                    role_api_provider: selectedProvider.kind,
+                    skip_reason: 'organization_role_api_unsupported',
+                  });
+                  executionResults.push({
+                    role_name: rolePlan.role_name,
+                    requested_name: rolePlan.role_name,
+                    execution_result: 'noop',
+                    failure_reason: null,
+                  });
+                  continue;
+                }
+
+                const createRoleResult = await executeCapabilityOperationWithRetry(
+                  () => selectedProvider.create(rolePlan),
+                  {
+                    maxRetries: options.maxRetries || 2,
+                    sleep: options.sleep,
+                  }
+                );
+
+                latestRateLimitSnapshot = createRoleResult.retry_plan.rate_limit_snapshot || latestRateLimitSnapshot;
+
+                if (createRoleResult.ok) {
+                  executionResults.push({
+                    role_name: rolePlan.role_name,
+                    requested_name: rolePlan.role_name,
+                    execution_result: 'created',
+                    failure_reason: null,
+                  });
+                  reconciliationPlan.organization_roles_to_create.push({
+                    ...rolePlan,
+                    role_id: createRoleResult.value && createRoleResult.value.id || null,
+                    role_api_provider: selectedProvider.kind,
+                  });
+                  continue;
+                }
+
                 reconciliationPlan.organization_roles_skipped.push({
                   ...rolePlan,
                   role_api_provider: selectedProvider.kind,
-                  skip_reason: 'organization_role_api_unsupported',
+                  skip_reason: `organization_role_provisioning_skipped_${classifyFailureReason(createRoleResult.error)}`,
                 });
                 executionResults.push({
                   role_name: rolePlan.role_name,
@@ -1345,45 +1451,7 @@ async function runApprovedExecution(options = {}) {
                   execution_result: 'noop',
                   failure_reason: null,
                 });
-                continue;
               }
-
-              const createRoleResult = await executeWithBoundedRetry(
-                () => selectedProvider.create(rolePlan),
-                {
-                  maxRetries: options.maxRetries || 2,
-                  sleep: options.sleep,
-                }
-              );
-
-              latestRateLimitSnapshot = createRoleResult.retry_plan.rate_limit_snapshot || latestRateLimitSnapshot;
-
-              if (createRoleResult.ok) {
-                executionResults.push({
-                  role_name: rolePlan.role_name,
-                  requested_name: rolePlan.role_name,
-                  execution_result: 'created',
-                  failure_reason: null,
-                });
-                reconciliationPlan.organization_roles_to_create.push({
-                  ...rolePlan,
-                  role_id: createRoleResult.value && createRoleResult.value.id || null,
-                  role_api_provider: selectedProvider.kind,
-                });
-                continue;
-              }
-
-              reconciliationPlan.organization_roles_skipped.push({
-                ...rolePlan,
-                role_api_provider: selectedProvider.kind,
-                skip_reason: `organization_role_provisioning_skipped_${classifyFailureReason(createRoleResult.error)}`,
-              });
-              executionResults.push({
-                role_name: rolePlan.role_name,
-                requested_name: rolePlan.role_name,
-                execution_result: 'noop',
-                failure_reason: null,
-              });
             }
           }
         }
@@ -1512,6 +1580,7 @@ async function runApprovedExecution(options = {}) {
 
         const registryResult = persistTenantRegistryRecord({
           request: auditArtifact.request,
+          reconciliation: reconciliationPlan,
           approver_login: auditArtifact.approval.approver_login,
           lifecycle_status: 'active',
           mode: env.TENANT_REGISTRY_PERSISTENCE_MODE,
@@ -1521,6 +1590,9 @@ async function runApprovedExecution(options = {}) {
         });
 
         reconciliationPlan.registry_persistence_result = registryResult;
+        reconciliationPlan.cicd_topology_update_result = registryResult && registryResult.record && registryResult.record.cicd_topology_relation
+          ? { status: registryResult.record.cicd_topology_relation.relation_status || 'noop' }
+          : { status: 'noop' };
         reconciliationPlan.compatibility_mode = reconciliationPlan.compatibility_mode || auditArtifact.request && auditArtifact.request.compatibility && auditArtifact.request.compatibility.mode || 'canonical';
         reconciliationPlan.registry_migration_status = registryResult && registryResult.migration
           ? registryResult.migration.status
@@ -1803,6 +1875,12 @@ async function runApprovedExecution(options = {}) {
       : null,
     topology_persistence_result: isTenantRepoCreation
       ? reconciliationPlan.topology_persistence_result || null
+      : null,
+    cicd_capability: isTenantCreation
+      ? reconciliationPlan.cicd_capability_decision || null
+      : null,
+    cicd_topology_update_outcome: isTenantCreation
+      ? reconciliationPlan.cicd_topology_update_result && reconciliationPlan.cicd_topology_update_result.status || null
       : null,
     audit_persistence_result: isTenantRepoCreation ? 'pending' : null,
     artifact_path: artifactPath,

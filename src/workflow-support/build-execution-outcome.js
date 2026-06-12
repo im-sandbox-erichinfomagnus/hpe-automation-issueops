@@ -114,6 +114,20 @@ function deriveContextBindingStatus(input = {}) {
   return 'mismatched';
 }
 
+function mapCicdCapabilityOutcome(input = {}) {
+  const candidate = input && typeof input === 'object' ? input : {};
+  const allowedStatuses = new Set(['requested', 'applied', 'skipped', 'blocked', 'unavailable', 'failed']);
+  const rawStatus = String(candidate.status || candidate.capability_status || '').toLowerCase();
+  const normalizedStatus = allowedStatuses.has(rawStatus) ? rawStatus : 'skipped';
+
+  return {
+    selected_path: String(candidate.selected_path || candidate.selectedPath || 'none').toLowerCase(),
+    status: normalizedStatus,
+    reason_code: candidate.reason_code || candidate.reasonCode || null,
+    reason_message: candidate.reason_message || candidate.reasonMessage || null,
+  };
+}
+
 function buildExecutionOutcome(input = {}) {
   const executionResults = input.executionResults || input.execution_results || [];
   const runContext = input.runContext || input.run_context || {};
@@ -138,6 +152,7 @@ function buildExecutionOutcome(input = {}) {
   const awaitingApprovalSummary = terminalState === 'awaiting_approval' && summary.mutated.length === 0
     ? 'Request is validated and ready for approval. No mutation was attempted in this phase.'
     : null;
+  const cicdCapability = mapCicdCapabilityOutcome(input.cicd_capability || input.cicdCapability || {});
 
   return {
     run_id: runContext.run_id || process.env.GITHUB_RUN_ID || null,
@@ -169,6 +184,11 @@ function buildExecutionOutcome(input = {}) {
     tenant_id: input.tenant_id || input.tenantId || null,
     tenant_team_slug: input.tenant_team_slug || input.tenantTeamSlug || null,
     repo_admin_team_slug: input.repo_admin_team_slug || input.repoAdminTeamSlug || null,
+    cicd_capability_selected_path: cicdCapability.selected_path,
+    cicd_capability_status: cicdCapability.status,
+    cicd_capability_reason_code: cicdCapability.reason_code,
+    cicd_capability_reason_message: cicdCapability.reason_message,
+    cicd_topology_update_outcome: input.cicd_topology_update_outcome || input.cicdTopologyUpdateOutcome || null,
     repository_creation_result: input.repository_creation_result || null,
     repo_admin_grant_result: input.repo_admin_grant_result || null,
     audit_persistence_result: input.audit_persistence_result || null,
@@ -201,6 +221,7 @@ module.exports = {
   deriveContextBindingStatus,
   deriveOwnedTopologyAction,
   deriveRollbackStatus,
+  mapCicdCapabilityOutcome,
   normalizeExecutionResult,
   summarizeResults,
 };

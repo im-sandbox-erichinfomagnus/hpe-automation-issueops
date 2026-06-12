@@ -31,7 +31,11 @@ test('parseTenantCreationRequest derives canonical tenant type and topology stru
   assert.equal(request.tenant_type, 'platform');
   assert.equal(request.topology.organization.orgName, 'octo-org');
   assert.equal(request.topology.teams.tenantRootTeam, 'acme-platform-root');
-  assert.equal(request.topology.teams.structure.length, 3);
+  assert.equal(request.topology.teams.structure.length, 4);
+  assert.equal(request.cicd_admin_team_name, 'acme-platform-cicd-admin');
+  assert.equal(request.cicd_admin_team_slug, 'acme-platform-cicd-admin');
+  assert.equal(request.requested_teams.length, 4);
+  assert.equal(request.requested_child_links.length, 3);
   assert.deepEqual(
     request.topology.accessModel.roles,
     ['tenant-admin', 'repo-admin', 'developer', 'viewer']

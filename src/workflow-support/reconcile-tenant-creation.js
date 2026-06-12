@@ -43,6 +43,60 @@ function buildCanonicalTopologyDraft(request = {}) {
   };
 }
 
+function evaluateCicdCapabilityPath(intent = {}) {
+  const normalizedIntent = intent && typeof intent === 'object' ? intent : {};
+  const requested = normalizedIntent.requested !== false;
+  const primaryAvailable = Boolean(normalizedIntent.primary_path_available || normalizedIntent.primaryPathAvailable);
+  const primaryApproved = Boolean(normalizedIntent.primary_policy_approved || normalizedIntent.primaryPolicyApproved);
+  const fallbackAvailable = Boolean(normalizedIntent.fallback_path_available || normalizedIntent.fallbackPathAvailable);
+  const fallbackApproved = Boolean(normalizedIntent.fallback_policy_approved || normalizedIntent.fallbackPolicyApproved);
+  const tenantScopeResolvable = Boolean(normalizedIntent.tenant_scope_resolvable || normalizedIntent.tenantScopeResolvable);
+  const unsafeScope = Boolean(normalizedIntent.unsafe_scope || normalizedIntent.unsafeScope);
+
+  if (!requested) {
+    return {
+      selected_path: 'none',
+      status: 'skipped',
+      reason_code: 'not_requested',
+      reason_message: 'CI/CD capability intent is not requested for this run.',
+    };
+  }
+
+  if (unsafeScope) {
+    return {
+      selected_path: 'none',
+      status: 'blocked',
+      reason_code: 'unsafe_scope',
+      reason_message: 'Requested capability path implies broad org-wide scope and is blocked by policy.',
+    };
+  }
+
+  if (primaryAvailable && primaryApproved && tenantScopeResolvable) {
+    return {
+      selected_path: 'primary',
+      status: 'applied',
+      reason_code: null,
+      reason_message: 'Primary capability path is available and policy-approved.',
+    };
+  }
+
+  if (fallbackAvailable && fallbackApproved && tenantScopeResolvable) {
+    return {
+      selected_path: 'fallback',
+      status: 'applied',
+      reason_code: null,
+      reason_message: 'Fallback capability path is available and policy-approved.',
+    };
+  }
+
+  return {
+    selected_path: 'none',
+    status: 'unavailable',
+    reason_code: 'capability_unavailable',
+    reason_message: 'No safe CI/CD capability path is available for this request.',
+  };
+}
+
 function reconcileTenantCreation(input = {}) {
   const request = input.request || {};
   const validatedTeams = input.validatedTeams || input.requested_teams || [];
@@ -116,6 +170,47 @@ function reconcileTenantCreation(input = {}) {
     : 'ensure_maintainer';
 
   const canonicalTopologyDraft = buildCanonicalTopologyDraft(request);
+  const fallbackCapabilityTargets = canonicalTopologyDraft && canonicalTopologyDraft.repositories && Array.isArray(canonicalTopologyDraft.repositories.owned)
+    ? canonicalTopologyDraft.repositories.owned
+        .map((repo) => {
+          const owner = String(repo && repo.owner || '').trim();
+          const name = String(repo && repo.name || '').trim();
+          if (!owner || !name) {
+            return null;
+          }
+          return {
+            repository_full_name: `${owner}/${name}`,
+            repository_owner: owner,
+            repository_name: name,
+          };
+        })
+        .filter(Boolean)
+    : [];
+  let cicdCapabilityDecision = evaluateCicdCapabilityPath(request.cicd_capability_intent || null);
+  if (cicdCapabilityDecision.selected_path === 'fallback' && fallbackCapabilityTargets.length === 0) {
+    cicdCapabilityDecision = {
+      selected_path: 'none',
+      status: 'unavailable',
+      reason_code: 'capability_unavailable',
+      reason_message: 'Fallback capability path requires tenant-owned repositories.',
+    };
+  }
+  const cicdCapabilityAssignmentPlan = {
+    selected_path: cicdCapabilityDecision.selected_path,
+    status: cicdCapabilityDecision.status,
+    reason_code: cicdCapabilityDecision.reason_code,
+    targets: cicdCapabilityDecision.selected_path === 'fallback'
+      ? fallbackCapabilityTargets
+      : [],
+  };
+  const cicdAdminTeamSlug = String(request.cicd_admin_team_slug || '').toLowerCase();
+  const cicdAdminTeamRequested = Boolean(cicdAdminTeamSlug);
+  const cicdAdminTeamCreatePlanned = cicdAdminTeamRequested && teamsToCreate.some((team) =>
+    String(team.normalized_slug || '').toLowerCase() === cicdAdminTeamSlug
+  );
+  const cicdAdminTeamAlreadyPresent = cicdAdminTeamRequested && teamsAlreadyPresent.some((team) =>
+    String(team.normalized_slug || '').toLowerCase() === cicdAdminTeamSlug
+  );
 
   return {
     organization_exists: input.organization_exists !== false,
@@ -136,6 +231,18 @@ function reconcileTenantCreation(input = {}) {
         ? canonicalTopologyDraft.teams.structure.length
         : 0,
     },
+    cicd_capability_decision: cicdCapabilityDecision,
+    cicd_capability_action: cicdCapabilityDecision.selected_path === 'primary'
+      ? 'apply_primary'
+      : cicdCapabilityDecision.selected_path === 'fallback'
+        ? 'apply_fallback'
+        : cicdCapabilityDecision.status,
+    cicd_capability_assignment_plan: cicdCapabilityAssignmentPlan,
+    cicd_admin_team_requested: cicdAdminTeamRequested,
+    cicd_admin_team_create_planned: cicdAdminTeamCreatePlanned,
+    cicd_admin_team_already_present: cicdAdminTeamAlreadyPresent,
+    cicd_topology_update_action: request.cicd_admin_team_slug ? 'evaluate' : 'not_applicable',
+    cicd_topology_update_result: null,
     dry_run: Boolean(input.dry_run ?? request.dry_run),
     rate_limit_snapshot: input.rate_limit_snapshot || null,
     state: teamsRejected.length > 0 || childLinksRejected.length > 0
@@ -146,5 +253,6 @@ function reconcileTenantCreation(input = {}) {
 
 module.exports = {
   buildCanonicalTopologyDraft,
+  evaluateCicdCapabilityPath,
   reconcileTenantCreation,
 };
