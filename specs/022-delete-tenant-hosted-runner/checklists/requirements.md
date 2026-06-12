@@ -32,5 +32,5 @@
 ## Notes
 
 - Validation completed on 2026-06-05.
-- This feature shares the tenant CI/CD authorization foundation (derived `TenantName_CICDAdmins` team, shared registry resolver, hosted-runner policy guard) with sibling feature 021.
+- This feature shares the tenant CI/CD authorization foundation (canonical tenant topology admin team (`<tenant-slug>-admin`), shared registry resolver, hosted-runner policy guard) with sibling feature 021.
 - Deletion is irreversible; the compensating action is re-creation through the 021 workflow, recorded in research.md Decision 5.

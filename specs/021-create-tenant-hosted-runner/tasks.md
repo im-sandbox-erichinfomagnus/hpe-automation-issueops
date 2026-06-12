@@ -25,7 +25,7 @@
 **⚠️ CRITICAL**: Shared modules used by validation, approval, and execution must exist before story phases.
 
 - [x] T004 Implement `src/workflow-support/github-runner-api.js` with hosted-runner and runner-group org endpoints (list/create/delete hosted runners, list/create runner groups, reference reads) following the github-team-api fetch conventions
-- [x] T005 Implement `src/workflow-support/resolve-tenant-cicd-context-from-registry.js` deriving `TenantName_CICDAdmins` from registry records and authorizing requester membership via live team-membership reads
+- [x] T005 Implement `src/workflow-support/resolve-tenant-cicd-context-from-registry.js` deriving `<tenant-slug>-admin` from registry records and authorizing requester membership via live team-membership reads
 - [x] T006 [P] Implement `src/workflow-support/parse-hosted-runner-request.js` with runner-name derivation and normalization helpers
 - [x] T007 [P] Implement `src/actions/hosted-runner-policy/index.js` exporting `assertHostedRunnerMutationAllowed`
 
@@ -40,7 +40,7 @@
 ### Tests for User Story 1 ⚠️
 
 - [x] T008 [P] [US1] Contract test `tests/contract/create-tenant-hosted-runner-parser-fixture.test.js` covering issue-form fixture scaffold, parser field mapping, name derivation, and normalization
-- [x] T009 [P] [US1] Contract test `tests/contract/create-tenant-hosted-runner-validation.test.js` covering tenant resolution, CI/CD admin membership authorization, missing-team fail-closed, name-constraint rejection, and runner-group resolution
+- [x] T009 [P] [US1] Contract test `tests/contract/create-tenant-hosted-runner-validation.test.js` covering tenant resolution, topology admin membership authorization, missing-team fail-closed, name-constraint rejection, and runner-group resolution
 
 ### Implementation for User Story 1
 

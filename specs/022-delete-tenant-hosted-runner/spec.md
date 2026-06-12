@@ -3,29 +3,29 @@
 **Feature Branch**: `022-delete-tenant-hosted-runner`
 **Created**: 2026-06-05
 **Status**: Draft
-**Input**: User description: "Delete GitHub-Hosted Runner (org level only). Verify if user member team X_Tenant_CICDAdmin. If not error. Delete X_Tenant_Name runner. Tenant context, tenant registry storage, and team derivation follow specs/014-create-tenant-model; tenant CI/CD authorization follows specs/021-create-tenant-hosted-runner."
+**Input**: User description: "Delete GitHub-Hosted Runner (org level only). Verify if user member team <tenant-slug>-admin. If not error. Delete X_Tenant_Name runner. Tenant context, tenant registry storage, and team derivation follow specs/014-create-tenant-model; tenant CI/CD authorization follows specs/021-create-tenant-hosted-runner."
 
 **Repository Structure Note**: Follow the constitution section `Repository Structure Conventions` for repository layout and artifact placement assumptions that this specification should respect.
 
-**Tenant Model Dependency**: This feature consumes the tenant model defined in `specs/014-create-tenant-model` and the tenant CI/CD authorization model introduced in `specs/021-create-tenant-hosted-runner` (derived `TenantName_CICDAdmins` team, deterministic tenant-prefixed runner naming, shared `tenant-registry/` resolution).
+**Tenant Model Dependency**: This feature consumes the tenant model defined in `specs/014-create-tenant-model` and the tenant CI/CD authorization model introduced in `specs/021-create-tenant-hosted-runner` (canonical tenant topology admin team (`<tenant-slug>-admin`), deterministic tenant-prefixed runner naming, shared `tenant-registry/` resolution).
 
 
-> **Topology update (2026-06-05):** Tenant context is now read from the canonical tenant topology in `tenant-registry/` defined by `specs/022-enhance-tenant-topology` (camelCase `tenantName`/`topology.teams.structure[]` with team types root/admin/repo-admin, plus a legacy-flat projection). The requester CI/CD authorization team is the tenant topology **admin** team (structure type "admin", `<tenant-slug>-admin`, carrying the `tenant-admin` role), not a separately-derived `TenantName_CICDAdmins` team. Inline references below to `TenantName_CICDAdmins` derivation are superseded by this note.
+> **Topology update (2026-06-05):** Tenant context is now read from the canonical tenant topology in `tenant-registry/` defined by `specs/022-enhance-tenant-topology` (camelCase `tenantName`/`topology.teams.structure[]` with team types root/admin/repo-admin, plus a legacy-flat projection). The requester CI/CD authorization team is the tenant topology **admin** team (structure type "admin", `<tenant-slug>-admin`, carrying the `tenant-admin` role), not a separately-canonical tenant topology admin team (`<tenant-slug>-admin`). Inline references below to `<tenant-slug>-admin` derivation are superseded by this note.
 
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Submit and Validate Tenant Runner Deletion Requests (Priority: P1)
 
-A tenant CI/CD administrator submits a request in the central administration repository to delete one GitHub-hosted runner belonging to their tenant in a target GitHub organization, and the workflow validates tenant context resolution, requester CI/CD-admin team membership, derived runner naming, and current runner existence before any mutation is allowed.
+A tenant topology administrator submits a request in the central administration repository to delete one GitHub-hosted runner belonging to their tenant in a target GitHub organization, and the workflow validates tenant context resolution, requester CI/CD-admin team membership, derived runner naming, and current runner existence before any mutation is allowed.
 
 **Why this priority**: Deletion is destructive to tenant CI capacity, so fail-closed tenant authorization and unambiguous runner targeting are required before review or approval.
 
-**Independent Test**: Can be fully tested by submitting requests from requesters who are and are not active members of the derived tenant CI/CD admin team, against runners that exist and do not exist, and verifying only tenant-authorized requests become approval-ready.
+**Independent Test**: Can be fully tested by submitting requests from requesters who are and are not active members of the canonical tenant topology admin team, against runners that exist and do not exist, and verifying only tenant-authorized requests become approval-ready.
 
 **Acceptance Scenarios**:
 
-1. **Given** a requester who is an active member of the derived `TenantName_CICDAdmins` team names an existing tenant runner, **When** validation completes, **Then** the workflow resolves the runner identifier and marks the request approval-ready with no mutation performed.
-2. **Given** a requester who is not an active member of the derived `TenantName_CICDAdmins` team, **When** validation completes, **Then** the workflow rejects the request with an explicit authorization error and no mutation is attempted.
+1. **Given** a requester who is an active member of the canonical tenant topology admin team (`<tenant-slug>-admin`) names an existing tenant runner, **When** validation completes, **Then** the workflow resolves the runner identifier and marks the request approval-ready with no mutation performed.
+2. **Given** a requester who is not an active member of the canonical tenant topology admin team (`<tenant-slug>-admin`), **When** validation completes, **Then** the workflow rejects the request with an explicit authorization error and no mutation is attempted.
 3. **Given** no hosted runner with the derived name exists, **When** validation completes, **Then** the request remains valid and is marked for no-op convergence with an explicit warning.
 
 ---
@@ -64,8 +64,8 @@ After valid approval, the workflow revalidates tenant boundary state, re-reads c
 
 - The target organization is missing or not visible to the workflow credential.
 - The tenant name does not resolve to exactly one tenant registry record for the target organization.
-- The derived `TenantName_CICDAdmins` team does not exist in the target organization.
-- The requester has a pending (not active) membership in the CI/CD admin team.
+- The canonical tenant topology admin team (`<tenant-slug>-admin`) does not exist in the target organization.
+- The requester has a pending (not active) membership in the topology admin team.
 - The submitted runner name carries another tenant's prefix (derivation confines targeting to the resolved tenant's prefix).
 - The runner exists at validation time but is deleted by another actor before execution (platform 404 treated as converged no-op).
 - The runner is busy executing jobs at deletion time (platform-side semantics; surfaced as failure if the API rejects).
@@ -81,7 +81,7 @@ After valid approval, the workflow revalidates tenant boundary state, re-reads c
 - **FR-002**: The request MUST capture target organization, tenant name, runner name, designated approver login, explicit dry-run indicator, and justification.
 - **FR-003**: The system MUST derive the full runner name deterministically using the 021 derivation rules, accepting either the tenant-prefixed full name or the base name.
 - **FR-004**: The system MUST resolve canonical tenant context from per-tenant registry records under `tenant-registry/` following the `specs/014-create-tenant-model` registry contract.
-- **FR-005**: The system MUST verify the requester is an active member of the derived `TenantName_CICDAdmins` team and reject the request otherwise, failing closed when the team is missing.
+- **FR-005**: The system MUST verify the requester is an active member of the canonical tenant topology admin team (`<tenant-slug>-admin`) and reject the request otherwise, failing closed when the team is missing.
 - **FR-006**: The system MUST resolve the existing hosted runner by exact derived-name match against current organization hosted-runner state and capture its identifier for deletion.
 - **FR-007**: The system MUST delete the hosted runner only when present, and MUST treat an absent runner as converged no-op rather than failure.
 - **FR-008**: Deletion MUST target only the runner whose name carries the resolved tenant's naming prefix; the derivation rule structurally prevents cross-tenant targeting.
@@ -99,7 +99,7 @@ After valid approval, the workflow revalidates tenant boundary state, re-reads c
 ### Authorization Requirements *(mandatory)*
 
 - **AR-001**: Requester identity MUST be derived from the GitHub user who created the central repository request.
-- **AR-002**: Requester authorization MUST require active membership in the derived `TenantName_CICDAdmins` team in the target organization at validation time.
+- **AR-002**: Requester authorization MUST require active membership in the canonical tenant topology admin team (`<tenant-slug>-admin`) in the target organization at validation time.
 - **AR-003**: Approver identity MUST be derived from the GitHub user who posts the explicit approval comment in the central repository.
 - **AR-004**: A valid approver MUST be designated in the request and MUST be an active owner of the target organization at approval evaluation time.
 - **AR-005**: Approval MUST be denied if the approver is not both designated and currently an active target-org owner.
@@ -110,7 +110,7 @@ After valid approval, the workflow revalidates tenant boundary state, re-reads c
 
 - **VS-001**: The issue form payload MUST be parsed into structured fields before any mutation step can be considered.
 - **VS-002**: Validation MUST verify target organization visibility and accessibility to workflow credentials.
-- **VS-003**: Validation MUST resolve tenant context from the tenant registry and verify the derived CI/CD admin team exists with the requester holding active membership.
+- **VS-003**: Validation MUST resolve tenant context from the tenant registry and verify the derived topology admin team exists with the requester holding active membership.
 - **VS-004**: Validation MUST verify deterministic runner-name derivation and reject empty or invalid derived names.
 - **VS-005**: Validation MUST read current hosted-runner state and resolve the target runner identifier when present.
 - **VS-006**: Validation MUST verify designated approver membership and active-owner role in the target organization.
@@ -150,7 +150,7 @@ After valid approval, the workflow revalidates tenant boundary state, re-reads c
 
 - **TE-001**: Tests MUST cover valid and invalid request parsing for organization, tenant name, runner name, dry-run, and justification fields.
 - **TE-002**: Tests MUST cover runner-name derivation for both base-name and full-name submissions.
-- **TE-003**: Tests MUST cover requester authorization for active members and non-members of the derived CI/CD admin team, and the missing-team fail-closed path.
+- **TE-003**: Tests MUST cover requester authorization for active members and non-members of the derived topology admin team, and the missing-team fail-closed path.
 - **TE-004**: Tests MUST cover approval-gate behavior for authorized active-owner approvers and unauthorized actors.
 - **TE-005**: Tests MUST cover reconciliation behavior for the delete path, the absent-runner no-op path, and rerun convergence.
 - **TE-006**: Tests MUST cover missing or insufficient token failure and fail-closed behavior.
@@ -160,7 +160,7 @@ After valid approval, the workflow revalidates tenant boundary state, re-reads c
 ### Key Entities *(include if feature involves data)*
 
 - **HostedRunnerDeletionRequest**: The parsed request record containing requester, target organization, tenant name, runner name, dry-run flag, justification, approval state, validation results, and execution outcomes.
-- **TenantCicdContext**: The resolved tenant governance context (shared with 021) authorizing the requester for CI/CD administration.
+- **TenantCicdContext**: The resolved tenant governance context (shared with 021) authorizing the requester for topology administration.
 - **TargetRunnerResolution**: The resolved hosted-runner identifier, name, and status for the derived tenant-prefixed name, or an explicit absent marker.
 - **HostedRunnerDeletionPlan**: The desired-versus-current diff with deletion action (`delete_hosted_runner` | `noop` | `reject`), blocked reason, and dry-run posture.
 - **HostedRunnerDeletionOutcome**: Audit-grade per-step execution result including the deletion result and final lifecycle state.
@@ -169,7 +169,7 @@ After valid approval, the workflow revalidates tenant boundary state, re-reads c
 
 ### Measurable Outcomes
 
-- **SC-001**: 100% of requests from users without active derived CI/CD admin team membership are rejected before approval with an explicit authorization error.
+- **SC-001**: 100% of requests from users without active derived topology admin team membership are rejected before approval with an explicit authorization error.
 - **SC-002**: 100% of execution attempts without valid designated active-owner approval remain blocked from mutation.
 - **SC-003**: 100% of reruns against an already-absent runner complete as no-op without errors.
 - **SC-004**: No execution path can delete a runner outside the resolved tenant naming boundary.
@@ -180,7 +180,7 @@ After valid approval, the workflow revalidates tenant boundary state, re-reads c
 - Requests are submitted by authenticated GitHub users through the repository issue-form flow.
 - One request manages exactly one hosted runner for exactly one tenant in exactly one target organization.
 - Tenant registry records under `tenant-registry/` are maintained by the 014 tenant bootstrap workflow and are authoritative for tenant context resolution.
-- The tenant CI/CD administration team (`TenantName_CICDAdmins`) is provisioned by a separate governance process; this feature only verifies its existence and the requester's membership.
+- The tenant topology admin team (`<tenant-slug>-admin`) is provisioned by a separate governance process; this feature only verifies its existence and the requester's membership.
 - `ISSUEOPS_GITHUB_TOKEN` is PAT-backed and scoped for hosted-runner administration (`manage_runners:org` classic scope or the equivalent fine-grained permission).
 - The platform accepts deletion of hosted runners via `DELETE /orgs/{org}/actions/hosted-runners/{hosted_runner_id}` returning 202; in-flight job handling is platform-side behavior.
 - Runner re-creation after deletion flows through the 021 creation workflow.

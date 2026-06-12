@@ -2,33 +2,33 @@
 
 ## Decision 0: Read tenant context from the canonical tenant topology (supersedes the CICDAdmins derivation)
 
-- Decision: Resolve tenant context from the canonical tenant topology that `specs/022-enhance-tenant-topology` stores in `tenant-registry/` (record carries `tenantName`, `tenantId`, and `topology.teams.structure[]` with team types root/admin/repo-admin; legacy flat records are projected to the same `<tenant-slug>-root`/`-admin`/`-repo-admin` naming). Authorize the requester against the topology **admin** team (structure type "admin", the `tenant-admin` role), which is the tenant CI/CD administration authority in the new model.
-- Rationale: The new topology has no dedicated `CICDAdmins` team or role; the `admin` team (tenant-admin: create repos, create teams, manage repository access) is the tenant governance authority that runner administration sits under. Reading the topology directly keeps these ops consistent with create-tenant-model and removes the invented `TenantName_CICDAdmins` naming.
+- Decision: Resolve tenant context from the canonical tenant topology that `specs/022-enhance-tenant-topology` stores in `tenant-registry/` (record carries `tenantName`, `tenantId`, and `topology.teams.structure[]` with team types root/admin/repo-admin; legacy flat records are projected to the same `<tenant-slug>-root`/`-admin`/`-repo-admin` naming). Authorize the requester against the topology **admin** team (structure type "admin", the `tenant-admin` role), which is the tenant topology administration authority in the new model.
+- Rationale: The new topology has no dedicated `CICDAdmins` team or role; the `admin` team (tenant-admin: create repos, create teams, manage repository access) is the tenant governance authority that runner administration sits under. Reading the topology directly keeps these ops consistent with create-tenant-model and removes the invented `<tenant-slug>-admin` naming.
 - Alternatives considered: a dedicated cicd-admin team/role (does not exist in the topology, would require a 022 schema change); the repo-admin team (too narrow - repo-scoped, not org Actions administration).
 
 
-## Decision 1: Tenant CI/CD admin team naming derivation
+## Decision 1: Tenant topology admin team naming derivation
 
-- Decision: Derive the tenant CI/CD administration team as `TenantName_CICDAdmins` (tenant display name with whitespace converted to underscores, suffixed with `_CICDAdmins`), with the slug computed by the same `normalizeSlug` rules used by 014 tenant bootstrap derivation.
+- Decision: Derive the tenant topology admin team as `<tenant-slug>-admin` (tenant display name with whitespace converted to underscores, suffixed with `_CICDAdmins`), with the slug computed by the same `normalizeSlug` rules used by 014 tenant bootstrap derivation.
 - Rationale: The 014 tenant model derives `TenantName_Tenant` and `TenantName_RepoAdmins` by suffixing the normalized tenant display name. Following the identical pattern keeps every tenant governance team discoverable from one derivation rule and keeps registry records free of redundant team fields.
 - Alternatives considered:
-  - `TenantName_Tenant_CICDAdmin` (literal scratch-pad naming `X_Tenant_CICDAdmin`): rejected because it deviates from the implemented 014 suffix-on-display-name convention (`X_RepoAdmin` became `TenantName_RepoAdmins`) and produces longer, redundant team names.
-  - Storing the CI/CD admin team in the tenant registry record: rejected for this version because it requires amending the 014 registry schema and migration of existing records; deterministic derivation needs no schema change. Revisit if team naming ever becomes configurable per tenant.
+  - `TenantName_Tenant_CICDAdmin` (literal scratch-pad naming `<tenant-slug>-admin`): rejected because it deviates from the implemented 014 suffix-on-display-name convention (`X_RepoAdmin` became `TenantName_RepoAdmins`) and produces longer, redundant team names.
+  - Storing the topology admin team in the tenant registry record: rejected for this version because it requires amending the 014 registry schema and migration of existing records; deterministic derivation needs no schema change. Revisit if team naming ever becomes configurable per tenant.
 
 ## Decision 2: Requester authorization via live team membership, not registry data
 
-- Decision: Authorize the requester by reading live active membership in the derived CI/CD admin team via the team-membership API at validation time, and again at execution-time boundary revalidation.
+- Decision: Authorize the requester by reading live active membership in the derived topology admin team via the team-membership API at validation time, and again at execution-time boundary revalidation.
 - Rationale: GitHub is the source of truth (constitution principle I); registry records prove tenant existence but not current membership. Live reads close the gap where membership changed after registry persistence.
 - Alternatives considered:
-  - Trusting registry-recorded bootstrap admin logins: rejected because membership is dynamic and the registry does not track CI/CD admin membership.
-  - Requiring maintainer (not just member) role on the CI/CD admin team: rejected because the tenant model treats CI/CD admin membership itself as the capability grant; maintainer role on that team governs team curation, not runner rights.
+  - Trusting registry-recorded bootstrap admin logins: rejected because membership is dynamic and the registry does not track topology admin membership.
+  - Requiring maintainer (not just member) role on the topology admin team: rejected because the tenant model treats topology admin membership itself as the capability grant; maintainer role on that team governs team curation, not runner rights.
 
-## Decision 3: Fail closed when the CI/CD admin team is missing
+## Decision 3: Fail closed when the topology admin team is missing
 
-- Decision: If the derived `TenantName_CICDAdmins` team does not exist, validation fails with explicit remediation guidance; this workflow never creates the team.
-- Rationale: The source requirement states "Verify if user member team X_Tenant_CICDAdmin. If not error." Team provisioning is a separate governance action (the "Add CICD Admin to Tenant" operation in the tenant design scratch pad) with its own approval semantics.
+- Decision: If the canonical tenant topology admin team (`<tenant-slug>-admin`) does not exist, validation fails with explicit remediation guidance; this workflow never creates the team.
+- Rationale: The source requirement states "Verify if user member team <tenant-slug>-admin. If not error." Team provisioning is a separate governance action (the "Add CICD Admin to Tenant" operation in the tenant design scratch pad) with its own approval semantics.
 - Alternatives considered:
-  - Auto-creating the missing team with CI/CD admin role: rejected because it silently expands the blast radius of a runner request into team-structure mutation and bypasses the team-creation approval model.
+  - Auto-creating the missing team with topology admin role: rejected because it silently expands the blast radius of a runner request into team-structure mutation and bypasses the team-creation approval model.
 
 ## Decision 4: Deterministic tenant-prefixed runner naming
 
@@ -56,10 +56,10 @@
 
 ## Decision 7: Dual authorization (tenant membership plus org-owner approval)
 
-- Decision: Keep the repository-standard designated-approver gate (explicit `approved` comment by a designated active target-org owner) in addition to the requester's CI/CD admin membership check.
+- Decision: Keep the repository-standard designated-approver gate (explicit `approved` comment by a designated active target-org owner) in addition to the requester's topology admin membership check.
 - Rationale: Constitution principle II requires an explicit approval gate for privileged mutation, and hosted runners are billable infrastructure. The tenant-level membership check authorizes the requester; the org-owner approval authorizes the spend and org-level mutation.
 - Alternatives considered:
-  - Treating CI/CD admin membership as sufficient authorization without an approval comment: rejected because it would make this the only mutating operation in the repository without an approval gate and would let tenant members create billable infrastructure unilaterally.
+  - Treating topology admin membership as sufficient authorization without an approval comment: rejected because it would make this the only mutating operation in the repository without an approval gate and would let tenant members create billable infrastructure unilaterally.
 
 ## Decision 8: Existing-runner convergence semantics
 

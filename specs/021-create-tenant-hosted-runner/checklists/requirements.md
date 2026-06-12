@@ -32,6 +32,6 @@
 ## Notes
 
 - Validation completed on 2026-06-05.
-- The specification consumes the tenant model from spec 014 (registry records under `tenant-registry/`, deterministic team derivation) and introduces the derived tenant CI/CD admin team (`TenantName_CICDAdmins`) as the requester authorization boundary for runner administration.
-- The CI/CD admin team naming derivation (`TenantName_CICDAdmins`, parallel to `TenantName_RepoAdmins`) is a project decision recorded in research.md Decision 1; confirm with the tenant governance owner before the team-provisioning operation is built.
+- The specification consumes the tenant model from spec 014 (registry records under `tenant-registry/`, deterministic team derivation) and introduces the canonical tenant topology admin team (`<tenant-slug>-admin`) as the requester authorization boundary for runner administration.
+- The topology admin team naming derivation (`<tenant-slug>-admin`, parallel to `TenantName_RepoAdmins`) is a project decision recorded in research.md Decision 1; confirm with the tenant governance owner before the team-provisioning operation is built.
 - Hosted runner deletion (022) and tenant runner-group creation (023) are sibling features sharing the tenant CI/CD authorization model.

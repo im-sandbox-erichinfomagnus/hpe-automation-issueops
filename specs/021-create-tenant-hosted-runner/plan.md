@@ -8,7 +8,7 @@ Use the constitution section `Repository Structure Conventions` as the authorita
 
 ## Summary
 
-Create a tenant-scoped GitHub-hosted runner creation IssueOps workflow that accepts one runner request for one tenant in one target organization, resolves canonical tenant context from `tenant-registry/` per the `specs/014-create-tenant-model` contract, derives the tenant CI/CD admin team (`TenantName_CICDAdmins`) and requires the requester's active membership, derives the tenant-prefixed runner name (`TenantName_RunnerBaseName`), resolves the target runner group (explicit tenant-patterned group or organization default), and creates the hosted runner only when missing after designated active-org-owner approval, with idempotent no-op convergence, dry-run support, bounded retry, and auditable artifacts.
+Create a tenant-scoped GitHub-hosted runner creation IssueOps workflow that accepts one runner request for one tenant in one target organization, resolves canonical tenant context from `tenant-registry/` per the `specs/014-create-tenant-model` contract, derives the tenant topology admin team (`<tenant-slug>-admin`) and requires the requester's active membership, derives the tenant-prefixed runner name (`TenantName_RunnerBaseName`), resolves the target runner group (explicit tenant-patterned group or organization default), and creates the hosted runner only when missing after designated active-org-owner approval, with idempotent no-op convergence, dry-run support, bounded retry, and auditable artifacts.
 
 ## Technical Context
 
@@ -20,7 +20,7 @@ Create a tenant-scoped GitHub-hosted runner creation IssueOps workflow that acce
 **Target Platform**: GitHub-hosted runners
 **Project Type**: IssueOps automation repository with reusable workflows and issue templates
 **Observability**: GitHub step summaries + JSON audit artifacts with intake/approval/reconciliation/mutation outcomes and correlation IDs
-**Constraints**: least privilege, explicit active-org-owner approval gate, fail-closed tenant CI/CD-admin requester authorization, idempotent reconciliation, bounded retry, dry-run no mutation, organization-level scope only, no CI/CD admin team creation
+**Constraints**: least privilege, explicit active-org-owner approval gate, fail-closed tenant CI/CD-admin requester authorization, idempotent reconciliation, bounded retry, dry-run no mutation, organization-level scope only, no topology admin team creation
 **Scale/Scope**: one hosted runner per request, one tenant per request, one target organization per request
 
 ## Constitution Check

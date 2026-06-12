@@ -2,12 +2,12 @@
 
 ## Goal
 
-Create one tenant-prefixed Actions runner group in a target organization through an approval-gated, auditable IssueOps request authorized by tenant CI/CD admin membership.
+Create one tenant-prefixed Actions runner group in a target organization through an approval-gated, auditable IssueOps request authorized by tenant topology admin membership.
 
 ## Prerequisites
 
 - A tenant registry record exists under `tenant-registry/` for the target organization (created by the 014 tenant bootstrap workflow).
-- The derived tenant CI/CD admin team (`TenantName_CICDAdmins`) exists in the target organization and the requester is an active member.
+- The canonical tenant topology admin team (`<tenant-slug>-admin`) exists in the target organization and the requester is an active member.
 - A repository or organization Actions secret named `ISSUEOPS_GITHUB_TOKEN` backed by a PAT with runner-group administration permission (`admin:org` classic scope or equivalent fine-grained permission).
 - A designated approver who is an active owner of the target organization.
 - The organization is on a plan that supports organization-level runner groups.
@@ -15,7 +15,7 @@ Create one tenant-prefixed Actions runner group in a target organization through
 ## Setup Verification
 
 1. Confirm `tenant-registry/<tenant_key>.json` exists on `main` and its `organization` matches the target organization.
-2. Confirm the `TenantName_CICDAdmins` team exists and the requester is an active member.
+2. Confirm the `<tenant-slug>-admin` team exists and the requester is an active member.
 3. Confirm `ISSUEOPS_GITHUB_TOKEN` is configured and PAT-backed.
 
 ## Workflow Path
@@ -47,7 +47,7 @@ Create one tenant-prefixed Actions runner group in a target organization through
 
 - Reconciliation reports `noop`; no duplicate group is created.
 
-### Scenario 3: Requester not a CI/CD admin member
+### Scenario 3: Requester not a topology admin member
 
 1. Submit the issue form from a non-member account.
 
@@ -67,7 +67,7 @@ Create one tenant-prefixed Actions runner group in a target organization through
 
 ### Scenario 6: Boundary mismatch at execution
 
-**Preconditions**: Request approved, then requester removed from the CI/CD admin team.
+**Preconditions**: Request approved, then requester removed from the topology admin team.
 
 1. Re-run the workflow for the approved issue.
 
@@ -77,7 +77,7 @@ Create one tenant-prefixed Actions runner group in a target organization through
 
 | Symptom | Likely cause | Resolution |
 |---|---|---|
-| Validation error: no authorized tenant context | Tenant name mismatch or requester lacks CI/CD admin membership | Verify the registry record and the requester's active membership on `TenantName_CICDAdmins` |
+| Validation error: no authorized tenant context | Tenant name mismatch or requester lacks topology admin membership | Verify the registry record and the requester's active membership on `<tenant-slug>-admin` |
 | Validation error: derived group name invalid | Base name empty after normalization or oversized derivation | Shorten the base name; use letters, digits, `.`, `-`, `_` |
 | Creation fails with 403 | Token lacks runner-group administration permission | Update `ISSUEOPS_GITHUB_TOKEN` scopes (`admin:org`) |
 | Creation fails with 404/422 on plan limits | Organization plan does not support org runner groups | Confirm GHEC/Team plan for the target organization |

@@ -52,7 +52,7 @@ function appendTenantResolutionFindings(request, tenantResolution, errors, warni
 
     if (missingCicdTeamCandidate) {
       errors.push(
-        `The derived tenant CI/CD admin team '${missingCicdTeamCandidate.cicd_admin_team_name}' does not exist in organization '${request.organization}'. Provision the team before managing tenant runners.`
+        `The tenant topology admin team '${missingCicdTeamCandidate.cicd_admin_team_name}' does not exist in organization '${request.organization}'. Provision the team before managing tenant runners.`
       );
     } else if (unauthorizedCandidate) {
       errors.push(

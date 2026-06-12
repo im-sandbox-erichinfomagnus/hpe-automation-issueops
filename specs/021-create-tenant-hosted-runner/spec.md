@@ -3,30 +3,30 @@
 **Feature Branch**: `021-create-tenant-hosted-runner`
 **Created**: 2026-06-05
 **Status**: Draft
-**Input**: User description: "Create GitHub-Hosted Runner for X_Tenant (org level only). Configure parameters (Name, etc). Verify if user member team X_Tenant_CICDAdmin. If not error. Create X_Tenant_Name runner. Tenant context, tenant registry storage, and team derivation follow specs/014-create-tenant-model."
+**Input**: User description: "Create GitHub-Hosted Runner for X_Tenant (org level only). Configure parameters (Name, etc). Verify if user member team <tenant-slug>-admin. If not error. Create X_Tenant_Name runner. Tenant context, tenant registry storage, and team derivation follow specs/014-create-tenant-model."
 
 **Repository Structure Note**: Follow the constitution section `Repository Structure Conventions` for repository layout and artifact placement assumptions that this specification should respect.
 
-**Tenant Model Dependency**: This feature consumes the tenant model defined in `specs/014-create-tenant-model`. Tenant context is resolved from durable per-tenant registry records under `tenant-registry/` in this repository, and tenant team naming follows the same deterministic derivation used by tenant bootstrap (`TenantName_Tenant`, `TenantName_RepoAdmins`). This feature derives the tenant CI/CD administration team as `TenantName_CICDAdmins` using identical normalization rules.
+**Tenant Model Dependency**: This feature consumes the tenant model defined in `specs/014-create-tenant-model`. Tenant context is resolved from durable per-tenant registry records under `tenant-registry/` in this repository, and tenant team naming follows the same deterministic derivation used by tenant bootstrap (`TenantName_Tenant`, `TenantName_RepoAdmins`). This feature derives the tenant topology admin team as `<tenant-slug>-admin` using identical normalization rules.
 
 
-> **Topology update (2026-06-05):** Tenant context is now read from the canonical tenant topology in `tenant-registry/` defined by `specs/022-enhance-tenant-topology` (camelCase `tenantName`/`topology.teams.structure[]` with team types root/admin/repo-admin, plus a legacy-flat projection). The requester CI/CD authorization team is the tenant topology **admin** team (structure type "admin", `<tenant-slug>-admin`, carrying the `tenant-admin` role), not a separately-derived `TenantName_CICDAdmins` team. Inline references below to `TenantName_CICDAdmins` derivation are superseded by this note.
+> **Topology update (2026-06-05):** Tenant context is now read from the canonical tenant topology in `tenant-registry/` defined by `specs/022-enhance-tenant-topology` (camelCase `tenantName`/`topology.teams.structure[]` with team types root/admin/repo-admin, plus a legacy-flat projection). The requester CI/CD authorization team is the tenant topology **admin** team (structure type "admin", `<tenant-slug>-admin`, carrying the `tenant-admin` role), not a separately-canonical tenant topology admin team (`<tenant-slug>-admin`). Inline references below to `<tenant-slug>-admin` derivation are superseded by this note.
 
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Submit and Validate Tenant Runner Creation Requests (Priority: P1)
 
-A tenant CI/CD administrator submits a request in the central administration repository to create one GitHub-hosted runner for their tenant in a target GitHub organization, and the workflow validates tenant context resolution, requester CI/CD-admin team membership, derived runner naming, runner configuration parameters, and runner-group targeting before any mutation is allowed.
+A tenant topology administrator submits a request in the central administration repository to create one GitHub-hosted runner for their tenant in a target GitHub organization, and the workflow validates tenant context resolution, requester CI/CD-admin team membership, derived runner naming, runner configuration parameters, and runner-group targeting before any mutation is allowed.
 
 **Why this priority**: Safe and unambiguous request intake with fail-closed tenant authorization is required before privileged, billable runner infrastructure can be reviewed or approved.
 
-**Independent Test**: Can be fully tested by submitting requests from requesters who are and are not active members of the derived tenant CI/CD admin team, with valid and invalid runner names, images, sizes, and runner-group references, and verifying that only fully valid, tenant-authorized requests become approval-ready while all others are rejected without organization mutation.
+**Independent Test**: Can be fully tested by submitting requests from requesters who are and are not active members of the canonical tenant topology admin team, with valid and invalid runner names, images, sizes, and runner-group references, and verifying that only fully valid, tenant-authorized requests become approval-ready while all others are rejected without organization mutation.
 
 **Acceptance Scenarios**:
 
-1. **Given** a requester who is an active member of the derived `TenantName_CICDAdmins` team submits a valid organization, tenant name, runner base name, image, and machine size, **When** validation completes, **Then** the workflow derives the tenant-prefixed runner name and marks the request approval-ready with no mutation performed.
-2. **Given** a requester who is not an active member of the derived `TenantName_CICDAdmins` team, **When** validation completes, **Then** the workflow rejects the request with an explicit authorization error and no mutation is attempted.
-3. **Given** the derived `TenantName_CICDAdmins` team does not exist in the target organization, **When** validation completes, **Then** the workflow fails closed with explicit remediation guidance and no mutation is attempted.
+1. **Given** a requester who is an active member of the canonical tenant topology admin team (`<tenant-slug>-admin`) submits a valid organization, tenant name, runner base name, image, and machine size, **When** validation completes, **Then** the workflow derives the tenant-prefixed runner name and marks the request approval-ready with no mutation performed.
+2. **Given** a requester who is not an active member of the canonical tenant topology admin team (`<tenant-slug>-admin`), **When** validation completes, **Then** the workflow rejects the request with an explicit authorization error and no mutation is attempted.
+3. **Given** the canonical tenant topology admin team (`<tenant-slug>-admin`) does not exist in the target organization, **When** validation completes, **Then** the workflow fails closed with explicit remediation guidance and no mutation is attempted.
 4. **Given** a requester submits a dry-run request, **When** validation and reconciliation complete, **Then** the workflow returns a reviewable runner-creation plan without mutating GitHub organization state.
 
 ---
@@ -65,8 +65,8 @@ After valid approval, the workflow revalidates tenant boundary state, reads curr
 
 - The target organization is missing or not visible to the workflow credential.
 - The tenant name does not resolve to exactly one tenant registry record for the target organization.
-- The derived `TenantName_CICDAdmins` team does not exist in the target organization.
-- The requester has a pending (not active) membership in the CI/CD admin team.
+- The canonical tenant topology admin team (`<tenant-slug>-admin`) does not exist in the target organization.
+- The requester has a pending (not active) membership in the topology admin team.
 - The runner base name normalizes to an empty value or produces a derived name longer than 64 characters or containing characters outside the allowed runner-name set.
 - The requested runner group name does not match the tenant naming pattern.
 - The requested runner group does not exist in the target organization.
@@ -87,9 +87,9 @@ After valid approval, the workflow revalidates tenant boundary state, reads curr
 - **FR-003**: The system MUST derive the full runner name deterministically as the tenant display name with whitespace converted to underscores, followed by an underscore and the normalized runner base name (`TenantName_RunnerBaseName`).
 - **FR-004**: The system MUST validate the derived runner name against GitHub hosted-runner naming constraints (1 to 64 characters; letters, digits, `.`, `-`, `_` only) and reject derivations that fail.
 - **FR-005**: The system MUST resolve canonical tenant context from per-tenant registry records under `tenant-registry/` following the `specs/014-create-tenant-model` registry contract, and reject requests whose tenant name does not resolve to exactly one record for the target organization.
-- **FR-006**: The system MUST derive the tenant CI/CD administration team as `TenantName_CICDAdmins` using the same normalization rules as tenant bootstrap team derivation.
-- **FR-007**: The system MUST verify the requester is an active member of the derived tenant CI/CD administration team and reject the request otherwise.
-- **FR-008**: If the derived tenant CI/CD administration team does not exist in the target organization, the system MUST fail closed with explicit remediation guidance and MUST NOT create the team.
+- **FR-006**: The system MUST derive the tenant topology admin team as `<tenant-slug>-admin` using the same normalization rules as tenant bootstrap team derivation.
+- **FR-007**: The system MUST verify the requester is an active member of the derived tenant topology admin team and reject the request otherwise.
+- **FR-008**: If the derived tenant topology admin team does not exist in the target organization, the system MUST fail closed with explicit remediation guidance and MUST NOT create the team.
 - **FR-009**: When a runner group name is provided, the system MUST require the name to match the tenant naming pattern (`TenantName_` prefix) and to exist in the target organization, and MUST resolve it to its runner group identifier.
 - **FR-010**: When no runner group name is provided, the system MUST resolve the organization default runner group and target it for runner creation.
 - **FR-011**: The system MUST create the hosted runner only when no hosted runner with the derived name exists in the target organization, and MUST treat an existing same-name runner as no-op.
@@ -109,7 +109,7 @@ After valid approval, the workflow revalidates tenant boundary state, reads curr
 ### Authorization Requirements *(mandatory)*
 
 - **AR-001**: Requester identity MUST be derived from the GitHub user who created the central repository request.
-- **AR-002**: Requester authorization MUST require active membership in the derived `TenantName_CICDAdmins` team in the target organization at validation time.
+- **AR-002**: Requester authorization MUST require active membership in the canonical tenant topology admin team (`<tenant-slug>-admin`) in the target organization at validation time.
 - **AR-003**: Approver identity MUST be derived from the GitHub user who posts the explicit approval comment in the central repository.
 - **AR-004**: A valid approver MUST be designated in the request and MUST be an active owner of the target organization at approval evaluation time.
 - **AR-005**: Approval MUST be denied if the approver is not both designated and currently an active target-org owner.
@@ -121,7 +121,7 @@ After valid approval, the workflow revalidates tenant boundary state, reads curr
 - **VS-001**: The issue form payload MUST be parsed into structured fields before any mutation step can be considered.
 - **VS-002**: Validation MUST verify target organization visibility and accessibility to workflow credentials.
 - **VS-003**: Validation MUST resolve tenant context from the tenant registry and verify governance relationships per the 014 tenant model.
-- **VS-004**: Validation MUST verify the derived CI/CD admin team exists and the requester holds active membership in it.
+- **VS-004**: Validation MUST verify the derived topology admin team exists and the requester holds active membership in it.
 - **VS-005**: Validation MUST verify deterministic runner-name derivation and reject empty, unsafe, oversized, or invalid derived names.
 - **VS-006**: Validation MUST verify runner image identifier, image source, and machine size inputs are present and well-formed, and SHOULD verify availability against organization hosted-runner reference data when accessible.
 - **VS-007**: Validation MUST resolve the target runner group (explicit tenant-patterned group or organization default) and reject unresolvable targets.
@@ -162,8 +162,8 @@ After valid approval, the workflow revalidates tenant boundary state, reads curr
 ### Testing Expectations *(mandatory)*
 
 - **TE-001**: Tests MUST cover valid and invalid request parsing for organization, tenant name, runner base name, image, size, runner group, maximum runners, dry-run, and justification fields.
-- **TE-002**: Tests MUST cover runner-name derivation, naming-constraint rejection, and CI/CD admin team-name derivation.
-- **TE-003**: Tests MUST cover requester authorization for active members, non-members, and pending members of the derived CI/CD admin team, and the missing-team fail-closed path.
+- **TE-002**: Tests MUST cover runner-name derivation, naming-constraint rejection, and topology admin team-name derivation.
+- **TE-003**: Tests MUST cover requester authorization for active members, non-members, and pending members of the derived topology admin team, and the missing-team fail-closed path.
 - **TE-004**: Tests MUST cover approval-gate behavior for authorized active-owner approvers and unauthorized actors.
 - **TE-005**: Tests MUST cover reconciliation behavior for the create path, the existing-runner no-op path, and rerun convergence.
 - **TE-006**: Tests MUST cover runner-group resolution for explicit tenant-patterned groups, the default-group fallback, and unresolvable-group rejection.
@@ -175,7 +175,7 @@ After valid approval, the workflow revalidates tenant boundary state, reads curr
 ### Key Entities *(include if feature involves data)*
 
 - **HostedRunnerCreationRequest**: The parsed request record containing requester, target organization, tenant name, runner base name, image, size, runner group reference, maximum runners, dry-run flag, justification, approval state, validation results, and execution outcomes.
-- **TenantCicdContext**: The resolved tenant governance context combining the canonical registry record (per 014) with the derived CI/CD admin team name/slug, team existence state, and requester membership state.
+- **TenantCicdContext**: The resolved tenant governance context combining the canonical registry record (per 014) with the derived topology admin team name/slug, team existence state, and requester membership state.
 - **DerivedRunnerName**: The deterministic tenant-prefixed runner name with derivation status and constraint-validation findings.
 - **RunnerGroupResolution**: The resolved runner-group target (explicit tenant-patterned group or organization default) with its identifier and resolution status.
 - **HostedRunnerReconciliationPlan**: The desired-versus-current diff with creation action (`create_hosted_runner` | `noop` | `reject`), blocked reason, and dry-run posture.
@@ -185,7 +185,7 @@ After valid approval, the workflow revalidates tenant boundary state, reads curr
 
 ### Measurable Outcomes
 
-- **SC-001**: 100% of requests from users without active derived CI/CD admin team membership are rejected before approval with an explicit authorization error.
+- **SC-001**: 100% of requests from users without active derived topology admin team membership are rejected before approval with an explicit authorization error.
 - **SC-002**: 100% of execution attempts without valid designated active-owner approval remain blocked from mutation.
 - **SC-003**: 100% of reruns for already-satisfied runner state complete as no-op without duplicate runner creation.
 - **SC-004**: 100% of created runners carry the derived tenant naming prefix; no execution path can create a runner outside the resolved tenant naming boundary.
@@ -196,7 +196,7 @@ After valid approval, the workflow revalidates tenant boundary state, reads curr
 - Requests are submitted by authenticated GitHub users through the repository issue-form flow.
 - One request manages exactly one hosted runner for exactly one tenant in exactly one target organization.
 - Tenant registry records under `tenant-registry/` are maintained by the 014 tenant bootstrap workflow and are the authoritative source for tenant context resolution.
-- The tenant CI/CD administration team (`TenantName_CICDAdmins`) is provisioned by a separate governance process; this feature only verifies its existence and the requester's membership.
+- The tenant topology admin team (`<tenant-slug>-admin`) is provisioned by a separate governance process; this feature only verifies its existence and the requester's membership.
 - `ISSUEOPS_GITHUB_TOKEN` is PAT-backed and can be scoped to least-privilege permissions needed for hosted-runner administration (`manage_runners:org` classic scope or the equivalent fine-grained organization hosted-runner permission).
 - GitHub-hosted runner creation incurs usage-based billing in the target organization; the designated approver accepts billing accountability at approval time.
 - The target organization is on a GitHub plan that supports organization-level GitHub-hosted runner administration (GitHub Enterprise Cloud).

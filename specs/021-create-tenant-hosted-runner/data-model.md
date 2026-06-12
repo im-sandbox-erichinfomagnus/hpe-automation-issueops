@@ -31,7 +31,7 @@
 
 ## TenantCicdContext
 
-- Purpose: Resolved tenant governance context authorizing the requester for CI/CD administration.
+- Purpose: Resolved tenant governance context authorizing the requester for topology administration.
 - Fields:
   - tenant_key
   - tenant_display_name
@@ -39,18 +39,18 @@
   - registry_ref
   - tenant_team_name
   - tenant_team_slug
-  - cicd_admin_team_name (`TenantName_CICDAdmins`)
-  - cicd_admin_team_slug
-  - cicd_admin_team_exists
+  - topology_admin_team_name (`<tenant-slug>-admin`)
+  - topology_admin_team_slug
+  - topology_admin_team_exists
   - governance_relation_status: `valid` | `missing_tenant_team` | `missing_cicd_admin_team`
-  - requester_cicd_membership_state: `active_member` | `active_maintainer` | `pending` | `absent` | `unknown`
+  - requester_admin_membership_state: `active_member` | `active_maintainer` | `pending` | `absent` | `unknown`
   - authorization_status: `authorized` | `unauthorized` | `blocked` | `ambiguous`
   - tenant_resolution_status: `resolved` | `no_match` | `ambiguous` | `registry_conflict`
   - context_marker
 - Validation rules:
   - Tenant context must resolve to exactly one registry record for the target organization.
-  - Authorization requires active membership (member or maintainer) on the derived CI/CD admin team.
-  - Missing tenant team or missing CI/CD admin team blocks the request.
+  - Authorization requires active membership (member or maintainer) on the derived topology admin team.
+  - Missing tenant team or missing topology admin team blocks the request.
 
 ## DerivedRunnerName
 

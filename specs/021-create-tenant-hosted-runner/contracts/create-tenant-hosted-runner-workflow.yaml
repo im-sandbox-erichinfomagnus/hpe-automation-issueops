@@ -4,7 +4,7 @@ purpose: >-
   Contract for the tenant-scoped GitHub-hosted runner creation IssueOps
   workflow that resolves canonical tenant context from tenant-registry plus
   live governance state, authorizes the requester through active membership in
-  the derived tenant CI/CD admin team, derives the tenant-prefixed runner
+  the canonical tenant topology admin team, derives the tenant-prefixed runner
   name, resolves the target runner group, creates one GitHub-hosted runner in
   the target organization after designated active-org-owner approval, and
   emits durable audit evidence.

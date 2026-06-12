@@ -93,7 +93,7 @@ async function validateRunnerGroupRequest(input = {}, options = {}) {
 
     if (missingCicdTeamCandidate) {
       errors.push(
-        `The derived tenant CI/CD admin team '${missingCicdTeamCandidate.cicd_admin_team_name}' does not exist in organization '${request.organization}'. Provision the team before requesting tenant runner groups.`
+        `The tenant topology admin team '${missingCicdTeamCandidate.cicd_admin_team_name}' does not exist in organization '${request.organization}'. Provision the team before requesting tenant runner groups.`
       );
     } else if (unauthorizedCandidate) {
       errors.push(

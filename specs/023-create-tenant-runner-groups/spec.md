@@ -3,29 +3,29 @@
 **Feature Branch**: `023-create-tenant-runner-groups`
 **Created**: 2026-06-05
 **Status**: Draft
-**Input**: User description: "Create Tenant Runner Groups. Input parameters. Verify if user member team X_Tenant_CICDAdmin. If not error. Create X_Tenant_Name runner group. Tenant context, tenant registry storage, and team derivation follow specs/014-create-tenant-model; tenant CI/CD authorization follows specs/021-create-tenant-hosted-runner."
+**Input**: User description: "Create Tenant Runner Groups. Input parameters. Verify if user member team <tenant-slug>-admin. If not error. Create X_Tenant_Name runner group. Tenant context, tenant registry storage, and team derivation follow specs/014-create-tenant-model; tenant CI/CD authorization follows specs/021-create-tenant-hosted-runner."
 
 **Repository Structure Note**: Follow the constitution section `Repository Structure Conventions` for repository layout and artifact placement assumptions that this specification should respect.
 
-**Tenant Model Dependency**: This feature consumes the tenant model defined in `specs/014-create-tenant-model` and the tenant CI/CD authorization model introduced in `specs/021-create-tenant-hosted-runner` (derived `TenantName_CICDAdmins` team, deterministic tenant-prefixed naming, shared `tenant-registry/` resolution).
+**Tenant Model Dependency**: This feature consumes the tenant model defined in `specs/014-create-tenant-model` and the tenant CI/CD authorization model introduced in `specs/021-create-tenant-hosted-runner` (canonical tenant topology admin team (`<tenant-slug>-admin`), deterministic tenant-prefixed naming, shared `tenant-registry/` resolution).
 
 
-> **Topology update (2026-06-05):** Tenant context is now read from the canonical tenant topology in `tenant-registry/` defined by `specs/022-enhance-tenant-topology` (camelCase `tenantName`/`topology.teams.structure[]` with team types root/admin/repo-admin, plus a legacy-flat projection). The requester CI/CD authorization team is the tenant topology **admin** team (structure type "admin", `<tenant-slug>-admin`, carrying the `tenant-admin` role), not a separately-derived `TenantName_CICDAdmins` team. Inline references below to `TenantName_CICDAdmins` derivation are superseded by this note.
+> **Topology update (2026-06-05):** Tenant context is now read from the canonical tenant topology in `tenant-registry/` defined by `specs/022-enhance-tenant-topology` (camelCase `tenantName`/`topology.teams.structure[]` with team types root/admin/repo-admin, plus a legacy-flat projection). The requester CI/CD authorization team is the tenant topology **admin** team (structure type "admin", `<tenant-slug>-admin`, carrying the `tenant-admin` role), not a separately-canonical tenant topology admin team (`<tenant-slug>-admin`). Inline references below to `<tenant-slug>-admin` derivation are superseded by this note.
 
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Submit and Validate Tenant Runner Group Requests (Priority: P1)
 
-A tenant CI/CD administrator submits a request in the central administration repository to create one Actions runner group for their tenant in a target GitHub organization, and the workflow validates tenant context resolution, requester CI/CD-admin team membership, derived group naming, and visibility parameters before any mutation is allowed.
+A tenant topology administrator submits a request in the central administration repository to create one Actions runner group for their tenant in a target GitHub organization, and the workflow validates tenant context resolution, requester CI/CD-admin team membership, derived group naming, and visibility parameters before any mutation is allowed.
 
 **Why this priority**: Runner groups are the tenant isolation boundary for CI runners; safe intake with fail-closed tenant authorization is required before organization-level mutation can be reviewed or approved.
 
-**Independent Test**: Can be fully tested by submitting requests from requesters who are and are not active members of the derived tenant CI/CD admin team, with valid and invalid group names and visibility values, and verifying only fully valid, tenant-authorized requests become approval-ready.
+**Independent Test**: Can be fully tested by submitting requests from requesters who are and are not active members of the canonical tenant topology admin team, with valid and invalid group names and visibility values, and verifying only fully valid, tenant-authorized requests become approval-ready.
 
 **Acceptance Scenarios**:
 
-1. **Given** a requester who is an active member of the derived `TenantName_CICDAdmins` team submits a valid organization, tenant name, and group base name, **When** validation completes, **Then** the workflow derives the tenant-prefixed group name and marks the request approval-ready with no mutation performed.
-2. **Given** a requester who is not an active member of the derived `TenantName_CICDAdmins` team, **When** validation completes, **Then** the workflow rejects the request with an explicit authorization error and no mutation is attempted.
+1. **Given** a requester who is an active member of the canonical tenant topology admin team (`<tenant-slug>-admin`) submits a valid organization, tenant name, and group base name, **When** validation completes, **Then** the workflow derives the tenant-prefixed group name and marks the request approval-ready with no mutation performed.
+2. **Given** a requester who is not an active member of the canonical tenant topology admin team (`<tenant-slug>-admin`), **When** validation completes, **Then** the workflow rejects the request with an explicit authorization error and no mutation is attempted.
 3. **Given** an invalid visibility value, **When** validation completes, **Then** the workflow rejects the request with an explicit finding.
 
 ---
@@ -64,8 +64,8 @@ After valid approval, the workflow revalidates tenant boundary state, reads curr
 
 - The target organization is missing or not visible to the workflow credential.
 - The tenant name does not resolve to exactly one tenant registry record for the target organization.
-- The derived `TenantName_CICDAdmins` team does not exist in the target organization.
-- The requester has a pending (not active) membership in the CI/CD admin team.
+- The canonical tenant topology admin team (`<tenant-slug>-admin`) does not exist in the target organization.
+- The requester has a pending (not active) membership in the topology admin team.
 - The group base name normalizes to an empty value or produces an oversized derived name.
 - The submitted base name already carries the tenant prefix (used as-is, no double-prefixing).
 - A runner group with the derived name already exists with a different visibility posture (no-op for creation; drift is reported, not mutated).
@@ -82,7 +82,7 @@ After valid approval, the workflow revalidates tenant boundary state, reads curr
 - **FR-002**: The request MUST capture target organization, tenant name, group base name, optional visibility selection, optional public-repository allowance, designated approver login, explicit dry-run indicator, and justification.
 - **FR-003**: The system MUST derive the full group name deterministically as `TenantName_GroupBaseName` using the 021 naming rules (whitespace to underscores; base names already carrying the exact tenant prefix used as-is).
 - **FR-004**: The system MUST resolve canonical tenant context from per-tenant registry records under `tenant-registry/` following the `specs/014-create-tenant-model` registry contract.
-- **FR-005**: The system MUST verify the requester is an active member of the derived `TenantName_CICDAdmins` team and reject the request otherwise, failing closed when the team is missing.
+- **FR-005**: The system MUST verify the requester is an active member of the canonical tenant topology admin team (`<tenant-slug>-admin`) and reject the request otherwise, failing closed when the team is missing.
 - **FR-006**: Visibility MUST default to `selected` (repositories attached later) to preserve tenant isolation, and MUST accept only `selected`, `all`, or `private`.
 - **FR-007**: The public-repository allowance MUST default to false.
 - **FR-008**: The system MUST create the runner group only when no group with the derived name exists, and MUST treat an existing same-name group as no-op regardless of its configuration; configuration drift is reported as a finding, not mutated.
@@ -100,7 +100,7 @@ After valid approval, the workflow revalidates tenant boundary state, reads curr
 ### Authorization Requirements *(mandatory)*
 
 - **AR-001**: Requester identity MUST be derived from the GitHub user who created the central repository request.
-- **AR-002**: Requester authorization MUST require active membership in the derived `TenantName_CICDAdmins` team in the target organization at validation time.
+- **AR-002**: Requester authorization MUST require active membership in the canonical tenant topology admin team (`<tenant-slug>-admin`) in the target organization at validation time.
 - **AR-003**: Approver identity MUST be derived from the GitHub user who posts the explicit approval comment in the central repository.
 - **AR-004**: A valid approver MUST be designated in the request and MUST be an active owner of the target organization at approval evaluation time.
 - **AR-005**: Approval MUST be denied if the approver is not both designated and currently an active target-org owner.
@@ -111,7 +111,7 @@ After valid approval, the workflow revalidates tenant boundary state, reads curr
 
 - **VS-001**: The issue form payload MUST be parsed into structured fields before any mutation step can be considered.
 - **VS-002**: Validation MUST verify target organization visibility and accessibility to workflow credentials.
-- **VS-003**: Validation MUST resolve tenant context from the tenant registry and verify the derived CI/CD admin team exists with the requester holding active membership.
+- **VS-003**: Validation MUST resolve tenant context from the tenant registry and verify the derived topology admin team exists with the requester holding active membership.
 - **VS-004**: Validation MUST verify deterministic group-name derivation and reject empty or oversized derived names.
 - **VS-005**: Validation MUST verify the visibility value against the allowed set and apply documented defaults.
 - **VS-006**: Validation MUST detect an existing runner group with the derived name and mark the request for no-op convergence.
@@ -152,7 +152,7 @@ After valid approval, the workflow revalidates tenant boundary state, reads curr
 
 - **TE-001**: Tests MUST cover valid and invalid request parsing for organization, tenant name, group name, visibility, public-repository allowance, dry-run, and justification fields.
 - **TE-002**: Tests MUST cover group-name derivation, pre-prefixed base names, and oversized-name rejection.
-- **TE-003**: Tests MUST cover requester authorization for active members and non-members of the derived CI/CD admin team, and the missing-team fail-closed path.
+- **TE-003**: Tests MUST cover requester authorization for active members and non-members of the derived topology admin team, and the missing-team fail-closed path.
 - **TE-004**: Tests MUST cover approval-gate behavior for authorized active-owner approvers and unauthorized actors.
 - **TE-005**: Tests MUST cover reconciliation behavior for the create path, the existing-group no-op path, and rerun convergence.
 - **TE-006**: Tests MUST cover visibility validation including the `selected` default and invalid-value rejection.
@@ -163,7 +163,7 @@ After valid approval, the workflow revalidates tenant boundary state, reads curr
 ### Key Entities *(include if feature involves data)*
 
 - **RunnerGroupCreationRequest**: The parsed request record containing requester, target organization, tenant name, group base name, visibility, public-repository allowance, dry-run flag, justification, approval state, validation results, and execution outcomes.
-- **TenantCicdContext**: The resolved tenant governance context (shared with 021) authorizing the requester for CI/CD administration.
+- **TenantCicdContext**: The resolved tenant governance context (shared with 021) authorizing the requester for topology administration.
 - **DerivedRunnerGroupName**: The deterministic tenant-prefixed group name with derivation status and constraint findings.
 - **RunnerGroupReconciliationPlan**: The desired-versus-current diff with creation action (`create_runner_group` | `noop` | `reject`), blocked reason, and dry-run posture.
 - **RunnerGroupExecutionOutcome**: Audit-grade per-step execution result including the group creation result, created group identifier, and final lifecycle state.
@@ -172,7 +172,7 @@ After valid approval, the workflow revalidates tenant boundary state, reads curr
 
 ### Measurable Outcomes
 
-- **SC-001**: 100% of requests from users without active derived CI/CD admin team membership are rejected before approval with an explicit authorization error.
+- **SC-001**: 100% of requests from users without active derived topology admin team membership are rejected before approval with an explicit authorization error.
 - **SC-002**: 100% of execution attempts without valid designated active-owner approval remain blocked from mutation.
 - **SC-003**: 100% of reruns for already-satisfied group state complete as no-op without duplicate group creation.
 - **SC-004**: 100% of created runner groups carry the derived tenant naming prefix; no execution path can create a group outside the resolved tenant naming boundary.
@@ -183,7 +183,7 @@ After valid approval, the workflow revalidates tenant boundary state, reads curr
 - Requests are submitted by authenticated GitHub users through the repository issue-form flow.
 - One request manages exactly one runner group for exactly one tenant in exactly one target organization.
 - Tenant registry records under `tenant-registry/` are maintained by the 014 tenant bootstrap workflow and are authoritative for tenant context resolution.
-- The tenant CI/CD administration team (`TenantName_CICDAdmins`) is provisioned by a separate governance process; this feature only verifies its existence and the requester's membership.
+- The tenant topology admin team (`<tenant-slug>-admin`) is provisioned by a separate governance process; this feature only verifies its existence and the requester's membership.
 - `ISSUEOPS_GITHUB_TOKEN` is PAT-backed and scoped for runner-group administration (`admin:org` classic scope or the equivalent fine-grained organization self-hosted-runners permission).
 - The target organization is on a GitHub plan that supports organization-level runner groups (GitHub Team or Enterprise Cloud).
 - Repository attachment and runner placement into the created group flow through sibling operations (the move-runners operation is a future feature; hosted-runner creation can target the group via feature 021).

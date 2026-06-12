@@ -8,7 +8,7 @@ Use the constitution section `Repository Structure Conventions` as the authorita
 
 ## Summary
 
-Create a tenant-scoped GitHub-hosted runner deletion IssueOps workflow that accepts one deletion request for one tenant in one target organization, resolves canonical tenant context and the derived `TenantName_CICDAdmins` authorization team via the shared resolver from feature 021, derives the tenant-prefixed runner name, resolves the existing runner identifier from live organization state, and deletes the runner only when present after designated active-org-owner approval, treating an absent runner as converged no-op, with dry-run support, bounded retry, boundary revalidation, and auditable artifacts.
+Create a tenant-scoped GitHub-hosted runner deletion IssueOps workflow that accepts one deletion request for one tenant in one target organization, resolves canonical tenant context and the derived `<tenant-slug>-admin` authorization team via the shared resolver from feature 021, derives the tenant-prefixed runner name, resolves the existing runner identifier from live organization state, and deletes the runner only when present after designated active-org-owner approval, treating an absent runner as converged no-op, with dry-run support, bounded retry, boundary revalidation, and auditable artifacts.
 
 ## Technical Context
 

@@ -2,18 +2,18 @@
 
 ## Decision 0: Read tenant context from the canonical tenant topology (supersedes the CICDAdmins derivation)
 
-- Decision: Resolve tenant context from the canonical tenant topology that `specs/022-enhance-tenant-topology` stores in `tenant-registry/` (record carries `tenantName`, `tenantId`, and `topology.teams.structure[]` with team types root/admin/repo-admin; legacy flat records are projected to the same `<tenant-slug>-root`/`-admin`/`-repo-admin` naming). Authorize the requester against the topology **admin** team (structure type "admin", the `tenant-admin` role), which is the tenant CI/CD administration authority in the new model.
-- Rationale: The new topology has no dedicated `CICDAdmins` team or role; the `admin` team (tenant-admin: create repos, create teams, manage repository access) is the tenant governance authority that runner administration sits under. Reading the topology directly keeps these ops consistent with create-tenant-model and removes the invented `TenantName_CICDAdmins` naming.
+- Decision: Resolve tenant context from the canonical tenant topology that `specs/022-enhance-tenant-topology` stores in `tenant-registry/` (record carries `tenantName`, `tenantId`, and `topology.teams.structure[]` with team types root/admin/repo-admin; legacy flat records are projected to the same `<tenant-slug>-root`/`-admin`/`-repo-admin` naming). Authorize the requester against the topology **admin** team (structure type "admin", the `tenant-admin` role), which is the tenant topology administration authority in the new model.
+- Rationale: The new topology has no dedicated `CICDAdmins` team or role; the `admin` team (tenant-admin: create repos, create teams, manage repository access) is the tenant governance authority that runner administration sits under. Reading the topology directly keeps these ops consistent with create-tenant-model and removes the invented `<tenant-slug>-admin` naming.
 - Alternatives considered: a dedicated cicd-admin team/role (does not exist in the topology, would require a 022 schema change); the repo-admin team (too narrow - repo-scoped, not org Actions administration).
 
 
 ## Decision 1: Reuse the 021 tenant CI/CD authorization foundation
 
 - Decision: Authorize deletion requests through the same shared resolver (`resolve-tenant-cicd-context-from-registry.js`) and approver model introduced by feature 021, with the operation marker `hosted_runner_deletion` in the context-marker payload.
-- Rationale: Creation and deletion share an identical authorization boundary (active membership in the derived `TenantName_CICDAdmins` team plus designated active-org-owner approval); duplicating the resolver would fork the security model.
+- Rationale: Creation and deletion share an identical authorization boundary (active membership in the canonical tenant topology admin team (`<tenant-slug>-admin`) plus designated active-org-owner approval); duplicating the resolver would fork the security model.
 - Alternatives considered:
   - A deletion-specific resolver: rejected as pure duplication with drift risk.
-  - Requiring maintainer role for deletion (stricter than creation): rejected because the tenant design treats CI/CD admin membership as the capability grant for both directions of runner lifecycle.
+  - Requiring maintainer role for deletion (stricter than creation): rejected because the tenant design treats topology admin membership as the capability grant for both directions of runner lifecycle.
 
 ## Decision 2: Accept full or base runner names with deterministic derivation
 

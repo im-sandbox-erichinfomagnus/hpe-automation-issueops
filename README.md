@@ -128,7 +128,7 @@ This list should be updated as new IssueOps workflows are added.
 	target organization.
 - `create-tenant-hosted-runner`: Request, validate, approve, and reconcile
 	creating one tenant-prefixed GitHub-hosted runner at organization level,
-	authorized by active membership in the derived tenant CI/CD admin team.
+	authorized by active membership in the canonical tenant topology admin team.
 - `delete-tenant-hosted-runner`: Request, validate, approve, and reconcile
 	deleting one tenant-prefixed GitHub-hosted runner at organization level,
 	with no-op convergence when the runner is already absent.

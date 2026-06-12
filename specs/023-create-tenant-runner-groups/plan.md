@@ -8,7 +8,7 @@ Use the constitution section `Repository Structure Conventions` as the authorita
 
 ## Summary
 
-Create a tenant-scoped Actions runner-group creation IssueOps workflow that accepts one group request for one tenant in one target organization, resolves canonical tenant context and the derived `TenantName_CICDAdmins` authorization team via the shared resolver from feature 021, derives the tenant-prefixed group name, and creates the runner group only when missing (visibility defaulting to `selected` with public repositories disallowed) after designated active-org-owner approval, with idempotent no-op convergence, dry-run support, bounded retry, boundary revalidation, and auditable artifacts.
+Create a tenant-scoped Actions runner-group creation IssueOps workflow that accepts one group request for one tenant in one target organization, resolves canonical tenant context and the derived `<tenant-slug>-admin` authorization team via the shared resolver from feature 021, derives the tenant-prefixed group name, and creates the runner group only when missing (visibility defaulting to `selected` with public repositories disallowed) after designated active-org-owner approval, with idempotent no-op convergence, dry-run support, bounded retry, boundary revalidation, and auditable artifacts.
 
 ## Technical Context
 
