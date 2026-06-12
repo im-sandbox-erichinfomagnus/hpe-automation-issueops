@@ -61,6 +61,12 @@ function determineOperation(request = {}, runContext = {}) {
     return 'team_hierarchy';
   }
 
+  const isTeamRepoAccessRemoval = hasNonEmptyArray(request.requested_repository_removals);
+
+  if (isTeamRepoAccessRemoval) {
+    return 'team_repo_access_removal';
+  }
+
   const isTeamRepoAccess = Boolean(
     request.requested_permission_api_value ||
       request.requested_permission_label ||
@@ -73,15 +79,6 @@ function determineOperation(request = {}, runContext = {}) {
 
   if (isTeamRepoAccess) {
     return 'team_repo_access';
-  }
-
-  const isTeamRepoAccessRemoval = Boolean(
-    (request.team_slug && request.designated_approver_login) ||
-      hasNonEmptyArray(request.requested_repository_removals)
-  );
-
-  if (isTeamRepoAccessRemoval) {
-    return 'team_repo_access_removal';
   }
 
   const isTeamCreation = Boolean(
