@@ -17,6 +17,7 @@ const { parseTeamMembershipRequest } = require('../workflow-support/parse-team-m
 const { parseTeamRepoAccessRequest } = require('../workflow-support/parse-team-repo-access-request');
 const { parseHostedRunnerRequest } = require('../workflow-support/parse-hosted-runner-request');
 const { parseHostedRunnerDeletionRequest } = require('../workflow-support/parse-hosted-runner-deletion-request');
+const { parseHostedRunnerMoveRequest } = require('../workflow-support/parse-hosted-runner-move-request');
 const { parseRunnerGroupRequest } = require('../workflow-support/parse-runner-group-request');
 const { reconcileTeamCreation } = require('../workflow-support/reconcile-team-creation');
 const { reconcileTenantRepoCreation } = require('../workflow-support/reconcile-tenant-repo-creation');
@@ -25,6 +26,7 @@ const { reconcileTeamHierarchy } = require('../workflow-support/reconcile-team-h
 const { reconcileTeamRepoAccess } = require('../workflow-support/reconcile-team-repo-access');
 const { reconcileHostedRunnerCreation } = require('../workflow-support/reconcile-hosted-runner-creation');
 const { reconcileHostedRunnerDeletion } = require('../workflow-support/reconcile-hosted-runner-deletion');
+const { reconcileHostedRunnerMove } = require('../workflow-support/reconcile-hosted-runner-move');
 const { reconcileRunnerGroupCreation } = require('../workflow-support/reconcile-runner-group-creation');
 const { validateTenantCreationRequest } = require('../workflow-support/validate-tenant-creation-request');
 const { validateTenantRepoRequest } = require('../workflow-support/validate-tenant-repo-request');
@@ -34,6 +36,7 @@ const { validateTeamMembershipRequest } = require('../workflow-support/validate-
 const { validateTeamRepoAccessRequest } = require('../workflow-support/validate-team-repo-access-request');
 const { validateHostedRunnerRequest } = require('../workflow-support/validate-hosted-runner-request');
 const { validateHostedRunnerDeletionRequest } = require('../workflow-support/validate-hosted-runner-deletion-request');
+const { validateHostedRunnerMoveRequest } = require('../workflow-support/validate-hosted-runner-move-request');
 const { validateRunnerGroupRequest } = require('../workflow-support/validate-runner-group-request');
 const { emitAuditSummary } = require('./emit-audit-summary');
 const { createGitHubTeamApi: createMembershipGitHubApi } = require('../workflow-support/github-team-api');
@@ -92,6 +95,8 @@ function readParsedRequestFromEnv(env = process.env) {
     runner_image_source: env.PARSED_RUNNER_IMAGE_SOURCE || '',
     runner_size: env.PARSED_RUNNER_SIZE || '',
     runner_group_name: env.PARSED_RUNNER_GROUP_NAME || '',
+    hosted_runner_id: env.PARSED_HOSTED_RUNNER_ID || '',
+    target_runner_group_name: env.PARSED_TARGET_RUNNER_GROUP_NAME || '',
     maximum_runners: env.PARSED_MAXIMUM_RUNNERS || '',
     runner_group_visibility: env.PARSED_RUNNER_GROUP_VISIBILITY || '',
     allows_public_repositories: env.PARSED_ALLOWS_PUBLIC_REPOSITORIES || '',
@@ -145,10 +150,18 @@ function isHostedRunnerCreationParsedRequest(parsedRequest = {}) {
 function isHostedRunnerDeletionParsedRequest(parsedRequest = {}) {
   return Boolean(
     (parsedRequest.runner_name || parsedRequest.parsed_runner_name) &&
+    !(parsedRequest.target_runner_group_name || parsedRequest.parsed_target_runner_group_name) &&
     !(parsedRequest.runner_image_id ||
       parsedRequest.parsed_runner_image_id ||
       parsedRequest.runner_size ||
       parsedRequest.parsed_runner_size)
+  );
+}
+
+function isHostedRunnerMoveParsedRequest(parsedRequest = {}) {
+  return Boolean(
+    (parsedRequest.runner_name || parsedRequest.parsed_runner_name) &&
+    (parsedRequest.target_runner_group_name || parsedRequest.parsed_target_runner_group_name)
   );
 }
 
@@ -220,6 +233,7 @@ function terminalStateLabelPrefix(operation) {
     tenant_creation: 'issueops:create-tenant-model:',
     hosted_runner_creation: 'issueops:create-tenant-hosted-runner:',
     hosted_runner_deletion: 'issueops:delete-tenant-hosted-runner:',
+    hosted_runner_move: 'issueops:move-tenant-hosted-runner:',
     runner_group_creation: 'issueops:create-tenant-runner-groups:',
   };
   return operationPrefixes[operation] || 'issueops:add-team-members:';
@@ -413,16 +427,17 @@ async function runRequestValidation(options = {}) {
     env.AUDIT_ARTIFACT_PATH ||
       path.join(
         'artifacts',
-        `${isTeamRepoAccessParsedRequest(readParsedRequestFromEnv(env)) ? 'add-team-repo-access' : isTenantRepoCreationParsedRequest(readParsedRequestFromEnv(env)) ? 'create-tenant-repos' : isHostedRunnerCreationParsedRequest(readParsedRequestFromEnv(env)) ? 'create-tenant-hosted-runner' : isHostedRunnerDeletionParsedRequest(readParsedRequestFromEnv(env)) ? 'delete-tenant-hosted-runner' : isRunnerGroupCreationParsedRequest(readParsedRequestFromEnv(env)) ? 'create-tenant-runner-groups' : isTenantCreationParsedRequest(readParsedRequestFromEnv(env)) ? 'create-tenant-model' : isTeamCreationParsedRequest(readParsedRequestFromEnv(env)) ? 'create-org-teams' : isTeamHierarchyParsedRequest(readParsedRequestFromEnv(env)) ? 'add-child-teams' : 'add-team-members'}-validation-${env.ISSUE_NUMBER || 'manual'}.json`
+        `${isTeamRepoAccessParsedRequest(readParsedRequestFromEnv(env)) ? 'add-team-repo-access' : isTenantRepoCreationParsedRequest(readParsedRequestFromEnv(env)) ? 'create-tenant-repos' : isHostedRunnerCreationParsedRequest(readParsedRequestFromEnv(env)) ? 'create-tenant-hosted-runner' : isHostedRunnerMoveParsedRequest(readParsedRequestFromEnv(env)) ? 'move-tenant-hosted-runner' : isHostedRunnerDeletionParsedRequest(readParsedRequestFromEnv(env)) ? 'delete-tenant-hosted-runner' : isRunnerGroupCreationParsedRequest(readParsedRequestFromEnv(env)) ? 'create-tenant-runner-groups' : isTenantCreationParsedRequest(readParsedRequestFromEnv(env)) ? 'create-tenant-model' : isTeamCreationParsedRequest(readParsedRequestFromEnv(env)) ? 'create-org-teams' : isTeamHierarchyParsedRequest(readParsedRequestFromEnv(env)) ? 'add-child-teams' : 'add-team-members'}-validation-${env.ISSUE_NUMBER || 'manual'}.json`
       )
   );
   const parsedRequest = readParsedRequestFromEnv(env);
   const isTeamRepoAccess = isTeamRepoAccessParsedRequest(parsedRequest);
   const isTenantRepoCreation = isTenantRepoCreationParsedRequest(parsedRequest);
   const isHostedRunnerCreation = !isTenantRepoCreation && isHostedRunnerCreationParsedRequest(parsedRequest);
-  const isHostedRunnerDeletion = !isTenantRepoCreation && !isHostedRunnerCreation && isHostedRunnerDeletionParsedRequest(parsedRequest);
-  const isRunnerGroupCreation = !isTenantRepoCreation && !isHostedRunnerCreation && !isHostedRunnerDeletion && isRunnerGroupCreationParsedRequest(parsedRequest);
-  const isTenantRunnerOperation = isHostedRunnerCreation || isHostedRunnerDeletion || isRunnerGroupCreation;
+  const isHostedRunnerMove = !isTenantRepoCreation && !isHostedRunnerCreation && isHostedRunnerMoveParsedRequest(parsedRequest);
+  const isHostedRunnerDeletion = !isTenantRepoCreation && !isHostedRunnerCreation && !isHostedRunnerMove && isHostedRunnerDeletionParsedRequest(parsedRequest);
+  const isRunnerGroupCreation = !isTenantRepoCreation && !isHostedRunnerCreation && !isHostedRunnerMove && !isHostedRunnerDeletion && isRunnerGroupCreationParsedRequest(parsedRequest);
+  const isTenantRunnerOperation = isHostedRunnerCreation || isHostedRunnerDeletion || isHostedRunnerMove || isRunnerGroupCreation;
   const isTenantCreation = !isTenantRunnerOperation && isTenantCreationParsedRequest(parsedRequest);
   const isTeamCreation = isTeamCreationParsedRequest(parsedRequest);
   const isTeamHierarchy = isTeamHierarchyParsedRequest(parsedRequest);
@@ -437,8 +452,10 @@ async function runRequestValidation(options = {}) {
       ? 'tenant_repo_creation'
       : isHostedRunnerCreation
         ? 'hosted_runner_creation'
-        : isHostedRunnerDeletion
-          ? 'hosted_runner_deletion'
+        : isHostedRunnerMove
+          ? 'hosted_runner_move'
+          : isHostedRunnerDeletion
+            ? 'hosted_runner_deletion'
           : isRunnerGroupCreation
             ? 'runner_group_creation'
       : isTenantCreation
@@ -455,8 +472,10 @@ async function runRequestValidation(options = {}) {
       ? parseTenantRepoRequest
     : isHostedRunnerCreation
       ? parseHostedRunnerRequest
-    : isHostedRunnerDeletion
-      ? parseHostedRunnerDeletionRequest
+    : isHostedRunnerMove
+      ? parseHostedRunnerMoveRequest
+      : isHostedRunnerDeletion
+        ? parseHostedRunnerDeletionRequest
     : isRunnerGroupCreation
       ? parseRunnerGroupRequest
     : isTenantCreation
@@ -568,7 +587,7 @@ async function runRequestValidation(options = {}) {
             request_status: 'validation_failed',
           },
         };
-      } else if (isHostedRunnerCreation || isHostedRunnerDeletion || isRunnerGroupCreation) {
+      } else if (isHostedRunnerCreation || isHostedRunnerDeletion || isHostedRunnerMove || isRunnerGroupCreation) {
         validation = {
           is_valid: false,
           request_status: 'validation_failed',
@@ -671,7 +690,7 @@ async function runRequestValidation(options = {}) {
       const tenantRepoApi = isTenantRepoCreation
         ? (options.tenantRepoApi || createGitHubTeamRepoApi({ token: tokenInfo.token }))
         : null;
-      const runnerApi = (isHostedRunnerCreation || isHostedRunnerDeletion || isRunnerGroupCreation)
+      const runnerApi = (isHostedRunnerCreation || isHostedRunnerDeletion || isHostedRunnerMove || isRunnerGroupCreation)
         ? (options.runnerApi || createGitHubRunnerApi({ token: tokenInfo.token }))
         : null;
       if (isTeamRepoAccess) {
@@ -806,6 +825,47 @@ async function runRequestValidation(options = {}) {
           runner_exists: validation.runner_exists,
           existing_runner_id: validation.existing_runner_id,
           runner_group_resolution: validation.runner_group_resolution,
+          dry_run: validation.request.dry_run,
+          boundary_revalidation_status: 'matched',
+        });
+      } else if (isHostedRunnerMove) {
+        validation = await validateHostedRunnerMoveRequest(request, {
+          getOrganization: ({ organization }) => executeGitHubReadWithRetry(
+            () => api.getOrganization({ organization }),
+            { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+          ),
+          listTeams: ({ organization }) => executeGitHubReadWithRetry(
+            () => api.listOrgTeams({ organization }),
+            { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+          ),
+          getMembershipForUser: ({ organization, teamSlug, username }) => executeGitHubReadWithRetry(
+            () => api.getMembershipForUser({ organization, teamSlug, username }),
+            { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+          ),
+          getOrganizationMembership: ({ organization, username }) => executeGitHubReadWithRetry(
+            () => api.getOrganizationMembership({ organization, username }),
+            { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+          ),
+          listHostedRunners: ({ organization }) => executeGitHubReadWithRetry(
+            () => runnerApi.listHostedRunners({ organization }),
+            { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+          ),
+          listRunnerGroups: ({ organization }) => executeGitHubReadWithRetry(
+            () => runnerApi.listRunnerGroups({ organization }),
+            { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+          ),
+          registryRef: env.TENANT_REGISTRY_REF || 'main',
+          registryDirectory: env.TENANT_REGISTRY_DIR || 'tenant-registry',
+        });
+        reconciliationPlan = reconcileHostedRunnerMove({
+          request: validation.request,
+          canonical_tenant_context: validation.canonical_tenant_context,
+          organization_visible: validation.organization_visible,
+          runner_exists: validation.runner_exists,
+          existing_runner_id: validation.existing_runner_id,
+          current_runner_group_id: validation.current_runner_group_id,
+          target_runner_group_resolution: validation.target_runner_group_resolution,
+          runner_already_in_target_group: validation.runner_already_in_target_group,
           dry_run: validation.request.dry_run,
           boundary_revalidation_status: 'matched',
         });
@@ -1055,7 +1115,7 @@ async function runRequestValidation(options = {}) {
       ? 'repository'
       : isTenantRepoCreation
         ? 'tenant_repository'
-        : isHostedRunnerCreation || isHostedRunnerDeletion
+        : isHostedRunnerCreation || isHostedRunnerDeletion || isHostedRunnerMove
           ? 'hosted_runner'
           : isRunnerGroupCreation
             ? 'runner_group'
@@ -1087,6 +1147,8 @@ async function runRequestValidation(options = {}) {
         ? 'Request is validated and ready for approval. No tenant repository mutation was attempted.'
         : isHostedRunnerCreation
         ? 'Request is validated and ready for approval. No hosted-runner mutation was attempted.'
+        : isHostedRunnerMove
+        ? 'Request is validated and ready for approval. No hosted-runner move was attempted.'
         : isHostedRunnerDeletion
         ? 'Request is validated and ready for approval. No hosted-runner deletion was attempted.'
         : isRunnerGroupCreation
@@ -1104,6 +1166,8 @@ async function runRequestValidation(options = {}) {
         ? 'Request validation failed. No tenant repository mutation was attempted.'
         : isHostedRunnerCreation
         ? 'Request validation failed. No hosted-runner mutation was attempted.'
+        : isHostedRunnerMove
+        ? 'Request validation failed. No hosted-runner move was attempted.'
         : isHostedRunnerDeletion
         ? 'Request validation failed. No hosted-runner deletion was attempted.'
         : isRunnerGroupCreation
@@ -1181,6 +1245,7 @@ module.exports = {
   isTeamCreationParsedRequest,
   isHostedRunnerCreationParsedRequest,
   isHostedRunnerDeletionParsedRequest,
+  isHostedRunnerMoveParsedRequest,
   isRunnerGroupCreationParsedRequest,
   parseParsedRequestJson,
   parseJsonFromEnv,

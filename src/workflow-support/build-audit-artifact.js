@@ -47,6 +47,15 @@ function determineOperation(request = {}, runContext = {}) {
     return 'hosted_runner_creation';
   }
 
+  const isHostedRunnerMove = Boolean(
+    request.runner_move_scope ||
+      request.target_runner_group_name_input
+  );
+
+  if (isHostedRunnerMove) {
+    return 'hosted_runner_move';
+  }
+
   const isHostedRunnerDeletion = Boolean(
     request.runner_deletion_scope ||
       ((request.runner_name_derived || request.runner_base_name_input) && !request.runner_image_id)
@@ -249,6 +258,9 @@ function buildAuditArtifact(input = {}) {
       runner_group_name_input: request.runner_group_name_input || '',
       maximum_runners: request.maximum_runners ?? null,
       runner_deletion_scope: request.runner_deletion_scope || '',
+      hosted_runner_id_input: request.hosted_runner_id_input ?? null,
+      target_runner_group_name_input: request.target_runner_group_name_input || '',
+      runner_move_scope: request.runner_move_scope || '',
       runner_group_base_name_input: request.runner_group_base_name_input || '',
       runner_group_name_derivation: request.runner_group_name_derivation || null,
       runner_group_name_derived: request.runner_group_name_derived || '',
@@ -319,6 +331,10 @@ function buildAuditArtifact(input = {}) {
       runner_exists: validation.runner_exists,
       existing_runner_id: validation.existing_runner_id ?? null,
       existing_runner_status: validation.existing_runner_status || null,
+      current_runner_group_id: validation.current_runner_group_id ?? null,
+      runner_resolution_status: validation.runner_resolution_status || null,
+      target_runner_group_resolution: validation.target_runner_group_resolution || null,
+      runner_already_in_target_group: validation.runner_already_in_target_group,
       runner_group_resolution: validation.runner_group_resolution || null,
       runner_group_exists: validation.runner_group_exists,
       existing_runner_group_id: validation.existing_runner_group_id ?? null,
@@ -376,12 +392,18 @@ function buildAuditArtifact(input = {}) {
       creation_action: reconciliationPlan.creation_action || null,
       permission_action: reconciliationPlan.permission_action || null,
       deletion_action: reconciliationPlan.deletion_action || null,
+      move_action: reconciliationPlan.move_action || null,
       direct_admin_avoidance: reconciliationPlan.direct_admin_avoidance || null,
       blocked_reason: reconciliationPlan.blocked_reason || null,
       boundary_revalidation_status: reconciliationPlan.boundary_revalidation_status || null,
       runner_exists: reconciliationPlan.runner_exists,
       existing_runner_id: reconciliationPlan.existing_runner_id ?? null,
       runner_name_derived: reconciliationPlan.runner_name_derived || '',
+      current_runner_group_id: reconciliationPlan.current_runner_group_id ?? null,
+      target_runner_group_resolution: reconciliationPlan.target_runner_group_resolution || null,
+      target_runner_group_id: reconciliationPlan.target_runner_group_id ?? null,
+      target_runner_group_name: reconciliationPlan.target_runner_group_name || '',
+      runner_already_in_target_group: reconciliationPlan.runner_already_in_target_group,
       runner_group_resolution: reconciliationPlan.runner_group_resolution || null,
       runner_group_exists: reconciliationPlan.runner_group_exists,
       existing_runner_group_id: reconciliationPlan.existing_runner_group_id ?? null,

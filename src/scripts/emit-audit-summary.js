@@ -105,13 +105,16 @@ function formatAuditSummary(auditArtifact = {}) {
     ].filter(Boolean).join('\n');
   }
 
-  const isHostedRunnerCreation = operation === 'hosted_runner_creation' || (operation !== 'hosted_runner_deletion' && Boolean(request.runner_image_id || request.runner_size));
-  const isHostedRunnerDeletion = operation === 'hosted_runner_deletion' || (!isHostedRunnerCreation && Boolean(request.runner_deletion_scope));
+  const isHostedRunnerCreation = operation === 'hosted_runner_creation' || (!['hosted_runner_deletion', 'hosted_runner_move'].includes(operation) && Boolean(request.runner_image_id || request.runner_size));
+  const isHostedRunnerMove = operation === 'hosted_runner_move' || Boolean(request.runner_move_scope || request.target_runner_group_name_input);
+  const isHostedRunnerDeletion = operation === 'hosted_runner_deletion' || (!isHostedRunnerCreation && !isHostedRunnerMove && Boolean(request.runner_deletion_scope));
   const isRunnerGroupCreation = operation === 'runner_group_creation' || Boolean(request.runner_group_name_derived || request.runner_group_base_name_input);
 
-  if (isHostedRunnerCreation || isHostedRunnerDeletion) {
+  if (isHostedRunnerCreation || isHostedRunnerDeletion || isHostedRunnerMove) {
     return [
-      isHostedRunnerDeletion
+      isHostedRunnerMove
+        ? '# Move Tenant GitHub-Hosted Runner Workflow Summary'
+        : isHostedRunnerDeletion
         ? '# Delete Tenant GitHub-Hosted Runner Workflow Summary'
         : '# Create Tenant GitHub-Hosted Runner Workflow Summary',
       '',
@@ -121,6 +124,8 @@ function formatAuditSummary(auditArtifact = {}) {
       `- Tenant name: ${request.tenant_name_input || request.tenant_display_name || 'n/a'}`,
       `- Runner base name: ${request.runner_base_name_input || 'n/a'}`,
       `- Derived runner name: ${request.runner_name_derived || 'n/a'}`,
+      isHostedRunnerMove ? `- Requested hosted runner id: ${request.hosted_runner_id_input ?? 'not provided'}` : null,
+      isHostedRunnerMove ? `- Target runner group: ${request.target_runner_group_name_input || 'n/a'}` : null,
       isHostedRunnerCreation ? `- Runner image: ${request.runner_image_id || 'n/a'} (${request.runner_image_source || 'github'})` : null,
       isHostedRunnerCreation ? `- Runner machine size: ${request.runner_size || 'n/a'}` : null,
       isHostedRunnerCreation ? `- Requested runner group: ${request.runner_group_name_input || 'organization default'}` : null,
@@ -146,13 +151,28 @@ function formatAuditSummary(auditArtifact = {}) {
       `- Context marker: ${request.context_marker || validation.validation_findings && validation.validation_findings.context_marker || 'n/a'}`,
       `- Runner exists: ${validation.runner_exists ? 'true' : 'false'}`,
       validation.existing_runner_id != null ? `- Existing runner id: ${validation.existing_runner_id}` : null,
+      isHostedRunnerMove ? `- Runner resolution: ${validation.runner_resolution_status || 'unknown'}` : null,
+      isHostedRunnerMove ? `- Current runner group id: ${validation.current_runner_group_id ?? 'n/a'}` : null,
+      isHostedRunnerMove && validation.target_runner_group_resolution
+        ? `- Target runner group resolution: ${validation.target_runner_group_resolution.resolution_status || 'unknown'}${validation.target_runner_group_resolution.resolved_group_name ? ` (${validation.target_runner_group_resolution.resolved_group_name} #${validation.target_runner_group_resolution.resolved_group_id})` : ''}`
+        : null,
       isHostedRunnerDeletion && validation.existing_runner_status ? `- Existing runner status: ${validation.existing_runner_status}` : null,
-      isHostedRunnerCreation ? `- Planned creation action: ${reconciliation.creation_action || 'n/a'}` : `- Planned deletion action: ${reconciliation.deletion_action || 'n/a'}`,
+      isHostedRunnerCreation
+        ? `- Planned creation action: ${reconciliation.creation_action || 'n/a'}`
+        : isHostedRunnerMove
+          ? `- Planned move action: ${reconciliation.move_action || 'n/a'}`
+          : `- Planned deletion action: ${reconciliation.deletion_action || 'n/a'}`,
       `- Blocked reason: ${reconciliation.blocked_reason || 'n/a'}`,
       `- Boundary revalidation: ${reconciliation.boundary_revalidation_status || 'n/a'}`,
-      isHostedRunnerCreation ? `- Runner creation result: ${execution.runner_creation_result || 'n/a'}` : `- Runner deletion result: ${execution.runner_deletion_result || 'n/a'}`,
+      isHostedRunnerCreation
+        ? `- Runner creation result: ${execution.runner_creation_result || 'n/a'}`
+        : isHostedRunnerMove
+          ? `- Runner move result: ${execution.runner_move_result || 'n/a'}`
+          : `- Runner deletion result: ${execution.runner_deletion_result || 'n/a'}`,
       execution.created_runner_id != null ? `- Created runner id: ${execution.created_runner_id}` : null,
       execution.created_runner_status ? `- Created runner status: ${execution.created_runner_status}` : null,
+      isHostedRunnerMove && execution.moved_runner_id != null ? `- Moved runner id: ${execution.moved_runner_id}` : null,
+      isHostedRunnerMove && execution.target_runner_group_id != null ? `- Target runner group id: ${execution.target_runner_group_id}` : null,
       `- Audit persistence result: ${execution.audit_persistence_result || 'n/a'}`,
       `- Added: ${execution.mutation_count || 0}`,
       `- No-op: ${execution.noop_count || 0}`,

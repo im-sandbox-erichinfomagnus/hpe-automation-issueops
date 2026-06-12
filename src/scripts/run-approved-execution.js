@@ -26,6 +26,7 @@ const { reconcileTenantCreation } = require('../workflow-support/reconcile-tenan
 const { reconcileTenantRepoCreation } = require('../workflow-support/reconcile-tenant-repo-creation');
 const { reconcileHostedRunnerCreation } = require('../workflow-support/reconcile-hosted-runner-creation');
 const { reconcileHostedRunnerDeletion } = require('../workflow-support/reconcile-hosted-runner-deletion');
+const { reconcileHostedRunnerMove } = require('../workflow-support/reconcile-hosted-runner-move');
 const { reconcileRunnerGroupCreation } = require('../workflow-support/reconcile-runner-group-creation');
 const { reconcileTeamHierarchy } = require('../workflow-support/reconcile-team-hierarchy');
 const { reconcileTeamCreation } = require('../workflow-support/reconcile-team-creation');
@@ -35,6 +36,7 @@ const { validateTeamRepoAccessRequest } = require('../workflow-support/validate-
 const { validateTenantRepoRequest } = require('../workflow-support/validate-tenant-repo-request');
 const { validateHostedRunnerRequest } = require('../workflow-support/validate-hosted-runner-request');
 const { validateHostedRunnerDeletionRequest } = require('../workflow-support/validate-hosted-runner-deletion-request');
+const { validateHostedRunnerMoveRequest } = require('../workflow-support/validate-hosted-runner-move-request');
 const { validateRunnerGroupRequest } = require('../workflow-support/validate-runner-group-request');
 const { emitAuditSummary } = require('./emit-audit-summary');
 
@@ -47,6 +49,7 @@ function terminalStateLabelPrefix(operation) {
     tenant_creation: 'issueops:create-tenant-model:',
     hosted_runner_creation: 'issueops:create-tenant-hosted-runner:',
     hosted_runner_deletion: 'issueops:delete-tenant-hosted-runner:',
+    hosted_runner_move: 'issueops:move-tenant-hosted-runner:',
     runner_group_creation: 'issueops:create-tenant-runner-groups:',
   };
   return operationPrefixes[operation] || 'issueops:add-team-members:';
@@ -300,8 +303,9 @@ async function runApprovedExecution(options = {}) {
   const isTeamCreation = auditArtifact.metadata && auditArtifact.metadata.operation === 'team_creation';
   const isHostedRunnerCreation = auditArtifact.metadata && auditArtifact.metadata.operation === 'hosted_runner_creation';
   const isHostedRunnerDeletion = auditArtifact.metadata && auditArtifact.metadata.operation === 'hosted_runner_deletion';
+  const isHostedRunnerMove = auditArtifact.metadata && auditArtifact.metadata.operation === 'hosted_runner_move';
   const isRunnerGroupCreation = auditArtifact.metadata && auditArtifact.metadata.operation === 'runner_group_creation';
-  const isTenantRunnerOperation = isHostedRunnerCreation || isHostedRunnerDeletion || isRunnerGroupCreation;
+  const isTenantRunnerOperation = isHostedRunnerCreation || isHostedRunnerDeletion || isHostedRunnerMove || isRunnerGroupCreation;
   const operation = auditArtifact.metadata && auditArtifact.metadata.operation || 'team_membership';
 
   if (!auditArtifact.validation || auditArtifact.validation.is_valid !== true) {
@@ -371,7 +375,7 @@ async function runApprovedExecution(options = {}) {
             dry_run: auditArtifact.request.dry_run,
             tokenInfo: options.tokenInfo,
           })
-      : (isHostedRunnerCreation || isHostedRunnerDeletion)
+      : (isHostedRunnerCreation || isHostedRunnerDeletion || isHostedRunnerMove)
         ? assertHostedRunnerMutationAllowed({
             approval_status: auditArtifact.approval.approval_status,
             approver_login: auditArtifact.approval.approver_login,
@@ -401,7 +405,7 @@ async function runApprovedExecution(options = {}) {
     auditArtifact.request.request_status = 'failed';
     auditArtifact.execution = buildExecutionOutcome({
       executionResults: [],
-      operationLabel: isTeamCreation ? 'team' : isTeamHierarchy ? 'child link' : (isTeamRepoAccess || isTenantRepoCreation) ? 'repository' : (isHostedRunnerCreation || isHostedRunnerDeletion) ? 'hosted_runner' : isRunnerGroupCreation ? 'runner_group' : 'membership',
+      operationLabel: isTeamCreation ? 'team' : isTeamHierarchy ? 'child link' : (isTeamRepoAccess || isTenantRepoCreation) ? 'repository' : (isHostedRunnerCreation || isHostedRunnerDeletion || isHostedRunnerMove) ? 'hosted_runner' : isRunnerGroupCreation ? 'runner_group' : 'membership',
       runContext: {
         run_id: env.GITHUB_RUN_ID,
         run_attempt: env.GITHUB_RUN_ATTEMPT,
@@ -417,7 +421,7 @@ async function runApprovedExecution(options = {}) {
     });
     auditArtifact.execution.failure_count = 1;
     auditArtifact.execution.rollback_status = 'manual_follow_up_required';
-    auditArtifact.execution.summary = `${error.message}. No ${isTenantCreation ? 'tenant bootstrap mutation' : isTeamCreation ? 'team creation' : isTeamHierarchy ? 'child-team mutation' : isTenantRepoCreation ? 'tenant repository mutation' : isHostedRunnerCreation ? 'tenant hosted-runner mutation' : isHostedRunnerDeletion ? 'tenant hosted-runner deletion' : isRunnerGroupCreation ? 'tenant runner-group mutation' : isTeamRepoAccess ? 'repository-access mutation' : 'membership mutation'} was attempted.`;
+    auditArtifact.execution.summary = `${error.message}. No ${isTenantCreation ? 'tenant bootstrap mutation' : isTeamCreation ? 'team creation' : isTeamHierarchy ? 'child-team mutation' : isTenantRepoCreation ? 'tenant repository mutation' : isHostedRunnerCreation ? 'tenant hosted-runner mutation' : isHostedRunnerMove ? 'tenant hosted-runner move' : isHostedRunnerDeletion ? 'tenant hosted-runner deletion' : isRunnerGroupCreation ? 'tenant runner-group mutation' : isTeamRepoAccess ? 'repository-access mutation' : 'membership mutation'} was attempted.`;
     fs.writeFileSync(artifactPath, toAuditArtifactJson({
       request: auditArtifact.request,
       validation: auditArtifact.validation,
@@ -436,7 +440,7 @@ async function runApprovedExecution(options = {}) {
   }
 
   if (!mutationDecision.allowed) {
-    auditArtifact.execution.summary = `Approved execution remains blocked because the request is dry-run only. No ${isTenantCreation ? 'tenant bootstrap mutation' : isTeamCreation ? 'team creation' : isTeamHierarchy ? 'child-team mutation' : isTenantRepoCreation ? 'tenant repository mutation' : isHostedRunnerCreation ? 'tenant hosted-runner mutation' : isHostedRunnerDeletion ? 'tenant hosted-runner deletion' : isRunnerGroupCreation ? 'tenant runner-group mutation' : isTeamRepoAccess ? 'repository-access mutation' : 'membership mutation'} was attempted.`;
+    auditArtifact.execution.summary = `Approved execution remains blocked because the request is dry-run only. No ${isTenantCreation ? 'tenant bootstrap mutation' : isTeamCreation ? 'team creation' : isTeamHierarchy ? 'child-team mutation' : isTenantRepoCreation ? 'tenant repository mutation' : isHostedRunnerCreation ? 'tenant hosted-runner mutation' : isHostedRunnerMove ? 'tenant hosted-runner move' : isHostedRunnerDeletion ? 'tenant hosted-runner deletion' : isRunnerGroupCreation ? 'tenant runner-group mutation' : isTeamRepoAccess ? 'repository-access mutation' : 'membership mutation'} was attempted.`;
     auditArtifact.execution.rollback_status = auditArtifact.execution.rollback_status || 'not_needed';
     writeGitHubOutput('execution-status', mutationDecision.reason, env.GITHUB_OUTPUT);
     emitAuditSummary(auditArtifact, { summaryPath: env.GITHUB_STEP_SUMMARY, overwrite: true });
@@ -531,6 +535,12 @@ async function runApprovedExecution(options = {}) {
       tenantRunnerValidation = await validateHostedRunnerDeletionRequest(auditArtifact.request, {
         ...runnerValidationOptions,
         listHostedRunners: ({ organization }) => runnerApi.listHostedRunners({ organization }),
+      });
+    } else if (isHostedRunnerMove) {
+      tenantRunnerValidation = await validateHostedRunnerMoveRequest(auditArtifact.request, {
+        ...runnerValidationOptions,
+        listHostedRunners: ({ organization }) => runnerApi.listHostedRunners({ organization }),
+        listRunnerGroups: ({ organization }) => runnerApi.listRunnerGroups({ organization }),
       });
     } else {
       tenantRunnerValidation = await validateRunnerGroupRequest(auditArtifact.request, {
@@ -635,6 +645,19 @@ async function runApprovedExecution(options = {}) {
         dry_run: auditArtifact.request.dry_run,
         boundary_revalidation_status: tenantRunnerValidation && tenantRunnerValidation.is_valid ? 'matched' : 'mismatched',
       })
+    : isHostedRunnerMove
+    ? reconcileHostedRunnerMove({
+        request: tenantRunnerValidation.request || auditArtifact.request,
+        canonical_tenant_context: tenantRunnerValidation.canonical_tenant_context,
+        organization_visible: tenantRunnerValidation.organization_visible,
+        runner_exists: tenantRunnerValidation.runner_exists,
+        existing_runner_id: tenantRunnerValidation.existing_runner_id,
+        current_runner_group_id: tenantRunnerValidation.current_runner_group_id,
+        target_runner_group_resolution: tenantRunnerValidation.target_runner_group_resolution,
+        runner_already_in_target_group: tenantRunnerValidation.runner_already_in_target_group,
+        dry_run: auditArtifact.request.dry_run,
+        boundary_revalidation_status: tenantRunnerValidation && tenantRunnerValidation.is_valid ? 'matched' : 'mismatched',
+      })
     : isRunnerGroupCreation
     ? reconcileRunnerGroupCreation({
         request: tenantRunnerValidation.request || auditArtifact.request,
@@ -710,10 +733,12 @@ async function runApprovedExecution(options = {}) {
         failure_reason: null,
       });
     }
-  } else if (isHostedRunnerCreation || isHostedRunnerDeletion) {
+  } else if (isHostedRunnerCreation || isHostedRunnerDeletion || isHostedRunnerMove) {
     const plannedAction = isHostedRunnerCreation
       ? reconciliationPlan.creation_action
-      : reconciliationPlan.deletion_action;
+      : isHostedRunnerMove
+        ? reconciliationPlan.move_action
+        : reconciliationPlan.deletion_action;
     if (plannedAction === 'noop') {
       executionResults.push({
         runner_name: reconciliationPlan.runner_name_derived,
@@ -1001,6 +1026,30 @@ async function runApprovedExecution(options = {}) {
         executionResults.push({
           runner_name: reconciliationPlan.runner_name_derived,
           execution_result: attemptResult.ok ? (deletedAsNoop ? 'noop' : 'deleted') : 'failed',
+          failure_reason: attemptResult.ok ? null : classifyFailureReason(attemptResult.error),
+        });
+      }
+    } else if (isHostedRunnerMove) {
+      if (reconciliationPlan.move_action === 'move_hosted_runner') {
+        const attemptResult = await executeWithBoundedRetry(
+          () => runnerApi.updateHostedRunner({
+            organization: auditArtifact.request.organization,
+            hostedRunnerId: reconciliationPlan.existing_runner_id,
+            runnerGroupId: reconciliationPlan.target_runner_group_id,
+          }),
+          {
+            maxRetries: options.maxRetries || 2,
+            sleep: options.sleep,
+          }
+        );
+
+        latestRateLimitSnapshot = attemptResult.retry_plan.rate_limit_snapshot || latestRateLimitSnapshot;
+
+        executionResults.push({
+          runner_name: reconciliationPlan.runner_name_derived,
+          hosted_runner_id: reconciliationPlan.existing_runner_id,
+          runner_group_id: reconciliationPlan.target_runner_group_id,
+          execution_result: attemptResult.ok ? 'moved' : 'failed',
           failure_reason: attemptResult.ok ? null : classifyFailureReason(attemptResult.error),
         });
       }
@@ -1388,10 +1437,10 @@ async function runApprovedExecution(options = {}) {
         (result.execution_result === 'granted' || result.execution_result === 'failed' || result.execution_result === 'noop')
       )
     : null;
-  const hostedRunnerExecutionResult = (isHostedRunnerCreation || isHostedRunnerDeletion)
+  const hostedRunnerExecutionResult = (isHostedRunnerCreation || isHostedRunnerDeletion || isHostedRunnerMove)
     ? [...executionResults].reverse().find((result) =>
         result.runner_name === reconciliationPlan.runner_name_derived &&
-        ['created', 'deleted', 'failed', 'noop'].includes(result.execution_result)
+        ['created', 'deleted', 'moved', 'failed', 'noop'].includes(result.execution_result)
       )
     : null;
   const runnerGroupExecutionResult = isRunnerGroupCreation
@@ -1407,7 +1456,7 @@ async function runApprovedExecution(options = {}) {
       ? 'tenant_bootstrap'
       : isTenantRepoCreation
         ? 'tenant_repository'
-        : (isHostedRunnerCreation || isHostedRunnerDeletion)
+        : (isHostedRunnerCreation || isHostedRunnerDeletion || isHostedRunnerMove)
           ? 'hosted_runner'
           : isRunnerGroupCreation
             ? 'runner_group'
@@ -1457,6 +1506,13 @@ async function runApprovedExecution(options = {}) {
           ? 'failed'
           : 'noop'
       : null,
+    runner_move_result: isHostedRunnerMove
+      ? hostedRunnerExecutionResult && hostedRunnerExecutionResult.execution_result === 'moved'
+        ? 'moved'
+        : hostedRunnerExecutionResult && hostedRunnerExecutionResult.execution_result === 'failed'
+          ? 'failed'
+          : 'noop'
+      : null,
     runner_group_creation_result: isRunnerGroupCreation
       ? runnerGroupExecutionResult && runnerGroupExecutionResult.execution_result === 'created'
         ? 'created'
@@ -1466,6 +1522,8 @@ async function runApprovedExecution(options = {}) {
       : null,
     created_runner_id: isHostedRunnerCreation ? reconciliationPlan.created_runner_id ?? null : null,
     created_runner_status: isHostedRunnerCreation ? reconciliationPlan.created_runner_status || null : null,
+    moved_runner_id: isHostedRunnerMove ? reconciliationPlan.existing_runner_id ?? null : null,
+    target_runner_group_id: isHostedRunnerMove ? reconciliationPlan.target_runner_group_id ?? null : null,
     created_runner_group_id: isRunnerGroupCreation ? reconciliationPlan.created_runner_group_id ?? null : null,
     audit_persistence_result: (isTenantRepoCreation || isTenantRunnerOperation) ? 'pending' : null,
     artifact_path: artifactPath,
@@ -1485,6 +1543,8 @@ async function runApprovedExecution(options = {}) {
       ? 'tenant repository execution'
       : isHostedRunnerCreation
         ? 'tenant hosted-runner creation'
+        : isHostedRunnerMove
+          ? 'tenant hosted-runner move'
         : isHostedRunnerDeletion
           ? 'tenant hosted-runner deletion'
           : isRunnerGroupCreation

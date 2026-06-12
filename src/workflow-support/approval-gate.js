@@ -11,11 +11,20 @@ const { resolveRunnerGroupApprover } = require('./resolve-runner-group-approver'
 
 const APPROVAL_COMMAND = 'approved';
 
-const TENANT_RUNNER_APPROVAL_MODES = ['hosted_runner_creation', 'hosted_runner_deletion', 'runner_group_creation'];
+const TENANT_RUNNER_APPROVAL_MODES = [
+  'hosted_runner_creation',
+  'hosted_runner_deletion',
+  'hosted_runner_move',
+  'runner_group_creation',
+];
 
 function describeTenantRunnerMutation(approvalMode) {
   if (approvalMode === 'hosted_runner_deletion') {
     return 'tenant hosted-runner deletion';
+  }
+
+  if (approvalMode === 'hosted_runner_move') {
+    return 'tenant hosted-runner move';
   }
 
   if (approvalMode === 'runner_group_creation') {
@@ -145,7 +154,7 @@ async function evaluateApprovalGate(input = {}, options = {}) {
       return resolveTenantRepoApprover(args, options);
     }
 
-    if (approvalMode === 'hosted_runner_creation' || approvalMode === 'hosted_runner_deletion') {
+    if (approvalMode === 'hosted_runner_creation' || approvalMode === 'hosted_runner_deletion' || approvalMode === 'hosted_runner_move') {
       return resolveHostedRunnerApprover(args, options);
     }
 

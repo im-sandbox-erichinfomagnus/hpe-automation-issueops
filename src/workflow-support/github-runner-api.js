@@ -162,6 +162,23 @@ function createGitHubRunnerApi(options = {}) {
       return mapHostedRunnerState(result.payload || {});
     },
 
+    async updateHostedRunner({ organization, hostedRunnerId, runnerGroupId }) {
+      const result = await request(`/orgs/${organization}/actions/hosted-runners/${hostedRunnerId}`, {
+        method: 'PATCH',
+        body: {
+          runner_group_id: runnerGroupId,
+        },
+      });
+
+      if (!result.ok) {
+        throw Object.assign(new Error('Failed to update hosted runner'), result, {
+          retry_after: getHeader(result.headers, 'retry-after'),
+        });
+      }
+
+      return mapHostedRunnerState(result.payload || {});
+    },
+
     async deleteHostedRunner({ organization, hostedRunnerId }) {
       const result = await request(`/orgs/${organization}/actions/hosted-runners/${hostedRunnerId}`, {
         method: 'DELETE',

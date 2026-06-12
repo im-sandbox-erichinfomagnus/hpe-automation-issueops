@@ -1,0 +1,209 @@
+name: move-tenant-hosted-runner
+
+on:
+  issues:
+    types:
+      - opened
+      - edited
+      - reopened
+      - labeled
+  issue_comment:
+    types:
+      - created
+      - edited
+      - deleted
+  workflow_dispatch:
+    inputs:
+      issue-number:
+        description: Existing issue number to replay for validation or execution.
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+  issues: write
+
+concurrency:
+  group: move-tenant-hosted-runner-${{ github.event.issue.number || inputs['issue-number'] || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  intake:
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'issues' || github.event_name == 'issue_comment'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    env:
+      ISSUE_NUMBER: ${{ github.event.issue.number || inputs['issue-number'] || '' }}
+      TENANT_REGISTRY_REF: main
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.TENANT_REGISTRY_REF }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Resolve issue context
+        id: issue_context
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          ISSUE_NUMBER: ${{ env.ISSUE_NUMBER }}
+        run: |
+          set -euo pipefail
+
+          if [ "$EVENT_NAME" = "issues" ] || [ "$EVENT_NAME" = "issue_comment" ]; then
+            issue_json=$(jq -c '.issue' "$GITHUB_EVENT_PATH")
+          else
+            issue_json=$(curl --silent --show-error --fail \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/repos/$REPOSITORY/issues/$ISSUE_NUMBER")
+          fi
+
+          issue_body=$(printf '%s' "$issue_json" | jq -r '.body // ""')
+          issue_number=$(printf '%s' "$issue_json" | jq -r '.number // ""')
+          requester_login=$(printf '%s' "$issue_json" | jq -r '.user.login // ""')
+          issue_labels_json=$(printf '%s' "$issue_json" | jq -c '.labels // []')
+
+          {
+            echo 'issue_body<<EOF'
+            printf '%s\n' "$issue_body"
+            echo EOF
+            echo "issue_number=$issue_number"
+            echo "requester_login=$requester_login"
+            echo "issue_labels_json=$issue_labels_json"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Parse issue body
+        id: parse_request
+        uses: issue-ops/parser@v5
+        with:
+          body: ${{ steps.issue_context.outputs.issue_body }}
+          issue-form-template: move-tenant-hosted-runner.yml
+
+      - name: Run request validation
+        id: request_validation
+        continue-on-error: true
+        env:
+          ISSUE_NUMBER: ${{ steps.issue_context.outputs.issue_number }}
+          REQUESTER_LOGIN: ${{ steps.issue_context.outputs.requester_login }}
+          ISSUE_LABELS_JSON: ${{ steps.issue_context.outputs.issue_labels_json }}
+          PARSED_REQUEST_JSON: ${{ steps.parse_request.outputs.json }}
+          PARSED_ORGANIZATION: ${{ steps.parse_request.outputs.parsed_organization }}
+          PARSED_TENANT_NAME: ${{ steps.parse_request.outputs.parsed_tenant_name }}
+          PARSED_RUNNER_NAME: ${{ steps.parse_request.outputs.parsed_runner_name }}
+          PARSED_HOSTED_RUNNER_ID: ${{ steps.parse_request.outputs.parsed_hosted_runner_id }}
+          PARSED_TARGET_RUNNER_GROUP_NAME: ${{ steps.parse_request.outputs.parsed_target_runner_group_name }}
+          PARSED_DESIGNATED_APPROVER: ${{ steps.parse_request.outputs.parsed_designated_approver }}
+          PARSED_DRY_RUN: ${{ steps.parse_request.outputs.parsed_dry_run }}
+          PARSED_JUSTIFICATION: ${{ steps.parse_request.outputs.parsed_justification }}
+          TENANT_REGISTRY_DIR: tenant-registry
+          TENANT_REGISTRY_REF: ${{ env.TENANT_REGISTRY_REF }}
+          ISSUEOPS_GITHUB_TOKEN: ${{ secrets.ISSUEOPS_GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+          AUDIT_ARTIFACT_RETENTION_DAYS: 30
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          artifact_path="artifacts/move-tenant-hosted-runner-validation-${ISSUE_NUMBER:-manual}.json"
+          echo "AUDIT_ARTIFACT_PATH=$artifact_path" >> "$GITHUB_ENV"
+          AUDIT_ARTIFACT_PATH="$artifact_path" node src/scripts/run-request-validation.js
+          echo "artifact_path=$artifact_path" >> "$GITHUB_OUTPUT"
+
+      - name: Run approval gate
+        id: approval_gate
+        continue-on-error: true
+        env:
+          AUDIT_ARTIFACT_PATH: ${{ steps.request_validation.outputs['audit-artifact-path'] || steps.request_validation.outputs.artifact_path }}
+          ISSUEOPS_GITHUB_TOKEN: ${{ secrets.ISSUEOPS_GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+          AUDIT_ARTIFACT_RETENTION_DAYS: 30
+        run: |
+          set -euo pipefail
+          node src/scripts/run-approval-gate.js
+
+      - name: Ensure terminal state labels exist
+        if: ${{ steps.approval_gate.outputs['approval-status'] == 'approved' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for label in \
+            "issueops:move-tenant-hosted-runner:executed" \
+            "issueops:move-tenant-hosted-runner:failed" \
+            "issueops:move-tenant-hosted-runner:partially_executed"; do
+            gh label create "$label" \
+              --repo "${{ github.repository }}" \
+              --force 2>/dev/null || true
+          done
+
+      - name: Run approved execution
+        id: approved_execution
+        if: ${{ steps.approval_gate.outputs['approval-status'] == 'approved' }}
+        continue-on-error: true
+        env:
+          AUDIT_ARTIFACT_PATH: ${{ steps.approval_gate.outputs['audit-artifact-path'] || steps.request_validation.outputs['audit-artifact-path'] || steps.request_validation.outputs.artifact_path }}
+          ISSUEOPS_GITHUB_TOKEN: ${{ secrets.ISSUEOPS_GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+          TENANT_REGISTRY_DIR: tenant-registry
+          TENANT_REGISTRY_REF: ${{ env.TENANT_REGISTRY_REF }}
+          AUDIT_ARTIFACT_RETENTION_DAYS: 30
+        run: |
+          set -euo pipefail
+          node src/scripts/run-approved-execution.js
+
+      - name: Post result comment on the issue
+        if: ${{ always() && steps.issue_context.outputs.issue_number != '' && steps.request_validation.outcome != 'skipped' }}
+        uses: actions/github-script@v7
+        env:
+          AUDIT_ARTIFACT_PATH: ${{ steps.approved_execution.outputs['audit-artifact-path'] || steps.approval_gate.outputs['audit-artifact-path'] || steps.request_validation.outputs['audit-artifact-path'] || steps.request_validation.outputs.artifact_path }}
+          ISSUE_NUMBER: ${{ steps.issue_context.outputs.issue_number }}
+        with:
+          script: |
+            const fs = require('fs');
+            const artifactPath = process.env.AUDIT_ARTIFACT_PATH;
+            if (!artifactPath || !fs.existsSync(artifactPath)) {
+              return;
+            }
+            const { formatAuditSummary } = require('./src/scripts/emit-audit-summary');
+            const artifact = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: Number(process.env.ISSUE_NUMBER),
+              body: formatAuditSummary(artifact),
+            });
+
+      - name: Upload audit artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: move-tenant-hosted-runner-execution-${{ steps.issue_context.outputs.issue_number || 'manual' }}-${{ github.run_attempt }}
+          path: ${{ steps.approved_execution.outputs['audit-artifact-path'] || steps.approval_gate.outputs['audit-artifact-path'] || steps.request_validation.outputs['audit-artifact-path'] || steps.request_validation.outputs.artifact_path }}
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Validation and approval snapshot
+        if: always()
+        run: |
+          {
+            echo "Request status: ${{ steps.approved_execution.outputs['execution-status'] || steps.approval_gate.outputs['approval-status'] || steps.request_validation.outputs['validation-status'] || 'unknown' }}"
+            echo "Approval status: ${{ steps.approval_gate.outputs['approval-status'] || 'unknown' }}"
+            echo "Execution status: ${{ steps.approved_execution.outputs['execution-status'] || 'not_requested' }}"
+            echo "Audit artifact path: ${{ steps.approved_execution.outputs['audit-artifact-path'] || steps.approval_gate.outputs['audit-artifact-path'] || steps.request_validation.outputs['audit-artifact-path'] || steps.request_validation.outputs.artifact_path || 'n/a' }}"
+            echo "Parsed organization: ${{ steps.parse_request.outputs.parsed_organization || '' }}"
+            echo "Parsed tenant name: ${{ steps.parse_request.outputs.parsed_tenant_name || '' }}"
+            echo "Parsed runner name: ${{ steps.parse_request.outputs.parsed_runner_name || '' }}"
+            echo "Parsed target runner group: ${{ steps.parse_request.outputs.parsed_target_runner_group_name || '' }}"
+          } >> "$GITHUB_STEP_SUMMARY"

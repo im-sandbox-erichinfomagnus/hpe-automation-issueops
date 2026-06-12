@@ -135,6 +135,9 @@ This list should be updated as new IssueOps workflows are added.
 - `create-tenant-runner-groups`: Request, validate, approve, and reconcile
 	creating one tenant-prefixed Actions runner group at organization level
 	with isolation-preserving defaults.
+- `move-tenant-hosted-runner`: Request, validate, approve, and reconcile moving
+	one existing tenant-prefixed GitHub-hosted runner into one existing
+	tenant-prefixed runner group, with optional runner-id disambiguation.
 
 Detailed design and operator guidance for the current operation live in:
 
