@@ -12,6 +12,126 @@ function hasPopulatedInput(value) {
   return unwrapCodeFence(value).trim() !== '';
 }
 
+function normalizeTeamSlug(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function canonicalizeTeamSlug(value) {
+  return normalizeTeamSlug(value).replace(/[-_]+/g, '-');
+}
+
+function buildTeamLookupMaps(currentTeams = []) {
+  const exactMap = new Map();
+  const canonicalMap = new Map();
+  const canonicalVariantsMap = new Map();
+
+  for (const team of currentTeams) {
+    if (!team || !team.slug) {
+      continue;
+    }
+
+    const exactSlug = normalizeTeamSlug(team.slug);
+    const canonicalSlug = canonicalizeTeamSlug(team.slug);
+
+    exactMap.set(exactSlug, team);
+
+    if (!canonicalMap.has(canonicalSlug)) {
+      canonicalMap.set(canonicalSlug, team);
+      canonicalVariantsMap.set(canonicalSlug, [team]);
+    } else {
+      const existing = canonicalMap.get(canonicalSlug);
+      if (existing && normalizeTeamSlug(existing.slug) !== exactSlug) {
+        // Ambiguous canonical key: keep exact matching only.
+        canonicalMap.set(canonicalSlug, null);
+      }
+
+      const variants = canonicalVariantsMap.get(canonicalSlug) || [];
+      variants.push(team);
+      canonicalVariantsMap.set(canonicalSlug, variants);
+    }
+  }
+
+  return {
+    exactMap,
+    canonicalMap,
+    canonicalVariantsMap,
+  };
+}
+
+function resolveTeamFromLookup(teamSlug, lookupMaps) {
+  const exactSlug = normalizeTeamSlug(teamSlug);
+  if (!exactSlug) {
+    return null;
+  }
+
+  if (lookupMaps.exactMap.has(exactSlug)) {
+    return lookupMaps.exactMap.get(exactSlug);
+  }
+
+  return lookupMaps.canonicalMap.get(canonicalizeTeamSlug(exactSlug)) || null;
+}
+
+function resolveTeamVariantsFromLookup(teamSlug, lookupMaps) {
+  const exactSlug = normalizeTeamSlug(teamSlug);
+  if (!exactSlug) {
+    return [];
+  }
+
+  const canonicalSlug = canonicalizeTeamSlug(exactSlug);
+  const exactTeam = lookupMaps.exactMap.get(exactSlug) || null;
+  const canonicalVariants = lookupMaps.canonicalVariantsMap.get(canonicalSlug) || [];
+
+  if (!exactTeam) {
+    return canonicalVariants;
+  }
+
+  const deduped = [exactTeam];
+  for (const team of canonicalVariants) {
+    if (!team || normalizeTeamSlug(team.slug) === normalizeTeamSlug(exactTeam.slug)) {
+      continue;
+    }
+
+    deduped.push(team);
+  }
+
+  return deduped;
+}
+
+function resolveChildTeamFromLookup(teamSlug, requestedParentCanonicalSlug, lookupMaps) {
+  const exactSlug = normalizeTeamSlug(teamSlug);
+  if (!exactSlug) {
+    return null;
+  }
+
+  const canonicalSlug = canonicalizeTeamSlug(exactSlug);
+  const exactTeam = lookupMaps.exactMap.get(exactSlug) || null;
+  const canonicalVariants = lookupMaps.canonicalVariantsMap.get(canonicalSlug) || [];
+
+  const hasParentMatch = (team) => {
+    const parentSlug = team && team.parent && team.parent.slug ? team.parent.slug : null;
+    return canonicalizeTeamSlug(parentSlug) === requestedParentCanonicalSlug;
+  };
+
+  if (exactTeam && hasParentMatch(exactTeam)) {
+    return exactTeam;
+  }
+
+  const parentMatchedVariants = canonicalVariants.filter((team) => hasParentMatch(team));
+  if (parentMatchedVariants.length === 1) {
+    return parentMatchedVariants[0];
+  }
+
+  if (exactTeam) {
+    return exactTeam;
+  }
+
+  if (canonicalVariants.length === 1) {
+    return canonicalVariants[0];
+  }
+
+  return lookupMaps.canonicalMap.get(canonicalSlug) || null;
+}
+
 function describeCsvRowIssue(finding) {
   switch (finding.failure_reason) {
     case 'missing_child_team':
@@ -53,10 +173,10 @@ function appendCsvValidationErrors(errors, schemaErrors = [], rowFindings = []) 
 function findAncestorSlugs(teamSlug, currentTeamMap) {
   const ancestors = [];
   const seen = new Set();
-  let currentTeam = currentTeamMap.get(String(teamSlug || '').toLowerCase());
+  let currentTeam = currentTeamMap.get(normalizeTeamSlug(teamSlug));
 
   while (currentTeam && currentTeam.parent && currentTeam.parent.slug) {
-    const parentSlug = String(currentTeam.parent.slug || '').toLowerCase();
+    const parentSlug = normalizeTeamSlug(currentTeam.parent.slug);
     if (!parentSlug || seen.has(parentSlug)) {
       break;
     }
@@ -339,11 +459,13 @@ async function validateTeamHierarchyRequest(input = {}, options = {}) {
   const currentTeamMap = new Map(
     currentTeams
       .filter((team) => team && team.slug)
-      .map((team) => [String(team.slug).toLowerCase(), team])
+      .map((team) => [normalizeTeamSlug(team.slug), team])
   );
+  const teamLookupMaps = buildTeamLookupMaps(currentTeams);
 
-  const parentTeam = currentTeamMap.get(request.parent_team_slug);
+  const parentTeam = resolveTeamFromLookup(request.parent_team_slug, teamLookupMaps);
   const parentTeamExists = Boolean(parentTeam);
+  const requestParentCanonicalSlug = canonicalizeTeamSlug(parentTeamExists ? parentTeam.slug : request.parent_team_slug);
   if (request.parent_team_slug && !parentTeamExists) {
     errors.push('The requested parent team does not exist in the target organization.');
   }
@@ -363,7 +485,7 @@ async function validateTeamHierarchyRequest(input = {}, options = {}) {
   ) {
     const parentMembership = await resolveTeamMembership({
       organization: request.organization,
-      teamSlug: request.parent_team_slug,
+      teamSlug: parentTeam.slug,
       username: request.designated_approver_login,
     });
 
@@ -374,7 +496,11 @@ async function validateTeamHierarchyRequest(input = {}, options = {}) {
 
     let hasMembershipAuthorizationFailure = designatedApproverAuthorization.parent_team_role !== 'maintainer';
     for (const childLink of request.requested_child_links) {
-      const childTeam = currentTeamMap.get(childLink.child_team_slug);
+      const childTeam = resolveChildTeamFromLookup(
+        childLink.child_team_slug,
+        requestParentCanonicalSlug,
+        teamLookupMaps
+      );
       if (!childTeam) {
         designatedApproverAuthorization.child_team_roles.push({
           child_team_slug: childLink.child_team_slug,
@@ -385,7 +511,7 @@ async function validateTeamHierarchyRequest(input = {}, options = {}) {
 
       const membership = await resolveTeamMembership({
         organization: request.organization,
-        teamSlug: childLink.child_team_slug,
+        teamSlug: childTeam.slug,
         username: request.designated_approver_login,
       });
       const role =
@@ -406,56 +532,73 @@ async function validateTeamHierarchyRequest(input = {}, options = {}) {
   }
 
   const parentAncestors = parentTeamExists
-    ? findAncestorSlugs(request.parent_team_slug, currentTeamMap)
+    ? findAncestorSlugs(parentTeam.slug, currentTeamMap)
     : [];
+  const parentAncestorSet = new Set(parentAncestors.map((slug) => canonicalizeTeamSlug(slug)));
 
   const requestedChildLinks = request.requested_child_links.map((childLink) => {
-    const currentChildTeam = currentTeamMap.get(childLink.child_team_slug);
-    if (!currentChildTeam) {
+    const candidateChildTeams = resolveTeamVariantsFromLookup(childLink.child_team_slug, teamLookupMaps);
+    const candidateTeamSlugs = candidateChildTeams.map((team) => normalizeTeamSlug(team.slug));
+    if (candidateChildTeams.length === 0) {
       return {
         ...childLink,
         validation_status: 'missing_child',
         desired_action: 'reject',
         failure_reason: 'missing_child_team',
+        resolved_child_team_slug: null,
+        candidate_child_team_slugs: [],
       };
     }
 
-    const currentParentSlug =
-      currentChildTeam.parent && currentChildTeam.parent.slug
-        ? String(currentChildTeam.parent.slug).toLowerCase()
-        : null;
+    const candidateByParentMatch = candidateChildTeams.find((team) =>
+      canonicalizeTeamSlug(team && team.parent && team.parent.slug) === requestParentCanonicalSlug
+    ) || null;
+    const candidateByNoParent = candidateChildTeams.find((team) => !team || !team.parent || !team.parent.slug) || null;
+    const currentChildTeam = candidateByParentMatch || candidateByNoParent || candidateChildTeams[0];
 
-    if (childLink.child_team_slug === request.parent_team_slug) {
+    const currentParentSlug = currentChildTeam && currentChildTeam.parent && currentChildTeam.parent.slug
+      ? normalizeTeamSlug(currentChildTeam.parent.slug)
+      : null;
+    const candidateCanonicalSlugs = new Set(candidateChildTeams.map((team) => canonicalizeTeamSlug(team.slug)));
+
+    if (candidateCanonicalSlugs.has(requestParentCanonicalSlug)) {
       return {
         ...childLink,
         current_parent_slug: currentParentSlug,
         validation_status: 'cycle_blocked',
         desired_action: 'reject',
         failure_reason: 'self_parent_cycle',
+        resolved_child_team_slug: normalizeTeamSlug(currentChildTeam.slug),
+        candidate_child_team_slugs: candidateTeamSlugs,
       };
     }
 
-    if (parentAncestors.includes(childLink.child_team_slug)) {
+    const isAncestorCycle = [...candidateCanonicalSlugs].some((slug) => parentAncestorSet.has(slug));
+    if (isAncestorCycle) {
       return {
         ...childLink,
         current_parent_slug: currentParentSlug,
         validation_status: 'cycle_blocked',
         desired_action: 'reject',
         failure_reason: 'ancestor_cycle',
+        resolved_child_team_slug: normalizeTeamSlug(currentChildTeam.slug),
+        candidate_child_team_slugs: candidateTeamSlugs,
       };
     }
 
-    if (currentParentSlug === request.parent_team_slug) {
+    if (candidateByParentMatch) {
       return {
         ...childLink,
-        current_parent_slug: currentParentSlug,
+        current_parent_slug: normalizeTeamSlug(candidateByParentMatch.parent && candidateByParentMatch.parent.slug),
         validation_status: 'already_linked',
         desired_action: 'noop',
-        current_team_id: currentChildTeam.id || null,
+        current_team_id: candidateByParentMatch.id || null,
+        resolved_child_team_slug: normalizeTeamSlug(candidateByParentMatch.slug),
+        candidate_child_team_slugs: candidateTeamSlugs,
       };
     }
 
-    if (currentParentSlug && currentParentSlug !== request.parent_team_slug) {
+    if (!candidateByNoParent && currentParentSlug && canonicalizeTeamSlug(currentParentSlug) !== requestParentCanonicalSlug) {
       return {
         ...childLink,
         current_parent_slug: currentParentSlug,
@@ -463,6 +606,8 @@ async function validateTeamHierarchyRequest(input = {}, options = {}) {
         desired_action: 'reject',
         current_team_id: currentChildTeam.id || null,
         failure_reason: 'reparenting_not_supported',
+        resolved_child_team_slug: normalizeTeamSlug(currentChildTeam.slug),
+        candidate_child_team_slugs: candidateTeamSlugs,
       };
     }
 
@@ -472,6 +617,8 @@ async function validateTeamHierarchyRequest(input = {}, options = {}) {
       validation_status: 'valid',
       desired_action: 'link_child',
       current_team_id: currentChildTeam.id || null,
+      resolved_child_team_slug: normalizeTeamSlug(currentChildTeam.slug),
+      candidate_child_team_slugs: candidateTeamSlugs,
     };
   });
 

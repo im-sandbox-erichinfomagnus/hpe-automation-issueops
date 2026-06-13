@@ -314,7 +314,6 @@ async function ensureTenantRepoCustomPropertyDefinitions(options = {}) {
     rate_limit_snapshot: latestRateLimitSnapshot,
   };
 }
-
 function deriveRequestStatus(executionOutcome) {
   if (executionOutcome.failure_count === 0) {
     return 'executed';

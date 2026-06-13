@@ -249,3 +249,158 @@ test('bulk CSV validation accepts quoted child-team names and normalizes them co
     ]
   );
 });
+
+test('manual validation resolves underscore team slugs when request values normalize to hyphens', async () => {
+  const validation = await validateTeamHierarchyRequest(
+    {
+      parsedRequest: {
+        organization: 'octo-org',
+        parent_team: 'acme-tenant',
+        designated_hierarchy_approver: 'octocat',
+        intake_mode: 'manual',
+        requested_child_teams: 'beta-team\nci-managers\ngamma-team',
+        business_justification: 'Need hierarchy updates',
+        dry_run: 'true',
+      },
+      issue: { number: 812, user: { login: 'requester' } },
+      repository: 'octo-org/issueops-speckit',
+    },
+    {
+      getOrganization: async () => ({ exists: true, organization: { login: 'octo-org' } }),
+      listTeams: async () => ([
+        { id: 1, name: 'Acme Tenant', slug: 'acme_tenant', parent: null },
+        { id: 2, name: 'Beta Team', slug: 'beta_team', parent: { id: 1, slug: 'acme_tenant' } },
+        { id: 3, name: 'CI Managers', slug: 'ci_managers', parent: { id: 1, slug: 'acme_tenant' } },
+        { id: 4, name: 'Gamma Team', slug: 'gamma_team', parent: null },
+      ]),
+      resolveTeamMembership: async () => ({ membership: { role: 'maintainer', state: 'active' } }),
+    }
+  );
+
+  assert.equal(validation.is_valid, true);
+  assert.equal(validation.request_status, 'awaiting_approval');
+  assert.doesNotMatch(validation.errors.join('\n'), /parent team does not exist/i);
+  assert.doesNotMatch(validation.errors.join('\n'), /re-parenting is out of scope/i);
+  assert.deepEqual(
+    validation.requested_child_links.map((entry) => ({
+      requested_name: entry.requested_name,
+      validation_status: entry.validation_status,
+      desired_action: entry.desired_action,
+      current_parent_slug: entry.current_parent_slug,
+    })),
+    [
+      {
+        requested_name: 'beta-team',
+        validation_status: 'already_linked',
+        desired_action: 'noop',
+        current_parent_slug: 'acme_tenant',
+      },
+      {
+        requested_name: 'ci-managers',
+        validation_status: 'already_linked',
+        desired_action: 'noop',
+        current_parent_slug: 'acme_tenant',
+      },
+      {
+        requested_name: 'gamma-team',
+        validation_status: 'valid',
+        desired_action: 'link_child',
+        current_parent_slug: null,
+      },
+    ]
+  );
+});
+
+test('manual validation prefers parent-aligned slug variant when hyphen and underscore child slugs both exist', async () => {
+  const validation = await validateTeamHierarchyRequest(
+    {
+      parsedRequest: {
+        organization: 'octo-org',
+        parent_team: 'acme-tenant',
+        designated_hierarchy_approver: 'octocat',
+        intake_mode: 'manual',
+        requested_child_teams: 'beta-team',
+        business_justification: 'Need hierarchy updates',
+        dry_run: 'true',
+      },
+      issue: { number: 813, user: { login: 'requester' } },
+      repository: 'octo-org/issueops-speckit',
+    },
+    {
+      getOrganization: async () => ({ exists: true, organization: { login: 'octo-org' } }),
+      listTeams: async () => ([
+        { id: 1, name: 'Acme Tenant', slug: 'acme_tenant', parent: null },
+        { id: 2, name: 'Beta Team (Legacy)', slug: 'beta-team', parent: { id: 9, slug: 'legacy-root' } },
+        { id: 3, name: 'Beta Team', slug: 'beta_team', parent: { id: 1, slug: 'acme_tenant' } },
+      ]),
+      resolveTeamMembership: async () => ({ membership: { role: 'maintainer', state: 'active' } }),
+    }
+  );
+
+  assert.equal(validation.is_valid, true);
+  assert.equal(validation.request_status, 'awaiting_approval');
+  assert.doesNotMatch(validation.errors.join('\n'), /re-parenting is out of scope/i);
+  assert.deepEqual(
+    validation.requested_child_links.map((entry) => ({
+      requested_name: entry.requested_name,
+      validation_status: entry.validation_status,
+      desired_action: entry.desired_action,
+      current_parent_slug: entry.current_parent_slug,
+    })),
+    [
+      {
+        requested_name: 'beta-team',
+        validation_status: 'already_linked',
+        desired_action: 'noop',
+        current_parent_slug: 'acme_tenant',
+      },
+    ]
+  );
+});
+
+test('manual validation does not mark re-parenting when a canonical child variant is unparented', async () => {
+  const validation = await validateTeamHierarchyRequest(
+    {
+      parsedRequest: {
+        organization: 'octo-org',
+        parent_team: 'acme-tenant',
+        designated_hierarchy_approver: 'octocat',
+        intake_mode: 'manual',
+        requested_child_teams: 'gamma-team',
+        business_justification: 'Need hierarchy updates',
+        dry_run: 'true',
+      },
+      issue: { number: 814, user: { login: 'requester' } },
+      repository: 'octo-org/issueops-speckit',
+    },
+    {
+      getOrganization: async () => ({ exists: true, organization: { login: 'octo-org' } }),
+      listTeams: async () => ([
+        { id: 1, name: 'Acme Tenant', slug: 'acme_tenant', parent: null },
+        { id: 2, name: 'Gamma Team (Elsewhere)', slug: 'gamma-team', parent: { id: 9, slug: 'legacy-root' } },
+        { id: 3, name: 'Gamma Team', slug: 'gamma_team', parent: null },
+      ]),
+      resolveTeamMembership: async () => ({ membership: { role: 'maintainer', state: 'active' } }),
+    }
+  );
+
+  assert.equal(validation.is_valid, true);
+  assert.equal(validation.request_status, 'awaiting_approval');
+  assert.doesNotMatch(validation.errors.join('\n'), /re-parenting is out of scope/i);
+  assert.deepEqual(
+    validation.requested_child_links.map((entry) => ({
+      requested_name: entry.requested_name,
+      validation_status: entry.validation_status,
+      desired_action: entry.desired_action,
+      current_parent_slug: entry.current_parent_slug,
+    })),
+    [
+      {
+        requested_name: 'gamma-team',
+        validation_status: 'valid',
+        desired_action: 'link_child',
+        current_parent_slug: null,
+      },
+    ]
+  );
+});

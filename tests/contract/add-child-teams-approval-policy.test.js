@@ -170,6 +170,33 @@ test('resolveTeamHierarchyApprover requires the designated approver to remain ma
   assert.equal(decision.approver_authorization_state, 'unauthorized');
 });
 
+test('resolveTeamHierarchyApprover accepts hyphen slug when team exists with underscore variant', async () => {
+  const decision = await resolveTeamHierarchyApprover(
+    {
+      organization: 'im-sandbox-himanshu',
+      approverLogin: 'himanshu-im',
+      designatedApproverLogin: 'himanshu-im',
+      parentTeamSlug: 'acme-tenant',
+      requestedChildLinks: [{ child_team_slug: 'beta-team' }],
+    },
+    {
+      getTeamMembership: async ({ teamSlug, username }) => {
+        const variants = new Map([
+          ['acme-tenant', { membership: null }],
+          ['acme_tenant', { membership: { role: 'maintainer', state: 'active' } }],
+          ['beta-team', { membership: null }],
+          ['beta_team', { membership: { role: 'maintainer', state: 'active' } }],
+        ]);
+
+        return variants.get(teamSlug) || { membership: null };
+      },
+    }
+  );
+
+  assert.equal(decision.approver_role, 'designated_hierarchy_approver');
+  assert.equal(decision.approver_authorization_state, 'authorized');
+});
+
 test('approval policy remains pending when no approval signal exists', async () => {
   const decision = await evaluateApprovalGate(
     {
