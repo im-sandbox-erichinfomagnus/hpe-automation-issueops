@@ -61,7 +61,9 @@ function determineOperation(request = {}, runContext = {}) {
     return 'team_hierarchy';
   }
 
-  const isTeamRepoAccessRemoval = hasNonEmptyArray(request.requested_repository_removals);
+  const isTeamRepoAccessRemoval = Boolean(
+    hasNonEmptyArray(request.requested_repository_removals)
+  );
 
   if (isTeamRepoAccessRemoval) {
     return 'team_repo_access_removal';
@@ -70,7 +72,6 @@ function determineOperation(request = {}, runContext = {}) {
   const isTeamRepoAccess = Boolean(
     request.requested_permission_api_value ||
       request.requested_permission_label ||
-      (request.team_slug && request.designated_approver_login) ||
       hasNonEmptyArray(request.requested_repository_grants) ||
       hasNonEmptyArray(request.duplicate_repositories) ||
       hasNonEmptyArray(request.conflicting_repositories) ||
@@ -219,8 +220,10 @@ function buildAuditArtifact(input = {}) {
       tenant_display_name: request.tenant_display_name,
       tenant_key: request.tenant_key,
       tenant_type: request.tenant_type || null,
-      primary_contact: request.primary_contact || '',
+      primary_contact: request.primary_contact ?? null,
+      primary_contact_type: request.primary_contact_type || 'absent',
       secondary_contact: request.secondary_contact || null,
+      secondary_contact_type: request.secondary_contact_type || 'absent',
       external_mappings: request.external_mappings || null,
       governance: request.governance || null,
       topology: request.topology || null,
@@ -358,6 +361,8 @@ function buildAuditArtifact(input = {}) {
       actual_visibility: reconciliationPlan.actual_visibility || reconciliationPlan.existing_visibility || null,
       creation_action: reconciliationPlan.creation_action || null,
       permission_action: reconciliationPlan.permission_action || null,
+      custom_properties_action: reconciliationPlan.custom_properties_action || null,
+      desired_repository_custom_properties: reconciliationPlan.desired_repository_custom_properties || [],
       direct_admin_avoidance: reconciliationPlan.direct_admin_avoidance || null,
       blocked_reason: reconciliationPlan.blocked_reason || null,
       boundary_revalidation_status: reconciliationPlan.boundary_revalidation_status || null,

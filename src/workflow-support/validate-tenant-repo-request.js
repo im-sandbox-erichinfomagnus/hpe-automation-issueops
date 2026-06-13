@@ -94,6 +94,40 @@ async function validateTenantRepoRequest(input = {}, options = {}) {
     visibilityValidationReason = `Requested repository visibility '${repositoryVisibility}' is allowed.`;
   }
 
+  const primaryContactDetectedType = request.primary_contact_type || 'absent';
+  let primaryContactValidationStatus = 'valid';
+  let primaryContactValidationReason = '';
+
+  if (primaryContactDetectedType === 'absent') {
+    primaryContactValidationStatus = 'missing';
+    primaryContactValidationReason = 'Primary contact is required.';
+    errors.push(primaryContactValidationReason);
+  } else if (primaryContactDetectedType === 'invalid') {
+    primaryContactValidationStatus = 'invalid_format';
+    primaryContactValidationReason = `Primary contact '${request.primary_contact}' is not a valid GitHub handle or email address.`;
+    errors.push(primaryContactValidationReason);
+  } else if (primaryContactDetectedType === 'handle') {
+    primaryContactValidationReason = 'Primary contact is a valid GitHub handle.';
+  } else if (primaryContactDetectedType === 'email') {
+    primaryContactValidationReason = 'Primary contact is a valid email address.';
+  }
+
+  const secondaryContactDetectedType = request.secondary_contact_type || 'absent';
+  let secondaryContactValidationStatus = 'absent';
+  let secondaryContactValidationReason = '';
+
+  if (secondaryContactDetectedType === 'invalid') {
+    secondaryContactValidationStatus = 'invalid_format';
+    secondaryContactValidationReason = `Secondary contact '${request.secondary_contact}' is not a valid GitHub handle or email address.`;
+    errors.push(secondaryContactValidationReason);
+  } else if (secondaryContactDetectedType === 'handle') {
+    secondaryContactValidationStatus = 'valid';
+    secondaryContactValidationReason = 'Secondary contact is a valid GitHub handle.';
+  } else if (secondaryContactDetectedType === 'email') {
+    secondaryContactValidationStatus = 'valid';
+    secondaryContactValidationReason = 'Secondary contact is a valid email address.';
+  }
+
   if (!request.designated_approver_login) {
     errors.push('A designated approver is required.');
   }
@@ -385,6 +419,22 @@ async function validateTenantRepoRequest(input = {}, options = {}) {
       access_model_enforcement: canonicalTenantContext ? canonicalTenantContext.access_model_enforcement : '',
       access_model_roles: canonicalTenantContext ? canonicalTenantContext.access_model_roles : [],
       canonical_fields_consulted: canonicalTenantContext ? canonicalTenantContext.canonical_fields_consulted : [],
+      primary_contact_validation: {
+        field: 'primary_contact',
+        submitted_value: request.primary_contact,
+        detected_type: primaryContactDetectedType,
+        normalized_value: request.primary_contact,
+        validation_status: primaryContactValidationStatus,
+        validation_reason: primaryContactValidationReason,
+      },
+      secondary_contact_validation: {
+        field: 'secondary_contact',
+        submitted_value: request.secondary_contact,
+        detected_type: secondaryContactDetectedType,
+        normalized_value: request.secondary_contact,
+        validation_status: secondaryContactValidationStatus,
+        validation_reason: secondaryContactValidationReason,
+      },
       requested_visibility: repositoryVisibility,
       allowed_repository_visibilities: allowedRepositoryVisibilities,
       visibility_validation_status: visibilityValidationStatus,
@@ -392,6 +442,22 @@ async function validateTenantRepoRequest(input = {}, options = {}) {
       repository_exists: Boolean(repositoryState && repositoryState.exists),
       current_repo_admin_permission: currentRepoAdminPermission,
       dry_run_no_mutation: Boolean(request.dry_run),
+    },
+    primary_contact_validation: {
+      field: 'primary_contact',
+      submitted_value: request.primary_contact,
+      detected_type: primaryContactDetectedType,
+      normalized_value: request.primary_contact,
+      validation_status: primaryContactValidationStatus,
+      validation_reason: primaryContactValidationReason,
+    },
+    secondary_contact_validation: {
+      field: 'secondary_contact',
+      submitted_value: request.secondary_contact,
+      detected_type: secondaryContactDetectedType,
+      normalized_value: request.secondary_contact,
+      validation_status: secondaryContactValidationStatus,
+      validation_reason: secondaryContactValidationReason,
     },
     no_mutation_planned: true,
     request: enrichedRequest,

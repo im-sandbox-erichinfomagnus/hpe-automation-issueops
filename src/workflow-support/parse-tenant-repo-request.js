@@ -1,5 +1,6 @@
 'use strict';
 
+const { normalizeContact } = require('./normalize-contact');
 const { normalizeRepositoryVisibility } = require('./repository-visibility');
 
 function normalizeText(value) {
@@ -90,6 +91,14 @@ function parseTenantRepoRequest(input = {}) {
     repositoryVisibilityInput,
     { allowDefault: false }
   );
+  const primaryContactInput = normalizeText(
+    readField(parsed, ['primary_contact', 'parsed_primary_contact']) || input.primaryContact || input.primary_contact
+  );
+  const { normalized: primaryContact, type: primaryContactType } = normalizeContact(primaryContactInput);
+  const secondaryContactInput = normalizeText(
+    readField(parsed, ['secondary_contact', 'parsed_secondary_contact']) || input.secondaryContact || input.secondary_contact
+  );
+  const { normalized: secondaryContact, type: secondaryContactType } = normalizeContact(secondaryContactInput);
   const justification = normalizeText(
     readField(parsed, ['justification', 'parsed_justification', 'business_justification']) || input.justification
   );
@@ -113,6 +122,10 @@ function parseTenantRepoRequest(input = {}) {
     repository_name_normalized: repositoryNameNormalized,
     repository_visibility: repositoryVisibility,
     repository_visibility_source: repositoryVisibilitySource,
+    primary_contact: primaryContact,
+    primary_contact_type: primaryContactType,
+    secondary_contact: secondaryContact,
+    secondary_contact_type: secondaryContactType,
     designated_approver_login: designatedApproverLogin,
     dry_run: dryRun,
     business_justification: justification,
