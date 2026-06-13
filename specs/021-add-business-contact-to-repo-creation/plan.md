@@ -5,19 +5,19 @@
 
 ## Summary
 
-Extend the tenant repository creation IssueOps workflow with two new contact fields — `primary_contact` (required) and `secondary_contact` (optional) — that capture the business owners for the repository being created. Each field accepts either a GitHub handle (preferred) or a work email address (fallback). The fields are added to the issue form, parsed into the existing request data model, validated for format, carried through the approval and execution stages, and recorded in all audit artifacts and step summaries. No repository creation logic, tenant-boundary enforcement, approval binding, or governance-grant behaviour is altered.
+Extend the tenant repository creation IssueOps workflow with two new contact fields — `primary_contact` (required) and `secondary_contact` (optional) — that capture the business owners for the repository being created. Each field accepts either a GitHub handle (preferred) or a work email address (fallback). The fields are added to the issue form, parsed into the existing request data model, validated for format, carried through the approval and execution stages, recorded in all audit artifacts and step summaries, and persisted to repository custom properties `primary_business_contact` and `secondary_business_contact`. Before setting repository values, execution now validates organization custom-property schema and creates missing required definitions automatically. No tenant-boundary enforcement, approval binding, or governance-grant authorization model behaviour is altered.
 
 ## Technical Context
 
 **Workflow Runtime**: GitHub Actions reusable workflows on `ubuntu-latest`.
 **Primary Dependencies**: `issue-ops/parser`, existing `parse-tenant-repo-request.js`, `validate-tenant-repo-request.js`, `reconcile-tenant-repo-creation.js`, and `build-audit-artifact.js` in `/src/workflow-support`; GitHub REST API via existing modules; Node.js.
 **Authentication Model**: `ISSUEOPS_GITHUB_TOKEN` and `GITHUB_TOKEN` with least-privilege access — unchanged from predecessor workflow.
-**Configuration Surface**: GitHub issue form in `/.github/ISSUE_TEMPLATE/create-tenant-repos.yml`; parser and validator modules in `/src/workflow-support`; audit artifact builder in `/src/workflow-support/build-audit-artifact.js`.
+**Configuration Surface**: GitHub issue form in `/.github/ISSUE_TEMPLATE/create-tenant-repos.yml`; parser and validator modules in `/src/workflow-support`; execution/reconciliation modules in `/src/scripts/run-approved-execution.js` and `/src/workflow-support/reconcile-tenant-repo-creation.js`; audit and summary emitters in `/src/workflow-support/build-audit-artifact.js` and `/src/scripts/emit-audit-summary.js`.
 **Testing**: Contract tests under `/tests/contract`, fixture updates under `/tests/fixtures`, regression integration tests under `/tests/integration`.
 **Target Platform**: GitHub-hosted runners.
 **Project Type**: IssueOps automation repository with reusable workflows and issue templates.
 **Observability**: Structured audit artifacts, GitHub step summaries, and workflow outputs — extended to include `primary_contact` and `secondary_contact`.
-**Constraints**: Least privilege (unchanged); fail-closed on missing primary contact; contact fields are request-time metadata only — no reconciliation against live GitHub state.
+**Constraints**: Least privilege (unchanged); fail-closed on missing primary contact; repository custom-property writes must not change authorization semantics or team-governance mutation logic.
 **Scale/Scope**: Additive enhancement to the tenant-scoped repository creation workflow; no cross-tenant or cross-workflow side effects.
 
 ## Constitution Check
@@ -29,13 +29,13 @@ Extend the tenant repository creation IssueOps workflow with two new contact fie
 - [x] Validation strategy covers issue form parsing, schema/input checks, actor eligibility, and target-state preconditions.
   *VS-001 to VS-008 define parsing, format checks, required-field enforcement, and integration with all predecessor validations.*
 - [x] Reconciliation logic defines current-state reads, drift detection, idempotent no-op behavior, and safe re-run semantics.
-  *RL-001 to RL-005 clarify that contacts are metadata only; no GitHub state is reconciled on their behalf. Re-runs record current contacts and remain idempotent.*
+  *RL-001 to RL-006 require contact propagation to audit outputs and repository custom properties while keeping repository creation and permission reconciliation unchanged, including schema preflight/create before value mutation.*
 - [x] Dry-run behavior, rollback or compensating actions, and partial failure handling are specified before implementation.
   *Dry-run includes contact values in planned output (VS-007). Rollback blocks on invalid contacts (RH-001). Partial failure on audit persistence failure (RH-002).*
 - [x] Structured logging and audit artifacts identify the issue, actor, approvers, API operations, reconciliation outcome, and final state.
   *OR-001 to OR-005 extend existing audit artifacts and summaries with primary_contact and secondary_contact.*
 - [x] GitHub API rate-limit and retry strategy is defined, including handling for secondary rate limits or abuse protection.
-  *GH-001: contact validation is a local format check with no API calls. GH-002 defers Users API validation to a future enhancement.*
+  *GH-001: contact parsing/validation is local. Custom-property writes reuse existing retry/backoff policy in execution mutation paths.*
 - [x] Reusable workflow boundaries and shared policy components are identified; one-off logic is justified in Complexity Tracking if retained.
   *All changes are to existing workflow-support modules (parse, validate, build-audit-artifact). No new workflow boundaries are introduced.*
 
@@ -67,8 +67,15 @@ src/
   workflow-support/
     parse-tenant-repo-request.js     ← extend to parse primary_contact and secondary_contact
     validate-tenant-repo-request.js  ← extend to validate contact format (handle or email)
+    reconcile-tenant-repo-creation.js ← extend tenant desired-state with custom property mutation intent
+    github-team-repo-api.js          ← add helpers for repository custom-property value mutation and org schema read/create
     build-audit-artifact.js          ← extend to include contact fields in audit output
+    build-execution-outcome.js       ← extend to include repository custom property mutation result
     normalize-contact.js             ← NEW: GitHub handle and email normalisation/validation helper
+
+  scripts/
+    run-approved-execution.js        ← apply repository custom properties in approved execution
+    emit-audit-summary.js            ← include custom property plan/result lines in workflow summary
 
 tests/
   contract/
@@ -78,9 +85,10 @@ tests/
     create-tenant-repos-with-contacts.json  ← new fixture covering contact field permutations
   integration/
     create-tenant-repos.test.js            ← extend with contact field end-to-end scenarios
+    create-tenant-repos-workflow.test.js   ← assert custom-property mutation payloads and results
 ```
 
-**Structure Decision**: All substantive logic lives in `/src/workflow-support`. A new `normalize-contact.js` module isolates the GitHub handle and email format rules so they can be unit-tested independently and reused by future features. The issue form template is updated in-place. No new workflow entrypoints or `.github/workflows` files are required for this enhancement.
+**Structure Decision**: Validation and normalization logic remains in `/src/workflow-support` and execution mutation wiring remains in existing scripts. A new `normalize-contact.js` module isolates the GitHub handle and email format rules so they can be unit-tested independently and reused by future features. Repository custom-property writes are implemented as an additive API helper and execution action without introducing new workflow entrypoints.
 
 ## Complexity Tracking
 
@@ -95,5 +103,7 @@ No constitution violations are required for this feature. The enhancement is ful
 5. Extend `build-audit-artifact.js` to include `primary_contact`, `primary_contact_type`, `secondary_contact`, and `secondary_contact_type` in every audit record.
 6. Add contract test fixtures covering: valid handle, valid email, missing primary, invalid format, secondary absent, both contacts present.
 7. Add regression test fixtures confirming existing create-tenant-repos payloads (no contact fields) continue to parse and validate correctly.
-8. Add integration test scenarios for the full happy-path (both contacts) and the no-op path (repository already exists).
+8. Extend approved execution to set repository custom properties `primary_business_contact` and `secondary_business_contact` on create and no-op paths.
+9. Add organization schema preflight in approved execution: check required property definitions and create missing ones before repository value mutation.
+10. Add integration test scenarios for the full happy-path (both contacts) and the no-op path (repository already exists), including custom-property schema-create and value-mutation assertions.
 
