@@ -49,6 +49,12 @@ function formatAuditSummary(auditArtifact = {}) {
       `- Target repository name: ${request.repository_name_normalized || request.repository_name_input || 'n/a'}`,
       `- Requested repository visibility: ${request.repository_visibility || 'not_provided'}`,
       `- Repository visibility source: ${request.repository_visibility_source || 'not_provided'}`,
+      request.primary_contact
+        ? `- Primary contact: ${request.primary_contact} (${request.primary_contact_type || 'unknown'})`
+        : '- Primary contact: (not provided)',
+      request.secondary_contact
+        ? `- Secondary contact: ${request.secondary_contact} (${request.secondary_contact_type || 'unknown'})`
+        : '- Secondary contact: (not provided)',
       `- Existing repository visibility: ${reconciliation.existing_visibility || 'n/a'}`,
       `- Actual repository visibility: ${reconciliation.actual_visibility || 'n/a'}`,
       `- Visibility conflict: ${reconciliation.visibility_conflict ? 'true' : 'false'}`,
@@ -77,18 +83,32 @@ function formatAuditSummary(auditArtifact = {}) {
       `- Current repo-admin permission: ${validation.current_repo_admin_permission || 'unknown'}`,
       `- Planned creation action: ${reconciliation.creation_action || 'n/a'}`,
       `- Planned permission action: ${reconciliation.permission_action || 'n/a'}`,
+      `- Planned custom properties action: ${reconciliation.custom_properties_action || 'n/a'}`,
       `- Blocked reason: ${reconciliation.blocked_reason || 'n/a'}`,
       `- Direct admin avoidance: ${reconciliation.direct_admin_avoidance || 'n/a'}`,
       `- Boundary revalidation: ${reconciliation.boundary_revalidation_status || 'n/a'}`,
       `- Dry-run validation evidence: ${request.no_mutation_evidence && request.no_mutation_evidence.mode ? request.no_mutation_evidence.mode : (validation.no_mutation_planned ? 'validation_only' : 'n/a')}`,
       `- Repository creation result: ${execution.repository_creation_result || 'n/a'}`,
       `- Repo-admin grant result: ${execution.repo_admin_grant_result || 'n/a'}`,
+      `- Repository custom properties result: ${execution.repository_custom_properties_result || 'n/a'}`,
       `- Execution context marker: ${execution.execution_context_marker || 'n/a'}`,
       `- Context binding status: ${execution.context_binding_status || 'unknown'}`,
       `- Execution topology mode: ${execution.topology_mode || validation.validation_findings && validation.validation_findings.topology_mode || 'unknown'}`,
       `- Execution tenant identifier: ${execution.tenant_id || validation.canonical_tenant_context && (validation.canonical_tenant_context.tenant_id || validation.canonical_tenant_context.tenant_key) || 'n/a'}`,
       `- Execution tenant team slug: ${execution.tenant_team_slug || validation.canonical_tenant_context && validation.canonical_tenant_context.tenant_team_slug || 'n/a'}`,
       `- Execution repo-admin team slug: ${execution.repo_admin_team_slug || validation.canonical_tenant_context && validation.canonical_tenant_context.repo_admin_team_slug || 'n/a'}`,
+      execution.mutation_token_source
+        ? `- Mutation token source: ${execution.mutation_token_source} (${execution.mutation_token_kind || 'unknown'}, pat_backed=${execution.mutation_token_is_pat_backed ? 'true' : 'false'})`
+        : null,
+      execution.repository_custom_properties_failure_reason
+        ? `- Repository custom properties failure reason: ${execution.repository_custom_properties_failure_reason}`
+        : null,
+      execution.repository_custom_properties_failure_status_code
+        ? `- Repository custom properties failure status code: ${execution.repository_custom_properties_failure_status_code}`
+        : null,
+      execution.repository_custom_properties_failure_detail
+        ? `- Repository custom properties failure detail: ${execution.repository_custom_properties_failure_detail}`
+        : null,
       `- Audit persistence result: ${execution.audit_persistence_result || 'n/a'}`,
       `- Added: ${execution.mutation_count || 0}`,
       `- No-op: ${execution.noop_count || 0}`,

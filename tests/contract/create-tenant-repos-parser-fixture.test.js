@@ -27,9 +27,72 @@ test('create-tenant-repos issue form scaffold includes required fields', () => {
   assert.match(form, /id:\s+tenant_name/i);
   assert.match(form, /id:\s+repository_name/i);
   assert.match(form, /id:\s+repository_visibility/i);
+  assert.match(form, /id:\s+primary_contact/i);
+  assert.match(form, /id:\s+primary_contact[\s\S]*?required:\s+true/i);
+  assert.match(form, /id:\s+secondary_contact/i);
+  assert.match(form, /id:\s+secondary_contact[\s\S]*?required:\s+false/i);
   assert.match(form, /id:\s+designated_approver/i);
   assert.match(form, /id:\s+dry_run/i);
   assert.match(form, /id:\s+justification/i);
+});
+
+test('create-tenant-repos parser module normalizes primary contact fixture scenarios', () => {
+  const fixturePath = path.join(__dirname, '..', 'fixtures', 'create-tenant-repos-with-contacts.json');
+  const fixture = JSON.parse(fs.readFileSync(fixturePath, 'utf8'));
+
+  const handleParsed = parseTenantRepoRequest({
+    parsedRequest: fixture.both_contacts_as_handles.parsedRequest,
+    issue: fixture.both_contacts_as_handles.issue,
+  });
+  assert.equal(handleParsed.primary_contact, 'octocat');
+  assert.equal(handleParsed.primary_contact_type, 'handle');
+
+  const prefixedHandleParsed = parseTenantRepoRequest({
+    parsedRequest: fixture.primary_as_prefixed_handle.parsedRequest,
+    issue: fixture.primary_as_prefixed_handle.issue,
+  });
+  assert.equal(prefixedHandleParsed.primary_contact, 'octocat');
+  assert.equal(prefixedHandleParsed.primary_contact_type, 'handle');
+
+  const emailParsed = parseTenantRepoRequest({
+    parsedRequest: fixture.primary_as_email.parsedRequest,
+    issue: fixture.primary_as_email.issue,
+  });
+  assert.equal(emailParsed.primary_contact, 'alice@example.com');
+  assert.equal(emailParsed.primary_contact_type, 'email');
+
+  const missingPrimaryParsed = parseTenantRepoRequest({
+    parsedRequest: fixture.missing_primary_contact.parsedRequest,
+    issue: fixture.missing_primary_contact.issue,
+  });
+  assert.equal(missingPrimaryParsed.primary_contact, null);
+  assert.equal(missingPrimaryParsed.primary_contact_type, 'absent');
+});
+
+test('create-tenant-repos parser module normalizes secondary contact fixture scenarios', () => {
+  const fixturePath = path.join(__dirname, '..', 'fixtures', 'create-tenant-repos-with-contacts.json');
+  const fixture = JSON.parse(fs.readFileSync(fixturePath, 'utf8'));
+
+  const handleParsed = parseTenantRepoRequest({
+    parsedRequest: fixture.both_contacts_as_handles.parsedRequest,
+    issue: fixture.both_contacts_as_handles.issue,
+  });
+  assert.equal(handleParsed.secondary_contact, 'hubot');
+  assert.equal(handleParsed.secondary_contact_type, 'handle');
+
+  const emailParsed = parseTenantRepoRequest({
+    parsedRequest: fixture.both_contacts_as_emails.parsedRequest,
+    issue: fixture.both_contacts_as_emails.issue,
+  });
+  assert.equal(emailParsed.secondary_contact, 'bob@example.com');
+  assert.equal(emailParsed.secondary_contact_type, 'email');
+
+  const absentParsed = parseTenantRepoRequest({
+    parsedRequest: fixture.secondary_absent_with_valid_primary.parsedRequest,
+    issue: fixture.secondary_absent_with_valid_primary.issue,
+  });
+  assert.equal(absentParsed.secondary_contact, null);
+  assert.equal(absentParsed.secondary_contact_type, 'absent');
 });
 
 test('create-tenant-repos parser module normalizes explicit repository visibility values', () => {

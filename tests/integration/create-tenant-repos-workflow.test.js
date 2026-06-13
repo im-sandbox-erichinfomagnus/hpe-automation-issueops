@@ -112,6 +112,8 @@ function buildValidationEnv(artifactPath, registryDir, overrides = {}) {
     PARSED_ORGANIZATION: 'im-sandbox-himanshu',
     PARSED_TENANT_NAME: 'ContosoUK',
     PARSED_REPOSITORY_NAME: 'acme-platform-service',
+    PARSED_PRIMARY_CONTACT: 'octocat',
+    PARSED_SECONDARY_CONTACT: '',
     PARSED_REPOSITORY_VISIBILITY: 'private',
     PARSED_DESIGNATED_APPROVER: 'himanshu-im',
     PARSED_DRY_RUN: 'false',
@@ -425,6 +427,278 @@ test('US3 existing repository follows no-op or missing-grant reconciliation', as
   assert.equal(missingGrantResult.execution.repo_admin_grant_result, 'granted');
   assert.equal(missingGrantResult.reconciliation.actual_visibility, 'private');
   assert.deepEqual(grantCalls, ['im-sandbox-himanshu/acme-platform-service:admin']);
+});
+
+test('US4 happy path includes contact metadata in audit artifact and step summary', async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'create-tenant-repos-us4-happy-'));
+  const artifactPath = path.join(workspace, 'audit.json');
+  const summaryPath = path.join(workspace, 'summary.md');
+  const registryDir = buildTenantRepoRegistry(workspace);
+  const customPropertyCalls = [];
+  const customPropertySchemaCreateCalls = [];
+
+  await runRequestValidation({
+    env: buildValidationEnv(artifactPath, registryDir, {
+      PARSED_PRIMARY_CONTACT: 'octocat',
+      PARSED_SECONDARY_CONTACT: 'hubot',
+      GITHUB_STEP_SUMMARY: summaryPath,
+    }),
+    api: buildValidationApi(),
+    tenantRepoApi: {
+      getRepository: async () => ({ exists: false, repository: null }),
+      getTeamRepositoryPermission: async () => ({ current_permission_api_value: 'none' }),
+    },
+    setProcessExitCode: false,
+  });
+
+  await runApprovalGate({
+    env: {
+      AUDIT_ARTIFACT_PATH: artifactPath,
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      GITHUB_TOKEN: 'pat-token',
+      GITHUB_STEP_SUMMARY: summaryPath,
+    },
+    api: {
+      getAssignableOwners: async () => ['aeruvakalpanaa'],
+      addIssueAssignees: async () => ({ status: 'assigned' }),
+      listIssueComments: async () => [
+        {
+          id: 301,
+          body: 'approved',
+          created_at: '2026-05-29T10:00:00Z',
+          user: { login: 'himanshu-im' },
+        },
+      ],
+      getOrganizationMembership: async () => ({
+        exists: true,
+        membership: { role: 'admin', state: 'active' },
+      }),
+    },
+    setProcessExitCode: false,
+  });
+
+  const result = await runApprovedExecution({
+    env: {
+      AUDIT_ARTIFACT_PATH: artifactPath,
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      GITHUB_RUN_ID: '26627740733',
+      GITHUB_RUN_ATTEMPT: '7',
+      TENANT_REGISTRY_DIR: registryDir,
+      TENANT_REGISTRY_REF: 'main',
+      GITHUB_STEP_SUMMARY: summaryPath,
+    },
+    tokenInfo: {
+      token: 'pat-token',
+      source: 'ISSUEOPS_GITHUB_TOKEN',
+      token_kind: 'pat',
+      is_pat_backed: true,
+      supports_team_repo_access_mutation: true,
+    },
+    createApi: () => ({
+      getRepository: async () => ({ exists: false, repository: null }),
+      getTeamRepositoryPermission: async () => ({ current_permission_api_value: 'none' }),
+      createOrganizationRepository: async ({ organization, name }) => ({
+        exists: true,
+        repository: { full_name: `${organization}/${name}` },
+      }),
+      addOrUpdateTeamRepositoryPermission: async ({ owner, repo, permission }) => ({
+        repository_full_name: `${owner}/${repo}`,
+        permission,
+      }),
+      getOrganizationCustomPropertiesSchema: async () => ([
+        {
+          property_name: 'secondary_business_contact',
+          value_type: 'string',
+        },
+      ]),
+      createOrUpdateOrganizationCustomProperty: async ({ organization, property_name, value_type }) => {
+        customPropertySchemaCreateCalls.push({ organization, property_name, value_type });
+        return {
+          property_name,
+          value_type,
+          source_type: 'organization',
+        };
+      },
+      setRepositoryCustomProperties: async ({ owner, repo, properties }) => {
+        customPropertyCalls.push({ owner, repo, properties });
+        return {
+          repository_full_name: `${owner}/${repo}`,
+          updated_count: properties.length,
+        };
+      },
+    }),
+    teamApi: buildValidationApi(),
+    setProcessExitCode: false,
+  });
+
+  const persistedArtifact = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
+  const summary = fs.readFileSync(summaryPath, 'utf8');
+
+  assert.equal(result.request.primary_contact, 'octocat');
+  assert.equal(result.request.primary_contact_type, 'handle');
+  assert.equal(result.request.secondary_contact, 'hubot');
+  assert.equal(result.request.secondary_contact_type, 'handle');
+  assert.equal(result.execution.repository_custom_properties_result, 'mutated');
+
+  assert.equal(persistedArtifact.request.primary_contact, 'octocat');
+  assert.equal(persistedArtifact.request.primary_contact_type, 'handle');
+  assert.equal(persistedArtifact.request.secondary_contact, 'hubot');
+  assert.equal(persistedArtifact.request.secondary_contact_type, 'handle');
+
+  assert.equal(customPropertyCalls.length, 1);
+  assert.deepEqual(customPropertySchemaCreateCalls, [
+    {
+      organization: 'im-sandbox-himanshu',
+      property_name: 'primary_business_contact',
+      value_type: 'string',
+    },
+  ]);
+  assert.deepEqual(customPropertyCalls[0], {
+    owner: 'im-sandbox-himanshu',
+    repo: 'acme-platform-service',
+    properties: [
+      { property_name: 'primary_business_contact', value: 'octocat' },
+      { property_name: 'secondary_business_contact', value: 'hubot' },
+    ],
+  });
+
+  assert.match(summary, /Primary contact: octocat \(handle\)/i);
+  assert.match(summary, /Secondary contact: hubot \(handle\)/i);
+});
+
+test('US4 no-op execution preserves contact metadata from current request', async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'create-tenant-repos-us4-noop-'));
+  const artifactPath = path.join(workspace, 'audit.json');
+  const registryDir = buildTenantRepoRegistry(workspace);
+  const customPropertyCalls = [];
+  const customPropertySchemaCreateCalls = [];
+
+  await runRequestValidation({
+    env: buildValidationEnv(artifactPath, registryDir, {
+      PARSED_PRIMARY_CONTACT: 'octocat',
+      PARSED_SECONDARY_CONTACT: 'ops-owner@example.com',
+    }),
+    api: buildValidationApi(),
+    tenantRepoApi: {
+      getRepository: async () => ({
+        exists: true,
+        repository: { full_name: 'im-sandbox-himanshu/acme-platform-service', visibility: 'private' },
+      }),
+      getTeamRepositoryPermission: async () => ({ current_permission_api_value: 'admin' }),
+    },
+    setProcessExitCode: false,
+  });
+
+  await runApprovalGate({
+    env: {
+      AUDIT_ARTIFACT_PATH: artifactPath,
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      GITHUB_TOKEN: 'pat-token',
+    },
+    api: {
+      getAssignableOwners: async () => ['aeruvakalpanaa'],
+      addIssueAssignees: async () => ({ status: 'assigned' }),
+      listIssueComments: async () => [
+        {
+          id: 301,
+          body: 'approved',
+          created_at: '2026-05-29T10:00:00Z',
+          user: { login: 'himanshu-im' },
+        },
+      ],
+      getOrganizationMembership: async () => ({
+        exists: true,
+        membership: { role: 'admin', state: 'active' },
+      }),
+    },
+    setProcessExitCode: false,
+  });
+
+  const result = await runApprovedExecution({
+    env: {
+      AUDIT_ARTIFACT_PATH: artifactPath,
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      GITHUB_RUN_ID: '26627740733',
+      GITHUB_RUN_ATTEMPT: '8',
+      TENANT_REGISTRY_DIR: registryDir,
+      TENANT_REGISTRY_REF: 'main',
+    },
+    tokenInfo: {
+      token: 'pat-token',
+      source: 'ISSUEOPS_GITHUB_TOKEN',
+      token_kind: 'pat',
+      is_pat_backed: true,
+      supports_team_repo_access_mutation: true,
+    },
+    createApi: () => ({
+      getRepository: async () => ({
+        exists: true,
+        repository: { full_name: 'im-sandbox-himanshu/acme-platform-service', visibility: 'private' },
+      }),
+      getTeamRepositoryPermission: async () => ({ current_permission_api_value: 'admin' }),
+      createOrganizationRepository: async () => {
+        throw new Error('create should not run for existing repository noop path');
+      },
+      addOrUpdateTeamRepositoryPermission: async () => {
+        throw new Error('permission grant should not run for admin noop path');
+      },
+      getOrganizationCustomPropertiesSchema: async () => ([]),
+      createOrUpdateOrganizationCustomProperty: async ({ organization, property_name, value_type }) => {
+        customPropertySchemaCreateCalls.push({ organization, property_name, value_type });
+        return {
+          property_name,
+          value_type,
+          source_type: 'organization',
+        };
+      },
+      setRepositoryCustomProperties: async ({ owner, repo, properties }) => {
+        customPropertyCalls.push({ owner, repo, properties });
+        return {
+          repository_full_name: `${owner}/${repo}`,
+          updated_count: properties.length,
+        };
+      },
+    }),
+    teamApi: buildValidationApi(),
+    setProcessExitCode: false,
+  });
+
+  const persistedArtifact = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
+
+  assert.equal(result.execution.repository_creation_result, 'noop');
+  assert.equal(result.execution.repo_admin_grant_result, 'noop');
+  assert.equal(result.request.primary_contact, 'octocat');
+  assert.equal(result.request.primary_contact_type, 'handle');
+  assert.equal(result.request.secondary_contact, 'ops-owner@example.com');
+  assert.equal(result.request.secondary_contact_type, 'email');
+  assert.equal(result.execution.repository_custom_properties_result, 'mutated');
+
+  assert.equal(persistedArtifact.request.primary_contact, 'octocat');
+  assert.equal(persistedArtifact.request.primary_contact_type, 'handle');
+  assert.equal(persistedArtifact.request.secondary_contact, 'ops-owner@example.com');
+  assert.equal(persistedArtifact.request.secondary_contact_type, 'email');
+
+  assert.equal(customPropertyCalls.length, 1);
+  assert.deepEqual(customPropertySchemaCreateCalls, [
+    {
+      organization: 'im-sandbox-himanshu',
+      property_name: 'primary_business_contact',
+      value_type: 'string',
+    },
+    {
+      organization: 'im-sandbox-himanshu',
+      property_name: 'secondary_business_contact',
+      value_type: 'string',
+    },
+  ]);
+  assert.deepEqual(customPropertyCalls[0], {
+    owner: 'im-sandbox-himanshu',
+    repo: 'acme-platform-service',
+    properties: [
+      { property_name: 'primary_business_contact', value: 'octocat' },
+      { property_name: 'secondary_business_contact', value: 'ops-owner@example.com' },
+    ],
+  });
 });
 
 test('US3 existing repository with mismatched visibility is blocked as a conflict with no mutation', async () => {

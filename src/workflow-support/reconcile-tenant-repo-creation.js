@@ -222,6 +222,19 @@ function reconcileTenantRepoCreation(input = {}) {
   const existingVisibility = repositoryState && repositoryState.repository && repositoryState.repository.visibility
     ? String(repositoryState.repository.visibility).toLowerCase()
     : null;
+  const desiredRepositoryCustomProperties = [];
+  if (request.primary_contact) {
+    desiredRepositoryCustomProperties.push({
+      property_name: 'primary_business_contact',
+      value: String(request.primary_contact),
+    });
+  }
+  if (request.secondary_contact) {
+    desiredRepositoryCustomProperties.push({
+      property_name: 'secondary_business_contact',
+      value: String(request.secondary_contact),
+    });
+  }
   const visibilityConflict = repositoryExists && existingVisibility && requestedVisibility !== existingVisibility;
   const duplicateOwnedRepositoryConflict = input.duplicate_owned_repository_conflict || null;
   const ownedEntryBuilder = buildOwnedRepositoryEntry(request, tenantContext || {});
@@ -274,6 +287,12 @@ function reconcileTenantRepoCreation(input = {}) {
     actual_visibility: existingVisibility,
     creation_action: blockedReason ? 'reject' : creationAction,
     permission_action: blockedReason ? 'reject' : permissionAction,
+    custom_properties_action: blockedReason
+      ? 'reject'
+      : desiredRepositoryCustomProperties.length > 0
+        ? 'set'
+        : 'noop',
+    desired_repository_custom_properties: desiredRepositoryCustomProperties,
     direct_admin_avoidance: 'enforced_team_only',
     blocked_reason: blockedReason,
     dry_run: dryRun,
