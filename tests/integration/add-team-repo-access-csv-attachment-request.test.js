@@ -105,6 +105,8 @@ test('workflow assumptions keep add-team-repo-access issue and issue_comment tri
   assert.match(workflow, /issue_comment:\s*[\s\S]*- edited/);
   assert.match(workflow, /issue_comment:\s*[\s\S]*- deleted/);
   assert.match(workflow, /name:\s+Check request applicability/);
+  assert.match(workflow, /issue_labels_json=\$\(jq -c '\.issue\.labels \/\/ \[\]' "\$GITHUB_EVENT_PATH"\)/);
+  assert.match(workflow, /issue_labels_json=\$\(printf '%s' "\$issue_json" \| jq -c '\.labels \/\/ \[\]'\)/);
   assert.match(workflow, /steps\.approval_gate\.outputs\['approval-status'\]\s*==\s*'approved'/);
 });
 

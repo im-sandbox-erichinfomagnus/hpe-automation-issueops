@@ -64,14 +64,14 @@ test('bulk CSV fixture keeps organization, team, approver, and permission reques
   assert.doesNotMatch(fixture.bulk_csv_requested_repositories, /organization|target_team|permission|approver/i);
 });
 
-test('issue form exposes both manual and bulk CSV repository intake fields', () => {
+test('issue form preserves manual+csv_attachment intake fields while bulk CSV textarea remains retired', () => {
   const template = loadIssueTemplate();
 
   assert.match(template, /id:\s+requested_repositories/);
-  assert.match(template, /id:\s+bulk_csv_requested_repositories/);
-  assert.match(template, /validation enforces exactly one populated intake mode/i);
+  assert.match(template, /id:\s+intake_mode/);
+  assert.match(template, /-\s+csv_attachment/i);
+  assert.doesNotMatch(template, /id:\s+bulk_csv_requested_repositories/);
   assert.match(template, /requested_repositories[\s\S]*required:\s+false/i);
-  assert.match(template, /bulk_csv_requested_repositories[\s\S]*required:\s+false/i);
 });
 
 test('parses a valid add-team-repo-access bulk CSV fixture into a normalized request', () => {

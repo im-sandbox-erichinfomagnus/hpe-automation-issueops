@@ -201,6 +201,9 @@ async function validateTeamRepoAccessRequest(input = {}, options = {}) {
   if (!request.intake_mode) {
     if (manualPopulated === bulkCsvPopulated) {
       errors.push('Exactly one intake source must be populated: requested_repositories or bulk_csv_requested_repositories.');
+      if (!manualPopulated && !bulkCsvPopulated) {
+        errors.push('At least one valid requested repository is required.');
+      }
     } else {
       errors.push('Exactly one supported intake mode must be selected: manual or csv_attachment.');
     }

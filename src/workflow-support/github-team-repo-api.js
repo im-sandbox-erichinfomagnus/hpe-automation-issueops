@@ -271,6 +271,31 @@ function createGitHubTeamRepoApi(options = {}) {
       }
       return (result.payload || []).map((label) => String(label.name || '').toLowerCase()).filter(Boolean);
     },
+
+    async listIssueLabels({ repository, issueNumber }) {
+      const [owner, repo] = String(repository || '').split('/');
+      const result = await request(`/repos/${owner}/${repo}/issues/${issueNumber}/labels?per_page=100`);
+
+      if (!result.ok) {
+        throw Object.assign(new Error('Failed to list issue labels'), result);
+      }
+
+      return (result.payload || []).map((label) => String(label.name || '').toLowerCase()).filter(Boolean);
+    },
+
+    async removeIssueLabel({ repository, issueNumber, label }) {
+      const [owner, repo] = String(repository || '').split('/');
+      const encodedLabel = encodeURIComponent(String(label || ''));
+      const result = await request(`/repos/${owner}/${repo}/issues/${issueNumber}/labels/${encodedLabel}`, {
+        method: 'DELETE',
+      });
+
+      if (!result.ok && result.status !== 404) {
+        throw Object.assign(new Error('Failed to remove issue label'), result);
+      }
+
+      return { removed: result.status !== 404, label: String(label || '').toLowerCase() };
+    },
   };
 }
 

@@ -3,6 +3,7 @@ name: CodeQL
 on:
   push:
     branches:
+      - 013-setup-feature-branch
       - 020-remove-team-repo-access
       - main
   pull_request:

@@ -223,6 +223,24 @@ function formatAuditSummary(auditArtifact = {}) {
       `- Approval: ${approval.approval_status || 'pending'} (${repoAccessApprovalState})`,
       approval.approver_login ? `- Approver: ${approval.approver_login}` : null,
       `- Validation: ${validation.is_valid ? 'passed' : 'failed'}`,
+      isCsvAttachment && request.request_status === 'waiting_for_attachment'
+        ? '- Attachment status: waiting for requester CSV attachment comment'
+        : null,
+      isCsvAttachment && request.accepted_attachment_submission && request.accepted_attachment_submission.attachment_url
+        ? `- Attachment URL: ${request.accepted_attachment_submission.attachment_url}`
+        : null,
+      isCsvAttachment && request.accepted_attachment_submission && request.accepted_attachment_submission.comment_id
+        ? `- Attachment comment ID: ${request.accepted_attachment_submission.comment_id}`
+        : null,
+      isCsvAttachment && request.accepted_attachment_submission && request.accepted_attachment_submission.uploader_login
+        ? `- Attachment uploader: ${request.accepted_attachment_submission.uploader_login}`
+        : null,
+      isCsvAttachment && request.accepted_attachment_submission && request.accepted_attachment_submission.filename
+        ? `- Attachment filename: ${request.accepted_attachment_submission.filename}`
+        : null,
+      isCsvAttachment && request.accepted_attachment_submission && request.accepted_attachment_submission.content_hash
+        ? `- Attachment content hash: ${request.accepted_attachment_submission.content_hash}`
+        : null,
       isBulkCsv
         ? `- CSV row findings: ${(validation.csv_row_findings || request.csv_row_findings || []).length}`
         : null,
