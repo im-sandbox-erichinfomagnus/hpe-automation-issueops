@@ -23,6 +23,68 @@ test('create-tenant-repos workflow includes validation and approval gates', () =
   assert.match(workflow, /steps\.approval_gate\.outputs\['approval-status'\]\s*==\s*'approved'/i);
 });
 
+function buildCanonicalTenantRepoRegistry(workspace) {
+  const registryDir = path.join(workspace, 'tenant-registry');
+  fs.mkdirSync(registryDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(registryDir, 'contosouk.json'),
+    JSON.stringify({
+      tenantId: 'contosouk',
+      tenantName: 'ContosoUK',
+      tenantType: 'application',
+      topology: {
+        organization: {
+          orgName: 'im-sandbox-himanshu',
+        },
+        teams: {
+          tenantRootTeam: 'contosouk_tenant',
+          structure: [
+            { team: 'contosouk_tenant', parent: null, type: 'root' },
+            { team: 'contosouk_repoadmins', parent: 'contosouk_tenant', type: 'repo-admin' },
+          ],
+        },
+        accessModel: {
+          enforcement: 'tenant-boundary',
+          roles: ['tenant-admin', 'repo-admin', 'developer', 'viewer'],
+        },
+        repositories: {
+          owned: [],
+        },
+      },
+      externalMappings: {},
+      metadata: {},
+    }, null, 2),
+    'utf8'
+  );
+  return registryDir;
+}
+
+test('US1 canonical topology validation path is approval-ready without mutation', async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'create-tenant-repos-us1-canonical-'));
+  const artifactPath = path.join(workspace, 'audit.json');
+  const registryDir = buildCanonicalTenantRepoRegistry(workspace);
+
+  const { validation, auditArtifact } = await runRequestValidation({
+    env: buildValidationEnv(artifactPath, registryDir, {
+      PARSED_DRY_RUN: 'true',
+      PARSED_REPOSITORY_VISIBILITY: 'internal',
+    }),
+    api: buildValidationApi(),
+    tenantRepoApi: {
+      getRepository: async () => ({ exists: false, repository: null }),
+      getTeamRepositoryPermission: async () => ({ current_permission_api_value: 'none' }),
+    },
+    setProcessExitCode: false,
+  });
+
+  assert.equal(validation.is_valid, true);
+  assert.equal(validation.request_status, 'awaiting_approval');
+  assert.equal(validation.canonical_tenant_context.topology_mode, 'canonical');
+  assert.equal(validation.validation_findings.topology_mode, 'canonical');
+  assert.equal(auditArtifact.validation.no_mutation_planned, true);
+  assert.equal(auditArtifact.reconciliation.boundary_revalidation_status, 'matched');
+});
+
 function buildTenantRepoRegistry(workspace) {
   const registryDir = path.join(workspace, 'tenant-registry');
   fs.mkdirSync(registryDir, { recursive: true });
@@ -92,10 +154,10 @@ function buildValidationApi(options = {}) {
   };
 }
 
-async function runValidatedAndApprovedFlow({ artifactPath, registryDir, validationTenantRepoApi, approvalComments }) {
+async function runValidatedAndApprovedFlow({ artifactPath, registryDir, validationTenantRepoApi, approvalComments, validationEnvOverrides, validationApi }) {
   await runRequestValidation({
-    env: buildValidationEnv(artifactPath, registryDir),
-    api: buildValidationApi(),
+    env: buildValidationEnv(artifactPath, registryDir, validationEnvOverrides || {}),
+    api: validationApi || buildValidationApi(),
     tenantRepoApi: validationTenantRepoApi,
     setProcessExitCode: false,
   });
@@ -179,6 +241,13 @@ test('US3 happy path creates repository and grants admin to X_RepoAdmin', async 
   assert.equal(result.execution.repo_admin_grant_result, 'granted');
   assert.equal(result.execution.failure_count, 0);
   assert.equal(result.execution.audit_persistence_result, 'persisted');
+  assert.equal(result.execution.context_binding_status, 'matched');
+  assert.equal(result.execution.approved_context_marker, result.approval.approved_context_marker);
+  assert.equal(result.execution.latest_context_marker, result.approval.latest_context_marker);
+  assert.match(result.execution.execution_context_marker || '', /^tenant-repo-context:/);
+  assert.equal(result.execution.tenant_id, 'contosouk');
+  assert.equal(result.execution.tenant_team_slug, 'contosouk_tenant');
+  assert.equal(result.execution.repo_admin_team_slug, 'contosouk_repoadmins');
   assert.deepEqual(calls, [
     'create:im-sandbox-himanshu/acme-platform-service',
     'grant:im-sandbox-himanshu/contosouk_repoadmins:im-sandbox-himanshu/acme-platform-service:admin',
@@ -777,6 +846,9 @@ test('US3 blocks approved execution when boundary revalidation mismatches', asyn
   assert.equal(mutationAttempted, false);
   assert.equal(result.request.request_status, 'failed');
   assert.equal(result.reconciliation.boundary_revalidation_status, 'mismatched');
+  assert.equal(result.execution.context_binding_status, 'matched');
+  assert.equal(result.execution.approved_context_marker, result.approval.approved_context_marker);
+  assert.equal(result.execution.latest_context_marker, result.approval.latest_context_marker);
   assert.equal(result.execution.failure_count > 0, true);
 });
 
@@ -869,6 +941,372 @@ test('US3 handles permission-grant failures, retry context, and audit persistenc
   } finally {
     fs.writeFileSync = originalWriteFileSync;
   }
+});
+
+test('US4 appends owned topology entry after successful repository provisioning', async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'create-tenant-repos-us4-append-'));
+  const artifactPath = path.join(workspace, 'audit.json');
+  const registryDir = buildCanonicalTenantRepoRegistry(workspace);
+
+  await runValidatedAndApprovedFlow({
+    artifactPath,
+    registryDir,
+    validationTenantRepoApi: {
+      getRepository: async () => ({ exists: false, repository: null }),
+      getTeamRepositoryPermission: async () => ({ current_permission_api_value: 'none' }),
+    },
+  });
+
+  const result = await runApprovedExecution({
+    env: {
+      AUDIT_ARTIFACT_PATH: artifactPath,
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      GITHUB_RUN_ID: '26627740733',
+      GITHUB_RUN_ATTEMPT: '11',
+      TENANT_REGISTRY_DIR: registryDir,
+      TENANT_REGISTRY_REF: 'main',
+    },
+    tokenInfo: {
+      token: 'pat-token',
+      source: 'ISSUEOPS_GITHUB_TOKEN',
+      token_kind: 'pat',
+      is_pat_backed: true,
+      supports_team_repo_access_mutation: true,
+    },
+    createApi: () => ({
+      getRepository: async () => ({ exists: false, repository: null }),
+      getTeamRepositoryPermission: async () => ({ current_permission_api_value: 'none' }),
+      createOrganizationRepository: async ({ organization, name, visibility }) => ({
+        exists: true,
+        repository: { full_name: `${organization}/${name}`, visibility },
+      }),
+      addOrUpdateTeamRepositoryPermission: async ({ owner, repo, permission }) => ({
+        repository_full_name: `${owner}/${repo}`,
+        permission,
+      }),
+    }),
+    teamApi: buildValidationApi(),
+    setProcessExitCode: false,
+  });
+
+  assert.equal(result.request.request_status, 'executed');
+  assert.equal(result.execution.repository_creation_result, 'created');
+  assert.equal(result.execution.repo_admin_grant_result, 'granted');
+  assert.equal(result.execution.owned_topology_action, 'append_owned_entry');
+  assert.equal(result.execution.topology_persistence_result.status, 'appended');
+
+  const registryRecord = JSON.parse(
+    fs.readFileSync(path.join(registryDir, 'contosouk.json'), 'utf8')
+  );
+  assert.equal(Array.isArray(registryRecord.topology.repositories.owned), true);
+  assert.equal(registryRecord.topology.repositories.owned.length, 1);
+  assert.deepEqual(registryRecord.topology.repositories.owned[0], {
+    repoName: 'acme-platform-service',
+    tenantId: 'contosouk',
+    visibility: 'private',
+    repoType: 'service',
+    lifecycle: 'active',
+    migrationWave: 'wave-1',
+    source: 'ghec',
+    adminTeam: 'contosouk_repoadmins',
+  });
+});
+
+test('US4 rerun is idempotent with noop_already_owned and no duplicate append', async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'create-tenant-repos-us4-rerun-'));
+  const artifactPath = path.join(workspace, 'audit.json');
+  const registryDir = buildCanonicalTenantRepoRegistry(workspace);
+  let createCalls = 0;
+  let grantCalls = 0;
+
+  await runValidatedAndApprovedFlow({
+    artifactPath,
+    registryDir,
+    validationTenantRepoApi: {
+      getRepository: async () => ({ exists: false, repository: null }),
+      getTeamRepositoryPermission: async () => ({ current_permission_api_value: 'none' }),
+    },
+  });
+
+  await runApprovedExecution({
+    env: {
+      AUDIT_ARTIFACT_PATH: artifactPath,
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      GITHUB_RUN_ID: '26627740733',
+      GITHUB_RUN_ATTEMPT: '12',
+      TENANT_REGISTRY_DIR: registryDir,
+      TENANT_REGISTRY_REF: 'main',
+    },
+    tokenInfo: {
+      token: 'pat-token',
+      source: 'ISSUEOPS_GITHUB_TOKEN',
+      token_kind: 'pat',
+      is_pat_backed: true,
+      supports_team_repo_access_mutation: true,
+    },
+    createApi: () => ({
+      getRepository: async () => ({ exists: false, repository: null }),
+      getTeamRepositoryPermission: async () => ({ current_permission_api_value: 'none' }),
+      createOrganizationRepository: async ({ organization, name, visibility }) => {
+        createCalls += 1;
+        return { exists: true, repository: { full_name: `${organization}/${name}`, visibility } };
+      },
+      addOrUpdateTeamRepositoryPermission: async ({ owner, repo, permission }) => {
+        grantCalls += 1;
+        return { repository_full_name: `${owner}/${repo}`, permission };
+      },
+    }),
+    teamApi: buildValidationApi(),
+    setProcessExitCode: false,
+  });
+
+  const rerunResult = await runApprovedExecution({
+    env: {
+      AUDIT_ARTIFACT_PATH: artifactPath,
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      GITHUB_RUN_ID: '26627740733',
+      GITHUB_RUN_ATTEMPT: '13',
+      TENANT_REGISTRY_DIR: registryDir,
+      TENANT_REGISTRY_REF: 'main',
+    },
+    tokenInfo: {
+      token: 'pat-token',
+      source: 'ISSUEOPS_GITHUB_TOKEN',
+      token_kind: 'pat',
+      is_pat_backed: true,
+      supports_team_repo_access_mutation: true,
+    },
+    createApi: () => ({
+      getRepository: async () => ({ exists: true, repository: { full_name: 'im-sandbox-himanshu/acme-platform-service', visibility: 'private' } }),
+      getTeamRepositoryPermission: async () => ({ current_permission_api_value: 'admin' }),
+      createOrganizationRepository: async () => {
+        createCalls += 1;
+        throw new Error('create should not run in rerun noop path');
+      },
+      addOrUpdateTeamRepositoryPermission: async () => {
+        grantCalls += 1;
+        throw new Error('grant should not run in rerun noop path');
+      },
+    }),
+    teamApi: buildValidationApi(),
+    setProcessExitCode: false,
+  });
+
+  assert.equal(createCalls, 1);
+  assert.equal(grantCalls, 1);
+  assert.equal(rerunResult.request.request_status, 'executed');
+  assert.equal(rerunResult.execution.repository_creation_result, 'noop');
+  assert.equal(rerunResult.execution.repo_admin_grant_result, 'noop');
+  assert.equal(rerunResult.execution.owned_topology_action, 'noop_already_owned');
+  assert.equal(rerunResult.execution.topology_persistence_result.status, 'noop');
+
+  const registryRecord = JSON.parse(
+    fs.readFileSync(path.join(registryDir, 'contosouk.json'), 'utf8')
+  );
+  assert.equal(registryRecord.topology.repositories.owned.length, 1);
+});
+
+test('US4 duplicate-owned topology is blocked during validation with no mutation evidence', async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'create-tenant-repos-us4-duplicate-blocked-'));
+  const artifactPath = path.join(workspace, 'audit.json');
+  const registryDir = buildCanonicalTenantRepoRegistry(workspace);
+  const registryPath = path.join(registryDir, 'contosouk.json');
+  const record = JSON.parse(fs.readFileSync(registryPath, 'utf8'));
+  record.topology.repositories.owned.push({
+    repoName: 'acme-platform-service',
+    tenantId: 'contosouk',
+    visibility: 'private',
+    repoType: 'service',
+    lifecycle: 'active',
+    migrationWave: 'wave-1',
+    source: 'ghec',
+    adminTeam: 'contosouk_repoadmins',
+  });
+  fs.writeFileSync(registryPath, JSON.stringify(record, null, 2), 'utf8');
+
+  const { validation, auditArtifact } = await runRequestValidation({
+    env: buildValidationEnv(artifactPath, registryDir, {
+      PARSED_REPOSITORY_VISIBILITY: 'private',
+    }),
+    api: buildValidationApi(),
+    tenantRepoApi: {
+      getRepository: async () => ({ exists: false, repository: null }),
+      getTeamRepositoryPermission: async () => ({ current_permission_api_value: 'none' }),
+    },
+    setProcessExitCode: false,
+  });
+
+  assert.equal(validation.is_valid, false);
+  assert.equal(validation.validation_findings.duplicate_owned_repository_status, 'duplicate_conflict');
+  assert.equal(auditArtifact.validation.no_mutation_planned, true);
+  assert.match(validation.errors.join('\n'), /already present in tenant topology owned repositories/i);
+});
+
+test('US2 mixed canonical and legacy tenant records keep approval and execution stable', async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'create-tenant-repos-us2-mixed-'));
+  const registryDir = path.join(workspace, 'tenant-registry');
+  fs.mkdirSync(registryDir, { recursive: true });
+
+  fs.writeFileSync(
+    path.join(registryDir, 'canonical-tenant.json'),
+    JSON.stringify({
+      tenantId: 'contoso-canonical',
+      tenantName: 'Contoso Canonical',
+      topology: {
+        organization: { orgName: 'im-sandbox-himanshu' },
+        teams: {
+          tenantRootTeam: 'canonical_tenant',
+          structure: [
+            { team: 'canonical_tenant', parent: null, type: 'root' },
+            { team: 'canonical_repoadmins', parent: 'canonical_tenant', type: 'repo-admin' },
+          ],
+        },
+        accessModel: {
+          enforcement: 'tenant-boundary',
+          roles: ['tenant-admin', 'repo-admin', 'developer', 'viewer'],
+        },
+        repositories: { owned: [] },
+      },
+    }, null, 2),
+    'utf8'
+  );
+
+  fs.writeFileSync(
+    path.join(registryDir, 'legacy-tenant.json'),
+    JSON.stringify({
+      tenant_key: 'contoso-legacy',
+      tenant_display_name: 'Contoso Legacy',
+      organization: 'im-sandbox-himanshu',
+      tenant_team_name: 'Contoso Legacy Tenant',
+      tenant_team_slug: 'legacy_tenant',
+      repo_admin_team_name: 'Contoso Legacy RepoAdmins',
+      repo_admin_team_slug: 'legacy_repoadmins',
+    }, null, 2),
+    'utf8'
+  );
+
+  const teamApi = {
+    ...buildValidationApi(),
+    listOrgTeams: async () => ([
+      { slug: 'canonical_tenant', parent: null },
+      { slug: 'canonical_repoadmins', parent: { slug: 'canonical_tenant' } },
+      { slug: 'legacy_tenant', parent: null },
+      { slug: 'legacy_repoadmins', parent: { slug: 'legacy_tenant' } },
+    ]),
+    getMembershipForUser: async ({ teamSlug }) => {
+      if (teamSlug === 'canonical_tenant' || teamSlug === 'legacy_tenant') {
+        return { state: 'active', membership: { role: 'maintainer' } };
+      }
+
+      return { state: 'active', membership: { role: 'member' } };
+    },
+  };
+
+  const canonicalArtifactPath = path.join(workspace, 'canonical-audit.json');
+  await runValidatedAndApprovedFlow({
+    artifactPath: canonicalArtifactPath,
+    registryDir,
+    validationApi: teamApi,
+    validationTenantRepoApi: {
+      getRepository: async () => ({ exists: false, repository: null }),
+      getTeamRepositoryPermission: async () => ({ current_permission_api_value: 'none' }),
+    },
+    validationEnvOverrides: {
+      PARSED_TENANT_NAME: 'Contoso Canonical',
+      PARSED_REPOSITORY_NAME: 'canonical-service-repo',
+      PARSED_REPOSITORY_VISIBILITY: 'internal',
+    },
+  });
+
+  const canonicalResult = await runApprovedExecution({
+    env: {
+      ...buildValidationEnv(canonicalArtifactPath, registryDir, {
+        PARSED_TENANT_NAME: 'Contoso Canonical',
+        PARSED_REPOSITORY_NAME: 'canonical-service-repo',
+        PARSED_REPOSITORY_VISIBILITY: 'internal',
+      }),
+      GITHUB_RUN_ATTEMPT: '20',
+    },
+    tokenInfo: {
+      token: 'pat-token',
+      source: 'ISSUEOPS_GITHUB_TOKEN',
+      token_kind: 'pat',
+      is_pat_backed: true,
+      supports_team_repo_access_mutation: true,
+    },
+    createApi: () => ({
+      getRepository: async () => ({ exists: false, repository: null }),
+      getTeamRepositoryPermission: async () => ({ current_permission_api_value: 'none' }),
+      createOrganizationRepository: async ({ organization, name, visibility }) => ({
+        exists: true,
+        repository: { full_name: `${organization}/${name}`, visibility },
+      }),
+      addOrUpdateTeamRepositoryPermission: async ({ owner, repo, permission }) => ({
+        repository_full_name: `${owner}/${repo}`,
+        permission,
+      }),
+    }),
+    teamApi,
+    setProcessExitCode: false,
+  });
+
+  const legacyArtifactPath = path.join(workspace, 'legacy-audit.json');
+  await runValidatedAndApprovedFlow({
+    artifactPath: legacyArtifactPath,
+    registryDir,
+    validationApi: teamApi,
+    validationTenantRepoApi: {
+      getRepository: async () => ({ exists: false, repository: null }),
+      getTeamRepositoryPermission: async () => ({ current_permission_api_value: 'none' }),
+    },
+    validationEnvOverrides: {
+      PARSED_TENANT_NAME: 'Contoso Legacy',
+      PARSED_REPOSITORY_NAME: 'legacy-service-repo',
+      PARSED_REPOSITORY_VISIBILITY: 'private',
+    },
+  });
+
+  const legacyResult = await runApprovedExecution({
+    env: {
+      ...buildValidationEnv(legacyArtifactPath, registryDir, {
+        PARSED_TENANT_NAME: 'Contoso Legacy',
+        PARSED_REPOSITORY_NAME: 'legacy-service-repo',
+        PARSED_REPOSITORY_VISIBILITY: 'private',
+      }),
+      GITHUB_RUN_ATTEMPT: '21',
+    },
+    tokenInfo: {
+      token: 'pat-token',
+      source: 'ISSUEOPS_GITHUB_TOKEN',
+      token_kind: 'pat',
+      is_pat_backed: true,
+      supports_team_repo_access_mutation: true,
+    },
+    createApi: () => ({
+      getRepository: async () => ({ exists: false, repository: null }),
+      getTeamRepositoryPermission: async () => ({ current_permission_api_value: 'none' }),
+      createOrganizationRepository: async ({ organization, name, visibility }) => ({
+        exists: true,
+        repository: { full_name: `${organization}/${name}`, visibility },
+      }),
+      addOrUpdateTeamRepositoryPermission: async ({ owner, repo, permission }) => ({
+        repository_full_name: `${owner}/${repo}`,
+        permission,
+      }),
+    }),
+    teamApi,
+    setProcessExitCode: false,
+  });
+
+  assert.equal(canonicalResult.request.request_status, 'executed');
+  assert.equal(canonicalResult.execution.repository_creation_result, 'created');
+  assert.equal(canonicalResult.execution.repo_admin_grant_result, 'granted');
+  assert.equal(canonicalResult.validation.validation_findings.topology_mode, 'canonical');
+
+  assert.equal(legacyResult.request.request_status, 'executed');
+  assert.equal(legacyResult.execution.repository_creation_result, 'created');
+  assert.equal(legacyResult.execution.repo_admin_grant_result, 'granted');
+  assert.equal(legacyResult.validation.validation_findings.topology_mode, 'legacy_projection');
 });
 
 // ─── Cross-cutting regression tests ──────────────────────────────────────────

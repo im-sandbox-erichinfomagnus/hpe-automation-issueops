@@ -87,7 +87,10 @@ function parseTenantRepoRequest(input = {}) {
     true
   );
   const repositoryVisibilityInput = readField(parsed, ['repository_visibility', 'parsed_repository_visibility']) || input.repositoryVisibility || input.repository_visibility;
-  const { visibility: repositoryVisibility, source: repositoryVisibilitySource } = normalizeRepositoryVisibility(repositoryVisibilityInput);
+  const { visibility: repositoryVisibility, source: repositoryVisibilitySource } = normalizeRepositoryVisibility(
+    repositoryVisibilityInput,
+    { allowDefault: false }
+  );
   const primaryContactInput = normalizeText(
     readField(parsed, ['primary_contact', 'parsed_primary_contact']) || input.primaryContact || input.primary_contact
   );

@@ -12,6 +12,15 @@ function normalizeTenantName(value) {
   return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
+function normalizeRepositoryNameForComparison(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
 function safeReadJson(filePath) {
   try {
     return {
@@ -88,6 +97,121 @@ function buildContextMarker(input = {}) {
   return `tenant-repo-context:${digest}`;
 }
 
+function isCanonicalTopologyRecord(record) {
+  return Boolean(
+    record &&
+    typeof record === 'object' &&
+    record.tenantId &&
+    record.topology &&
+    typeof record.topology === 'object'
+  );
+}
+
+function projectCanonicalRecord(record = {}) {
+  const topology = record.topology && typeof record.topology === 'object' ? record.topology : {};
+  const organization = topology.organization && topology.organization.orgName
+    ? normalizeLogin(topology.organization.orgName)
+    : '';
+  const teams = topology.teams && typeof topology.teams === 'object' ? topology.teams : {};
+  const structure = Array.isArray(teams.structure) ? teams.structure : [];
+  const tenantRootTeamSlug = normalizeLogin(teams.tenantRootTeam || '');
+  const repoAdminCandidates = structure
+    .filter((node) => node && typeof node === 'object' && normalizeLogin(node.type) === 'repo-admin')
+    .map((node) => ({
+      team_slug: normalizeLogin(node.team || ''),
+      parent_slug: normalizeLogin(node.parent || ''),
+      team_name: String(node.name || node.team || ''),
+    }))
+    .filter((node) => node.team_slug);
+
+  let selectedRepoAdmin = repoAdminCandidates[0] || null;
+  let selectedRepoAdminParentMatchesRoot = false;
+  if (tenantRootTeamSlug) {
+    const sameParent = repoAdminCandidates.find((candidate) => candidate.parent_slug === tenantRootTeamSlug) || null;
+    if (sameParent) {
+      selectedRepoAdmin = sameParent;
+      selectedRepoAdminParentMatchesRoot = true;
+    }
+  }
+  if (!selectedRepoAdminParentMatchesRoot && selectedRepoAdmin && tenantRootTeamSlug) {
+    selectedRepoAdminParentMatchesRoot = selectedRepoAdmin.parent_slug === tenantRootTeamSlug;
+  }
+
+  const accessModel = topology.accessModel && typeof topology.accessModel === 'object'
+    ? topology.accessModel
+    : {};
+  const accessModelEnforcement = String(accessModel.enforcement || '').trim().toLowerCase();
+  const accessModelRoles = Array.isArray(accessModel.roles)
+    ? accessModel.roles.map((role) => String(role || '').trim().toLowerCase()).filter(Boolean)
+    : [];
+
+  const ownedRaw = topology.repositories && typeof topology.repositories === 'object'
+    ? topology.repositories.owned
+    : undefined;
+  const ownedRepositoriesStatus = Array.isArray(ownedRaw)
+    ? 'array'
+    : ownedRaw == null
+      ? 'absent'
+      : 'invalid';
+  const ownedRepositories = Array.isArray(ownedRaw)
+    ? ownedRaw
+    : [];
+
+  return {
+    topology_mode: 'canonical',
+    tenant_id: normalizeLogin(record.tenantId || ''),
+    tenant_key: normalizeLogin(record.tenantId || ''),
+    tenant_display_name: String(record.tenantName || ''),
+    organization,
+    tenant_team_name: String(teams.tenantRootTeamName || teams.tenantRootTeam || ''),
+    tenant_team_slug: tenantRootTeamSlug,
+    repo_admin_team_name: selectedRepoAdmin ? selectedRepoAdmin.team_name : '',
+    repo_admin_team_slug: selectedRepoAdmin ? selectedRepoAdmin.team_slug : '',
+    repo_admin_parent_matches_root: selectedRepoAdminParentMatchesRoot,
+    access_model_enforcement: accessModelEnforcement,
+    access_model_roles: accessModelRoles,
+    canonical_fields_consulted: [
+      'tenantId',
+      'topology.organization.orgName',
+      'topology.teams.tenantRootTeam',
+      'topology.teams.structure',
+      'topology.accessModel.enforcement',
+      'topology.accessModel.roles',
+      'topology.repositories.owned',
+    ],
+    owned_repositories: ownedRepositories,
+    owned_repositories_status: ownedRepositoriesStatus,
+  };
+}
+
+function projectLegacyRecord(record = {}) {
+  return {
+    topology_mode: 'legacy_projection',
+    tenant_id: normalizeLogin(record.tenant_key || ''),
+    tenant_key: normalizeLogin(record.tenant_key || ''),
+    tenant_display_name: String(record.tenant_display_name || ''),
+    organization: normalizeLogin(record.organization || ''),
+    tenant_team_name: String(record.tenant_team_name || ''),
+    tenant_team_slug: normalizeLogin(record.tenant_team_slug || ''),
+    repo_admin_team_name: String(record.repo_admin_team_name || ''),
+    repo_admin_team_slug: normalizeLogin(record.repo_admin_team_slug || ''),
+    repo_admin_parent_matches_root: true,
+    access_model_enforcement: '',
+    access_model_roles: [],
+    canonical_fields_consulted: [],
+    owned_repositories: [],
+    owned_repositories_status: 'absent',
+  };
+}
+
+function projectTenantRecord(record = {}) {
+  if (isCanonicalTopologyRecord(record)) {
+    return projectCanonicalRecord(record);
+  }
+
+  return projectLegacyRecord(record);
+}
+
 async function resolveTenantContextFromRegistry(input = {}, options = {}) {
   const registryRef = String(options.registryRef || process.env.TENANT_REGISTRY_REF || 'main');
   const requesterLogin = normalizeLogin(input.requester_login);
@@ -98,11 +222,18 @@ async function resolveTenantContextFromRegistry(input = {}, options = {}) {
   const getMembershipForUser = options.getMembershipForUser;
 
   const registryResult = readTenantRegistryRecords({ registryDirectory: options.registryDirectory });
-  const recordsForOrganization = registryResult.records.filter(
-    (record) => normalizeLogin(record.organization) === organization
+  const projectedRecords = registryResult.records
+    .map((record) => ({
+      source_record: record,
+      projection: projectTenantRecord(record),
+    }))
+    .filter((entry) => entry.projection.organization);
+
+  const recordsForOrganization = projectedRecords.filter(
+    (entry) => entry.projection.organization === organization
   );
   const recordsForTenantName = requestedTenantNameNormalized
-    ? recordsForOrganization.filter((record) => normalizeTenantName(record.tenant_display_name) === requestedTenantNameNormalized)
+    ? recordsForOrganization.filter((entry) => normalizeTenantName(entry.projection.tenant_display_name) === requestedTenantNameNormalized)
     : recordsForOrganization;
 
   const teams = typeof listTeams === 'function'
@@ -115,9 +246,11 @@ async function resolveTenantContextFromRegistry(input = {}, options = {}) {
   );
 
   const candidates = [];
-  for (const record of recordsForTenantName) {
-    const tenantTeamSlug = normalizeLogin(record.tenant_team_slug);
-    const repoAdminTeamSlug = normalizeLogin(record.repo_admin_team_slug);
+  for (const entry of recordsForTenantName) {
+    const record = entry.source_record;
+    const projection = entry.projection;
+    const tenantTeamSlug = normalizeLogin(projection.tenant_team_slug);
+    const repoAdminTeamSlug = normalizeLogin(projection.repo_admin_team_slug);
     const tenantTeam = tenantTeamSlug ? teamBySlug.get(tenantTeamSlug) || null : null;
     const repoAdminTeam = repoAdminTeamSlug ? teamBySlug.get(repoAdminTeamSlug) || null : null;
 
@@ -184,14 +317,22 @@ async function resolveTenantContextFromRegistry(input = {}, options = {}) {
     }
 
     candidates.push({
-      tenant_key: normalizeLogin(record.tenant_key),
-      tenant_display_name: String(record.tenant_display_name || ''),
+      topology_mode: projection.topology_mode,
+      tenant_id: projection.tenant_id,
+      tenant_key: projection.tenant_key,
+      tenant_display_name: projection.tenant_display_name,
       organization,
       registry_ref: registryRef,
-      tenant_team_name: String(record.tenant_team_name || ''),
+      tenant_team_name: projection.tenant_team_name,
       tenant_team_slug: tenantTeamSlug,
-      repo_admin_team_name: String(record.repo_admin_team_name || ''),
+      repo_admin_team_name: projection.repo_admin_team_name,
       repo_admin_team_slug: repoAdminTeamSlug,
+      owned_repositories: projection.owned_repositories,
+      owned_repositories_status: projection.owned_repositories_status,
+      repo_admin_parent_matches_root: projection.repo_admin_parent_matches_root,
+      access_model_enforcement: projection.access_model_enforcement,
+      access_model_roles: projection.access_model_roles,
+      canonical_fields_consulted: projection.canonical_fields_consulted,
       governance_relation_status: governanceRelationStatus,
       tenant_role_state: tenantRoleState,
       repo_admin_membership_state: repoAdminMembershipState,
@@ -232,7 +373,7 @@ async function resolveTenantContextFromRegistry(input = {}, options = {}) {
     requested_tenant_name_normalized: requestedTenantNameNormalized,
     candidate_registry_record_count: recordsForTenantName.length,
     available_tenant_display_names: [...new Set(recordsForOrganization
-      .map((record) => String(record.tenant_display_name || '').split(/[\r\n]+/)[0].trim())
+      .map((entry) => String(entry.projection.tenant_display_name || '').split(/[\r\n]+/)[0].trim())
       .filter(Boolean))],
     tenant_match_count: authorizedCandidates.length,
     tenant_resolution_status: tenantResolutionStatus,
@@ -240,6 +381,7 @@ async function resolveTenantContextFromRegistry(input = {}, options = {}) {
     resolved_context: resolvedCandidate
       ? {
           ...resolvedCandidate,
+          repository_name_normalized_for_context: normalizeRepositoryNameForComparison(input.repository_name_normalized),
           context_marker: contextMarker,
         }
       : null,

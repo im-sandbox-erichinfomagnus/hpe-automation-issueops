@@ -190,6 +190,7 @@ test('tenant repo request validation integrates canonical tenant context without
     PARSED_ORGANIZATION: 'octo-org',
     PARSED_TENANT_NAME: 'Tenant A',
     PARSED_REPOSITORY_NAME: 'acme-platform-service',
+    PARSED_REPOSITORY_VISIBILITY: 'private',
     PARSED_PRIMARY_CONTACT: 'octocat',
     PARSED_SECONDARY_CONTACT: '',
     PARSED_DESIGNATED_APPROVER: 'org-owner-user',

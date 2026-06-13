@@ -25,7 +25,7 @@ on:
 
 permissions:
   actions: read
-  contents: read
+  contents: write
   issues: write
 
 concurrency:

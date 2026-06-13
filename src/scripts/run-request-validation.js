@@ -966,12 +966,22 @@ async function runRequestValidation(options = {}) {
           registryRef: env.TENANT_REGISTRY_REF || 'main',
           registryDirectory: env.TENANT_REGISTRY_DIR || 'tenant-registry',
         });
+        validation.request = {
+          ...validation.request,
+          no_mutation_evidence: validation.request && validation.request.dry_run
+            ? {
+                mode: 'dry_run_validation_only',
+                no_mutation_planned: true,
+              }
+            : null,
+        };
         reconciliationPlan = reconcileTenantRepoCreation({
           request: validation.request,
           canonical_tenant_context: validation.canonical_tenant_context,
           organization_visible: validation.organization_visible,
           repository_state: validation.repository_state,
           current_repo_admin_permission: validation.current_repo_admin_permission,
+          duplicate_owned_repository_conflict: validation.validation_findings && validation.validation_findings.duplicate_owned_repository_conflict,
           dry_run: validation.request.dry_run,
           boundary_revalidation_status: 'matched',
         });

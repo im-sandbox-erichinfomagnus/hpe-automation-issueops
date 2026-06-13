@@ -1,0 +1,42 @@
+{
+  "tenantId": "acme-platform",
+  "tenantName": "Acme Platform",
+  "tenantType": "platform",
+  "topology": {
+    "organization": {
+      "orgName": "im-sandbox-himanshu"
+    },
+    "teams": {
+      "tenantRootTeam": "acme_tenant",
+      "structure": [
+        { "team": "acme_tenant", "parent": null, "type": "root" },
+        { "team": "acme_admin", "parent": "acme_tenant", "type": "admin" },
+        { "team": "acme_repoadmin", "parent": "acme_tenant", "type": "repo-admin" }
+      ]
+    },
+    "accessModel": {
+      "enforcement": "tenant-boundary",
+      "roles": ["tenant-admin", "repo-admin", "developer", "viewer"]
+    },
+    "repositories": {
+      "owned": [
+        {
+          "repoName": "acme-api",
+          "tenantId": "acme-platform",
+          "visibility": "internal",
+          "repoType": "service",
+          "lifecycle": "active",
+          "migrationWave": "wave-1",
+          "source": "ghec",
+          "adminTeam": "acme_repoadmin"
+        }
+      ]
+    }
+  },
+  "externalMappings": {
+    "environment": "nonprod"
+  },
+  "metadata": {
+    "primaryContact": "owner@example.com"
+  }
+}

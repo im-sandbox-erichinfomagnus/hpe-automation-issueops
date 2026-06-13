@@ -139,7 +139,7 @@ test('create-tenant-repos parser module normalizes explicit repository visibilit
   assert.equal(internalRequest.repository_visibility_source, 'user_selected');
 });
 
-test('create-tenant-repos parser module defaults missing repository visibility to private', () => {
+test('create-tenant-repos parser module marks missing repository visibility as not provided', () => {
   const parsed = parseTenantRepoRequest({
     parsedRequest: {
       organization: 'Octo-Org',
@@ -157,8 +157,8 @@ test('create-tenant-repos parser module defaults missing repository visibility t
     },
   });
 
-  assert.equal(parsed.repository_visibility, 'private');
-  assert.equal(parsed.repository_visibility_source, 'default');
+  assert.equal(parsed.repository_visibility, '');
+  assert.equal(parsed.repository_visibility_source, 'not_provided');
 });
 
 test('create-tenant-repos parser module normalizes repository request fields', () => {
