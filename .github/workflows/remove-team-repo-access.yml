@@ -1,4 +1,4 @@
-name: create-tenant-model
+name: remove-team-repo-access
 
 on:
   issues:
@@ -15,17 +15,17 @@ on:
   workflow_dispatch:
     inputs:
       issue-number:
-        description: Existing issue number to replay for validation or execution.
+        description: Existing issue number to replay for scaffold validation.
         required: true
         type: string
 
 permissions:
   actions: read
-  contents: write
+  contents: read
   issues: write
 
 concurrency:
-  group: create-tenant-model-${{ github.event.issue.number || inputs['issue-number'] || github.run_id }}
+  group: remove-team-repo-access-${{ github.event.issue.number || inputs.issue-number || github.run_id }}
   cancel-in-progress: false
 
 jobs:
@@ -37,10 +37,8 @@ jobs:
       run:
         shell: bash
     env:
-      ISSUE_NUMBER: ${{ github.event.issue.number || inputs['issue-number'] || '' }}
-      TENANT_REGISTRY_PERSISTENCE_MODE: durable
-      TENANT_REGISTRY_DIR: tenant-registry
-      TENANT_REGISTRY_REQUIRE_DIRECTORY: "true"
+      ISSUE_NUMBER: ${{ github.event.issue.number || inputs.issue-number || '' }}
+      AUDIT_ARTIFACT_PATH: artifacts/remove-team-repo-access-validation-${{ github.event.issue.number || inputs.issue-number || 'manual' }}.json
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -64,6 +62,7 @@ jobs:
           if [ "$EVENT_NAME" = "issues" ] || [ "$EVENT_NAME" = "issue_comment" ]; then
             issue_body=$(jq -r '.issue.body // ""' "$GITHUB_EVENT_PATH")
             requester_login=$(jq -r '.issue.user.login // ""' "$GITHUB_EVENT_PATH")
+            issue_labels_json=$(jq -c '.issue.labels // []' "$GITHUB_EVENT_PATH")
           else
             if [ -z "$ISSUE_NUMBER" ]; then
               echo "workflow_dispatch requires an issue number to replay" >&2
@@ -78,18 +77,12 @@ jobs:
 
             issue_body=$(printf '%s' "$issue_json" | jq -r '.body // ""')
             requester_login=$(printf '%s' "$issue_json" | jq -r '.user.login // ""')
-          fi
-
-          echo "requester_login=$requester_login" >> "$GITHUB_OUTPUT"
-
-          if [ "$EVENT_NAME" = "issues" ] || [ "$EVENT_NAME" = "issue_comment" ]; then
-            issue_labels_json=$(jq -c '.issue.labels // []' "$GITHUB_EVENT_PATH")
-          else
             issue_labels_json=$(printf '%s' "$issue_json" | jq -c '.labels // []')
           fi
-          echo "issue_labels_json=$issue_labels_json" >> "$GITHUB_OUTPUT"
 
           {
+            echo "requester_login=$requester_login"
+            echo "issue_labels_json=$issue_labels_json"
             echo 'issue_body<<EOF'
             printf '%s\n' "$issue_body"
             echo EOF
@@ -100,106 +93,89 @@ jobs:
         uses: issue-ops/parser@v5
         with:
           body: ${{ steps.issue_context.outputs.issue_body }}
-          issue-form-template: create-tenant-model.yml
+          issue-form-template: remove-team-repo-access.yml
 
       - name: Check request applicability
         id: request_scope
         env:
-          PARSED_ORGANIZATION: ${{ steps.parse_request.outputs.parsed_organization }}
-          PARSED_TENANT_NAME: ${{ steps.parse_request.outputs.parsed_tenant_name }}
+          PARSED_TEAM: ${{ steps.parse_request.outputs.parsed_team }}
           PARSED_DESIGNATED_APPROVER: ${{ steps.parse_request.outputs.parsed_designated_approver }}
         run: |
           set -euo pipefail
 
           matches_request=false
-          if [ -n "${PARSED_ORGANIZATION:-}" ] && [ -n "${PARSED_TENANT_NAME:-}" ] && [ -n "${PARSED_DESIGNATED_APPROVER:-}" ]; then
+          if [ -n "${PARSED_TEAM:-}" ] && [ -n "${PARSED_DESIGNATED_APPROVER:-}" ]; then
             matches_request=true
           fi
 
           echo "matches-request=$matches_request" >> "$GITHUB_OUTPUT"
 
       - name: Skip unrelated issue form
-        if: ${{ steps.request_scope.outputs['matches-request'] != 'true' }}
+        if: ${{ steps.request_scope.outputs.matches-request != 'true' }}
         run: |
-          echo 'This issue does not match the create-tenant-model form. Exiting without validation or execution.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'This issue does not match the remove-team-repo-access form. Exiting without validation or assignment.' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Restore prior request audit artifact
-        if: ${{ steps.request_scope.outputs['matches-request'] == 'true' }}
+        if: ${{ steps.request_scope.outputs.matches-request == 'true' }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
           ISSUE_NUMBER: ${{ env.ISSUE_NUMBER }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_RUN_ID: ${{ github.run_id }}
-          AUDIT_ARTIFACT_PATH: artifacts/create-tenant-model-validation-${{ env.ISSUE_NUMBER || 'manual' }}.json
+          AUDIT_ARTIFACT_PATH: ${{ env.AUDIT_ARTIFACT_PATH }}
         run: node src/scripts/restore-request-audit-artifact.js
 
       - name: Validate request and record approval-ready state
         id: validate_request
-        if: ${{ steps.request_scope.outputs['matches-request'] == 'true' }}
+        if: ${{ steps.request_scope.outputs.matches-request == 'true' }}
         env:
           ISSUEOPS_GITHUB_TOKEN: ${{ secrets.ISSUEOPS_GITHUB_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.ISSUEOPS_GITHUB_TOKEN || github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
           ISSUE_NUMBER: ${{ env.ISSUE_NUMBER }}
           REQUESTER_LOGIN: ${{ steps.issue_context.outputs.requester_login }}
           PARSED_REQUEST_JSON: ${{ steps.parse_request.outputs.json }}
           PARSED_ORGANIZATION: ${{ steps.parse_request.outputs.parsed_organization }}
-          PARSED_TENANT_NAME: ${{ steps.parse_request.outputs.parsed_tenant_name }}
+          PARSED_TEAM: ${{ steps.parse_request.outputs.parsed_team }}
           PARSED_DESIGNATED_APPROVER: ${{ steps.parse_request.outputs.parsed_designated_approver }}
-          PARSED_JUSTIFICATION: ${{ steps.parse_request.outputs.parsed_justification }}
+          PARSED_REQUESTED_REPOSITORIES: ${{ steps.parse_request.outputs.parsed_requested_repositories }}
+          PARSED_INTAKE_MODE: ${{ steps.parse_request.outputs.parsed_intake_mode }}
           PARSED_DRY_RUN: ${{ steps.parse_request.outputs.parsed_dry_run }}
-          ISSUE_LABELS_JSON: ${{ steps.issue_context.outputs.issue_labels_json }}
           COMMENT_ID: ${{ github.event.comment.id || '' }}
           COMMENT_AUTHOR_LOGIN: ${{ github.event.comment.user.login || '' }}
           COMMENT_BODY: ${{ github.event.comment.body || '' }}
-          AUDIT_ARTIFACT_PATH: artifacts/create-tenant-model-validation-${{ env.ISSUE_NUMBER || 'manual' }}.json
+          AUDIT_ARTIFACT_PATH: ${{ env.AUDIT_ARTIFACT_PATH }}
         run: node src/scripts/run-request-validation.js
 
-      - name: Evaluate approval gate
+      - name: Evaluate approval gate and assign central owner
         id: approval_gate
         if: ${{ always() && steps.request_scope.outputs.matches-request == 'true' && steps.validate_request.outcome != 'skipped' }}
         env:
           ISSUEOPS_GITHUB_TOKEN: ${{ secrets.ISSUEOPS_GITHUB_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.ISSUEOPS_GITHUB_TOKEN || github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
           ISSUE_NUMBER: ${{ env.ISSUE_NUMBER }}
-          AUDIT_ARTIFACT_PATH: artifacts/create-tenant-model-validation-${{ env.ISSUE_NUMBER || 'manual' }}.json
+          AUDIT_ARTIFACT_PATH: ${{ env.AUDIT_ARTIFACT_PATH }}
         run: node src/scripts/run-approval-gate.js
 
-      - name: Configure git for registry persistence
-        if: ${{ steps.request_scope.outputs.matches-request == 'true' && steps.approval_gate.outputs.approval-status == 'approved' }}
-        run: |
-          git config --global user.email "github-actions[bot]@github.com"
-          git config --global user.name "github-actions[bot]"
-
-      - name: Execute approved reconciliation
+      - name: Execute approved repository-access reconciliation
         id: execute_request
-        if: ${{ always() && steps.request_scope.outputs.matches-request == 'true' && steps.approval_gate.outputs.approval-status == 'approved' }}
+        if: ${{ always() && steps.request_scope.outputs.matches-request == 'true' && steps.approval_gate.outputs['approval-status'] == 'approved' }}
         env:
           ISSUEOPS_GITHUB_TOKEN: ${{ secrets.ISSUEOPS_GITHUB_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.ISSUEOPS_GITHUB_TOKEN || github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
           ISSUE_NUMBER: ${{ env.ISSUE_NUMBER }}
-          TENANT_REGISTRY_PERSISTENCE_MODE: ${{ env.TENANT_REGISTRY_PERSISTENCE_MODE }}
-          TENANT_REGISTRY_DIR: ${{ env.TENANT_REGISTRY_DIR }}
-          TENANT_REGISTRY_REQUIRE_DIRECTORY: ${{ env.TENANT_REGISTRY_REQUIRE_DIRECTORY }}
-          AUDIT_ARTIFACT_PATH: artifacts/create-tenant-model-validation-${{ env.ISSUE_NUMBER || 'manual' }}.json
+          AUDIT_ARTIFACT_PATH: ${{ env.AUDIT_ARTIFACT_PATH }}
         run: node src/scripts/run-approved-execution.js
 
-      - name: Upload request audit artifact
+      - name: Upload validation artifact
         if: ${{ always() && steps.request_scope.outputs.matches-request == 'true' && steps.validate_request.outcome != 'skipped' }}
         uses: actions/upload-artifact@v7
         with:
-          name: create-tenant-model-validation-${{ env.ISSUE_NUMBER || github.run_id }}
-          path: artifacts/create-tenant-model-validation-${{ env.ISSUE_NUMBER || 'manual' }}.json
+          name: remove-team-repo-access-validation-${{ env.ISSUE_NUMBER || github.run_id }}
+          path: ${{ env.AUDIT_ARTIFACT_PATH }}
           if-no-files-found: error
 
-      - name: Upload tenant registry fallback artifact
-        if: ${{ always() && steps.request_scope.outputs.matches-request == 'true' }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: create-tenant-model-fallback-${{ env.ISSUE_NUMBER || github.run_id }}
-          path: artifacts/tenant-registry-fallback-${{ env.ISSUE_NUMBER || 'manual' }}.json
-          if-no-files-found: ignore
-
-      - name: Workflow status note
-        if: ${{ steps.request_scope.outputs.matches-request == 'true' }}
-        run: |
-          echo 'create-tenant-model workflow is wired for validation, approval, and approved execution routing.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Emit workflow summary
+        if: ${{ always() && steps.request_scope.outputs.matches-request == 'true' && steps.validate_request.outcome != 'skipped' }}
+        env:
+          AUDIT_ARTIFACT_PATH: ${{ env.AUDIT_ARTIFACT_PATH }}
+        run: node src/scripts/emit-audit-summary.js "${{ env.AUDIT_ARTIFACT_PATH }}"

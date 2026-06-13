@@ -1,0 +1,119 @@
+name: remove-team-repo-access-workflow-contract
+version: 1
+purpose: >-
+  Contract for IssueOps workflow that removes one existing team from one or
+  more repositories while preserving governance, CSV attachment lifecycle, and
+  terminal-state immutability patterns from prior repo-access baselines.
+
+issue_form:
+  path: .github/ISSUE_TEMPLATE/remove-team-repo-access.yml
+  required_fields:
+    - id: organization
+      type: input
+    - id: team
+      type: input
+    - id: designated_approver
+      type: input
+    - id: intake_mode
+      type: dropdown
+      allowed:
+        - manual
+        - csv_attachment
+    - id: dry_run
+      type: dropdown
+  conditional_fields:
+    - id: requested_repositories
+      type: textarea
+      rules:
+        - May be populated only when intake_mode is manual.
+        - Must be empty when intake_mode is csv_attachment.
+
+parser:
+  action: issue-ops/parser@v5
+  outputs:
+    - json
+    - parsed_organization
+    - parsed_team
+    - parsed_designated_approver
+    - parsed_intake_mode
+    - parsed_requested_repositories
+    - parsed_dry_run
+
+authorization:
+  requester_identity: github.event.issue.user.login
+  attachment_uploader_requirement: Accepted CSV attachment comment author equals requester.
+  approval_model: Preserve designated approver validation as active target org owner for full batch.
+  central_assignment_semantics: Routing only; never approval evidence.
+  execution_identity:
+    credential: ISSUEOPS_GITHUB_TOKEN
+    least_privilege: true
+
+validation_rules:
+  - Exactly one intake mode must be selected.
+  - csv_attachment requests with valid metadata and no accepted candidate are waiting_for_attachment.
+  - Approval and execution are blocked while waiting_for_attachment.
+  - Attachment candidates are requester-authored same-issue comments only.
+  - Newest eligible requester candidate after latest failed validation attempt is selected.
+  - CSV validation preserves repository header and row semantics from feature 009.
+  - Duplicate/conflicting normalized repositories are rejected.
+  - Organization/team/repository visibility and eligibility are required.
+
+reconciliation:
+  desired_state: Team has no explicit access on each requested repository.
+  current_state_reads:
+    - org/team/repository visibility
+    - current team-repository permission state
+  decisions:
+    remove_access: repository currently has explicit team permission
+    noop_already_absent: repository currently has no explicit team permission
+    reject: repository invalid/ineligible/conflicting
+  rerun_rule: Idempotent; no duplicate removal operations.
+  stale_state_rule: Recompute state before mutation.
+
+terminal_state:
+  statuses:
+    - executed
+    - partially_executed
+    - failed_after_approved_execution
+  forbidden_reopen_transitions:
+    - waiting_for_attachment
+    - validation_failed
+    - awaiting_approval
+
+observability:
+  outputs:
+    - github_step_summary
+    - json_audit_artifact
+  required_fields:
+    - issue_number
+    - run_id
+    - requester_login
+    - approver_login
+    - organization
+    - team
+    - intake_mode
+    - attachment_url
+    - attachment_comment_id
+    - attachment_uploader_login
+    - attachment_content_hash
+    - row_findings
+    - removed_count
+    - noop_count
+    - rejected_count
+    - failure_count
+    - mutated_repositories
+    - noop_repositories
+    - rejected_repositories
+    - failed_repositories
+    - rollback_status
+
+rate_limit_handling:
+  strategy: bounded_exponential_backoff
+  retryable_conditions:
+    - transient throttling
+    - explicit retry-after guidance
+  non_retryable_conditions:
+    - authorization failure
+    - invalid approver
+    - malformed/ambiguous attachment
+    - invalid repository inputs

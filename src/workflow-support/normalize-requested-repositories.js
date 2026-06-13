@@ -100,6 +100,19 @@ function buildNormalizedRepositoryGrant(parsed, overrides = {}) {
   };
 }
 
+function buildNormalizedRepositoryRemoval(parsed, overrides = {}) {
+  return {
+    ...parsed,
+    repository_archived: false,
+    current_permission_api_value: 'none',
+    current_permission_rank: 0,
+    desired_action: 'remove_access',
+    execution_result: 'not_started',
+    failure_reason: null,
+    ...overrides,
+  };
+}
+
 function normalizeRequestedRepositories(input, options = {}) {
   const defaultOwner = options.defaultOwner || options.default_owner || '';
   const normalizedRepositories = [];
@@ -165,11 +178,27 @@ function normalizeRequestedRepositories(input, options = {}) {
   };
 }
 
+function normalizeRequestedRepositoryRemovals(input, options = {}) {
+  const normalized = normalizeRequestedRepositories(input, options);
+
+  return {
+    normalizedRepositories: normalized.normalizedRepositories.map((entry) =>
+      buildNormalizedRepositoryRemoval(entry)
+    ),
+    requestedRepositoryDetail: normalized.requestedRepositoryDetail,
+    duplicateRepositories: normalized.duplicateRepositories,
+    conflictingRepositories: normalized.conflictingRepositories,
+    invalidRepositories: normalized.invalidRepositories,
+  };
+}
+
 module.exports = {
   buildNormalizedRepositoryGrant,
+  buildNormalizedRepositoryRemoval,
   hasPopulatedInput,
   normalizeLogin,
   normalizeRepositoryName,
+  normalizeRequestedRepositoryRemovals,
   normalizeRequestedRepositories,
   parseRepositoryReference,
   toLines,

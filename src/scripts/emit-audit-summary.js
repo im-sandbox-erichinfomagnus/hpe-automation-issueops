@@ -21,6 +21,7 @@ function formatAuditSummary(auditArtifact = {}) {
   const isBulkCsv = request.intake_mode === 'bulk_csv';
   const isCsvAttachment = request.intake_mode === 'csv_attachment';
   const isTeamRepoAccess = operation === 'team_repo_access';
+  const isTeamRepoAccessRemoval = operation === 'team_repo_access_removal';
   const isTeamHierarchy = operation === 'team_hierarchy';
   const isTeamCreation = operation === 'team_creation';
 
@@ -153,6 +154,55 @@ function formatAuditSummary(auditArtifact = {}) {
             ? 'Approval was denied or invalid. No tenant mutation was attempted.'
             : 'Request is validated and ready for approval. No tenant mutation was attempted.'
         : 'Request validation failed. No tenant mutation was attempted.'),
+    ].filter(Boolean).join('\n');
+  }
+
+  if (isTeamRepoAccessRemoval) {
+    return [
+      '# Remove Team Repository Access Workflow Summary',
+      '',
+      `- Request ID: ${request.request_id || 'n/a'}`,
+      `- Repository: ${request.repository || 'n/a'}`,
+      `- Target organization: ${request.organization || 'n/a'}`,
+      `- Target team: ${request.team_slug || request.team_name || 'n/a'}`,
+      `- Designated approver: ${request.designated_approver_login || 'n/a'}`,
+      `- Requester: ${request.requester_login || 'n/a'}`,
+      `- Intake mode: ${request.intake_mode || 'n/a'}`,
+      `- Request status: ${request.request_status || 'submitted'}`,
+      `- Central assignment: ${assignment.assignment_status || 'not_attempted'}${assignment.assigned_login ? ` (${assignment.assigned_login})` : ''}`,
+      `- Approval: ${approval.approval_status || 'pending'} (${repoAccessApprovalState})`,
+      approval.approver_login ? `- Approver: ${approval.approver_login}` : null,
+      `- Validation: ${validation.is_valid ? 'passed' : 'failed'}`,
+      isCsvAttachment && request.request_status === 'waiting_for_attachment'
+        ? '- Attachment status: waiting for requester CSV attachment comment'
+        : null,
+      `- Repositories requested: ${(request.requested_repository_removals || []).length}`,
+      `- Removed repositories: ${execution.removed_count || execution.mutation_count || 0}`,
+      `- No-op repositories: ${execution.noop_count || (reconciliation.already_absent_noops || []).length || 0}`,
+      `- Rejected repositories: ${execution.rejected_count || (reconciliation.rejected_items || []).length || 0}`,
+      `- Failed repositories: ${execution.failure_count || 0}`,
+      `- Rollback status: ${execution.rollback_status || 'not_needed'}`,
+      validation.warnings && validation.warnings.length > 0
+        ? `- Validation warnings: ${validation.warnings.join('; ')}`
+        : null,
+      validation.errors && validation.errors.length > 0
+        ? `- Validation errors: ${validation.errors.join('; ')}`
+        : null,
+      assignment.assignment_note ? `- Assignment note: ${assignment.assignment_note}` : null,
+      assignment.assignment_status === 'assigned'
+        ? '- Assignment semantics: routing only (never grants approval)'
+        : null,
+      approval.decision_note ? `- Approval note: ${approval.decision_note}` : null,
+      '',
+      execution.summary || (request.request_status === 'waiting_for_attachment'
+        ? 'Request metadata is valid, but execution remains blocked until the requester posts a qualifying CSV attachment comment.'
+        : validation.is_valid
+          ? approval.approval_status === 'approved'
+            ? 'Request is approved and eligible for repository-access removal execution. No repository-access mutation was attempted in this phase.'
+            : approval.approval_status === 'denied'
+              ? 'Approval was denied or invalid. No repository-access mutation was attempted.'
+              : 'Request is validated and ready for approval. No repository-access mutation was attempted.'
+          : 'Request validation failed. No repository-access mutation was attempted.'),
     ].filter(Boolean).join('\n');
   }
 

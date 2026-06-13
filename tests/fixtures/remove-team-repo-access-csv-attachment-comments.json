@@ -1,0 +1,38 @@
+[
+  {
+    "id": 9201,
+    "body": "requester correction attempt from another user [repos.csv](https://github.com/user-attachments/files/9201/repos.csv)",
+    "created_at": "2026-06-02T09:00:00Z",
+    "user": { "login": "other-user" }
+  },
+  {
+    "id": 9202,
+    "body": "requester posted non-csv attachment [repos.txt](https://github.com/user-attachments/files/9202/repos.txt)",
+    "created_at": "2026-06-02T09:02:00Z",
+    "user": { "login": "requester" }
+  },
+  {
+    "id": 9203,
+    "body": "requester posted ambiguous csv links https://github.com/user-attachments/files/9203/a.csv https://github.com/user-attachments/files/9203/b.csv",
+    "created_at": "2026-06-02T09:04:00Z",
+    "user": { "login": "requester" }
+  },
+  {
+    "id": 9204,
+    "body": "requester first csv https://github.com/user-attachments/files/9204/remove-access.csv",
+    "created_at": "2026-06-02T09:06:00Z",
+    "user": { "login": "requester" }
+  },
+  {
+    "id": 9205,
+    "body": "requester corrected csv https://github.com/user-attachments/files/9205/remove-access-corrected.csv",
+    "created_at": "2026-06-02T09:08:00Z",
+    "user": { "login": "requester" }
+  },
+  {
+    "id": 9206,
+    "body": "approved",
+    "created_at": "2026-06-02T09:10:00Z",
+    "user": { "login": "octocat" }
+  }
+]

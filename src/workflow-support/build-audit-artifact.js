@@ -61,10 +61,17 @@ function determineOperation(request = {}, runContext = {}) {
     return 'team_hierarchy';
   }
 
+  const isTeamRepoAccessRemoval = Boolean(
+    hasNonEmptyArray(request.requested_repository_removals)
+  );
+
+  if (isTeamRepoAccessRemoval) {
+    return 'team_repo_access_removal';
+  }
+
   const isTeamRepoAccess = Boolean(
     request.requested_permission_api_value ||
       request.requested_permission_label ||
-      (request.team_slug && request.designated_approver_login) ||
       hasNonEmptyArray(request.requested_repository_grants) ||
       hasNonEmptyArray(request.duplicate_repositories) ||
       hasNonEmptyArray(request.conflicting_repositories) ||
@@ -135,6 +142,11 @@ function inferRequestIntakeMode(request = {}, operation = determineOperation(req
       hasPopulatedString(request.requested_child_teams_input) ||
       hasManualNormalizedEntries(request.requested_child_links) ||
       hasManualNormalizedEntries(request.requested_child_link_detail)
+    )
+  ) || (
+    operation === 'team_repo_access_removal' && (
+      hasPopulatedString(request.requested_repositories_input) ||
+      hasNonEmptyArray(request.requested_repository_removals)
     )
   ) || (
     operation === 'team_repo_access' && (
@@ -235,6 +247,7 @@ function buildAuditArtifact(input = {}) {
       requested_permission_label: request.requested_permission_label,
       requested_permission_api_value: request.requested_permission_api_value,
       requested_repository_grants: request.requested_repository_grants || [],
+      requested_repository_removals: request.requested_repository_removals || [],
       requested_teams: request.requested_teams || [],
       requested_child_links: request.requested_child_links || [],
       request_status: request.request_status,
@@ -277,6 +290,8 @@ function buildAuditArtifact(input = {}) {
         Boolean(request.dry_run) ||
         ['submitted', 'awaiting_approval', 'validation_failed', 'waiting_for_attachment'].includes(String(request.request_status || '')),
       requested_repository_grants: validation.requested_repository_grants || [],
+      requested_repository_removals: validation.requested_repository_removals || [],
+      already_absent_repository_removals: validation.already_absent_repository_removals || [],
       already_satisfied_repository_grants: validation.already_satisfied_repository_grants || [],
       intended_owner_membership: validation.intended_owner_membership || null,
       requested_teams: validation.requested_teams || [],
@@ -332,6 +347,9 @@ function buildAuditArtifact(input = {}) {
       repositories_to_grant: reconciliationPlan.repositories_to_grant || [],
       repositories_already_satisfied: reconciliationPlan.repositories_already_satisfied || [],
       repositories_rejected: reconciliationPlan.repositories_rejected || [],
+      removals_to_apply: reconciliationPlan.removals_to_apply || [],
+      already_absent_noops: reconciliationPlan.already_absent_noops || [],
+      rejected_items: reconciliationPlan.rejected_items || [],
       permission_strength_ladder: reconciliationPlan.permission_strength_ladder || [],
       parent_team_exists: reconciliationPlan.parent_team_exists,
       teams_to_create: reconciliationPlan.teams_to_create || [],
@@ -349,7 +367,14 @@ function buildAuditArtifact(input = {}) {
       rate_limit_snapshot: reconciliationPlan.rate_limit_snapshot || null,
       state: reconciliationPlan.state || '',
     },
-    execution: executionOutcome,
+    execution: {
+      ...executionOutcome,
+      mutated_repositories: executionOutcome.mutated_repositories || [],
+      noop_repositories: executionOutcome.noop_repositories || [],
+      rejected_repositories: executionOutcome.rejected_repositories || [],
+      failed_repositories: executionOutcome.failed_repositories || [],
+      removed_count: executionOutcome.removed_count ?? executionOutcome.mutation_count ?? 0,
+    },
     metadata: {
       run_id: runContext.run_id || process.env.GITHUB_RUN_ID || null,
       run_attempt: runContext.run_attempt || process.env.GITHUB_RUN_ATTEMPT || null,

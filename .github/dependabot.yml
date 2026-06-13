@@ -2,6 +2,7 @@ version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
+    target-branch: 020-remove-team-repo-access
     schedule:
       interval: weekly
       day: monday
@@ -14,7 +15,7 @@ updates:
       - github-actions
   - package-ecosystem: npm
     directory: /
-    target-branch: 013-setup-feature-branch
+    target-branch: 020-remove-team-repo-access
     schedule:
       interval: weekly
       day: monday

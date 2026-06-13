@@ -244,6 +244,22 @@ function createGitHubTeamRepoApi(options = {}) {
       };
     },
 
+    async removeTeamRepositoryPermission({ organization, teamSlug, owner, repo }) {
+      const result = await request(`/orgs/${organization}/teams/${teamSlug}/repos/${owner}/${repo}`, {
+        method: 'DELETE',
+      });
+
+      if (!result.ok && result.status !== 404) {
+        throw Object.assign(new Error('Failed to remove team repository permission'), result, {
+          retry_after: getHeader(result.headers, 'retry-after'),
+        });
+      }
+
+      return {
+        repository_full_name: `${owner}/${repo}`.toLowerCase(),
+      };
+    },
+
     async addIssueLabels({ repository, issueNumber, labels }) {
       const [owner, repo] = String(repository || '').split('/');
       const result = await request(`/repos/${owner}/${repo}/issues/${issueNumber}/labels`, {
