@@ -50,6 +50,7 @@ test('tenant repo validation resolves canonical tenant context from registry and
       organization: 'octo-org',
       tenant_name: 'Tenant A',
       repository_name: 'acme-platform-service',
+      primary_contact: 'octocat',
       designated_approver: 'org-owner-user',
       dry_run: 'true',
       justification: 'Test request',
@@ -479,5 +480,158 @@ test('tenant repo approval gate accepts designated active owner and binds approv
   assert.equal(decision.approver_role, 'target_org_owner');
   assert.equal(decision.approved_context_marker, 'tenant-repo-context:new');
   assert.equal(decision.latest_context_marker, 'tenant-repo-context:new');
+});
+
+async function buildPrimaryContactValidationResult(primaryContact, secondaryContact) {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'issueops-tenant-repo-primary-contact-'));
+  const registryDir = path.join(tempRoot, 'tenant-registry');
+  fs.mkdirSync(registryDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(registryDir, 'tenant-a.json'),
+    JSON.stringify({
+      tenant_key: 'tenant-a',
+      tenant_display_name: 'Tenant A',
+      organization: 'octo-org',
+      tenant_team_name: 'TenantA_Tenant',
+      tenant_team_slug: 'tenanta-tenant',
+      repo_admin_team_name: 'TenantA_RepoAdmin',
+      repo_admin_team_slug: 'tenanta-repoadmin',
+    }, null, 2),
+    'utf8'
+  );
+
+  const parsedRequest = {
+    organization: 'octo-org',
+    tenant_name: 'Tenant A',
+    repository_name: 'acme-platform-service',
+    repository_visibility: 'private',
+    designated_approver: 'org-owner-user',
+    dry_run: 'true',
+    justification: 'Test request',
+  };
+
+  if (primaryContact !== undefined) {
+    parsedRequest.primary_contact = primaryContact;
+  }
+
+  if (secondaryContact !== undefined) {
+    parsedRequest.secondary_contact = secondaryContact;
+  }
+
+  return validateTenantRepoRequest({
+    parsedRequest,
+    issue: {
+      number: 90,
+      user: {
+        login: 'tenant-admin-user',
+      },
+    },
+    repository: 'owner/repo',
+  }, {
+    registryDirectory: registryDir,
+    registryRef: 'main',
+    getOrganization: async () => ({ exists: true }),
+    listTeams: async () => ([
+      { slug: 'tenanta-tenant', parent: null },
+      { slug: 'tenanta-repoadmin', parent: { slug: 'tenanta-tenant' } },
+    ]),
+    getMembershipForUser: async ({ teamSlug }) => {
+      if (teamSlug === 'tenanta-tenant') {
+        return { state: 'active', membership: { role: 'maintainer' } };
+      }
+      return { state: 'active', membership: { role: 'member' } };
+    },
+    getOrganizationMembership: async () => ({ exists: true, membership: { role: 'admin', state: 'active' } }),
+    getRepository: async () => ({ exists: false, repository: null }),
+  });
+}
+
+test('tenant repo validation rejects missing primary contact', async () => {
+  const result = await buildPrimaryContactValidationResult(undefined);
+
+  assert.equal(result.is_valid, false);
+  assert.equal(result.request_status, 'validation_failed');
+  assert.equal(result.primary_contact_validation.validation_status, 'missing');
+  assert.equal(result.primary_contact_validation.detected_type, 'absent');
+  assert.match(result.errors.join('\n'), /Primary contact is required\./i);
+});
+
+test('tenant repo validation accepts valid primary contact as GitHub handle or email', async () => {
+  const handleResult = await buildPrimaryContactValidationResult('octocat');
+  assert.equal(handleResult.is_valid, true);
+  assert.equal(handleResult.primary_contact_validation.validation_status, 'valid');
+  assert.equal(handleResult.primary_contact_validation.detected_type, 'handle');
+  assert.equal(handleResult.primary_contact_validation.normalized_value, 'octocat');
+
+  const emailResult = await buildPrimaryContactValidationResult('alice@example.com');
+  assert.equal(emailResult.is_valid, true);
+  assert.equal(emailResult.primary_contact_validation.validation_status, 'valid');
+  assert.equal(emailResult.primary_contact_validation.detected_type, 'email');
+  assert.equal(emailResult.primary_contact_validation.normalized_value, 'alice@example.com');
+});
+
+test('tenant repo validation normalizes @octocat and octocat to same canonical primary contact', async () => {
+  const withAt = await buildPrimaryContactValidationResult('@octocat');
+  const withoutAt = await buildPrimaryContactValidationResult('octocat');
+
+  assert.equal(withAt.is_valid, true);
+  assert.equal(withoutAt.is_valid, true);
+  assert.equal(withAt.primary_contact_validation.normalized_value, 'octocat');
+  assert.equal(withoutAt.primary_contact_validation.normalized_value, 'octocat');
+  assert.equal(withAt.primary_contact_validation.normalized_value, withoutAt.primary_contact_validation.normalized_value);
+});
+
+test('tenant repo validation accepts absent secondary contact with explicit absent validation status', async () => {
+  const result = await buildPrimaryContactValidationResult('octocat', undefined);
+
+  assert.equal(result.is_valid, true);
+  assert.equal(result.secondary_contact_validation.validation_status, 'absent');
+  assert.equal(result.secondary_contact_validation.detected_type, 'absent');
+  assert.equal(result.secondary_contact_validation.normalized_value, null);
+});
+
+test('tenant repo validation accepts valid secondary contact handle and email', async () => {
+  const handleResult = await buildPrimaryContactValidationResult('octocat', 'hubot');
+  assert.equal(handleResult.is_valid, true);
+  assert.equal(handleResult.secondary_contact_validation.validation_status, 'valid');
+  assert.equal(handleResult.secondary_contact_validation.detected_type, 'handle');
+  assert.equal(handleResult.secondary_contact_validation.normalized_value, 'hubot');
+
+  const emailResult = await buildPrimaryContactValidationResult('octocat', 'bob@example.com');
+  assert.equal(emailResult.is_valid, true);
+  assert.equal(emailResult.secondary_contact_validation.validation_status, 'valid');
+  assert.equal(emailResult.secondary_contact_validation.detected_type, 'email');
+  assert.equal(emailResult.secondary_contact_validation.normalized_value, 'bob@example.com');
+});
+
+test('tenant repo validation rejects fixture scenario with invalid primary contact format', async () => {
+  const fixturePath = path.join(__dirname, '..', 'fixtures', 'create-tenant-repos-with-contacts.json');
+  const fixture = JSON.parse(fs.readFileSync(fixturePath, 'utf8'));
+
+  const scenario = fixture.invalid_primary_freeform;
+  const result = await buildPrimaryContactValidationResult(scenario.parsedRequest.primary_contact);
+
+  assert.equal(result.is_valid, false);
+  assert.equal(result.request_status, 'validation_failed');
+  assert.equal(result.primary_contact_validation.validation_status, 'invalid_format');
+  assert.equal(result.primary_contact_validation.detected_type, 'invalid');
+  assert.match(result.errors.join('\n'), /Primary contact 'Not A Handle' is not a valid GitHub handle or email address\./i);
+});
+
+test('tenant repo validation rejects fixture scenario with invalid secondary contact format', async () => {
+  const fixturePath = path.join(__dirname, '..', 'fixtures', 'create-tenant-repos-with-contacts.json');
+  const fixture = JSON.parse(fs.readFileSync(fixturePath, 'utf8'));
+
+  const scenario = fixture.invalid_secondary_url;
+  const result = await buildPrimaryContactValidationResult(
+    scenario.parsedRequest.primary_contact,
+    scenario.parsedRequest.secondary_contact
+  );
+
+  assert.equal(result.is_valid, false);
+  assert.equal(result.request_status, 'validation_failed');
+  assert.equal(result.secondary_contact_validation.validation_status, 'invalid_format');
+  assert.equal(result.secondary_contact_validation.detected_type, 'invalid');
+  assert.match(result.errors.join('\n'), /Secondary contact 'https:\/\/example.com\/profile' is not a valid GitHub handle or email address\./i);
 });
 

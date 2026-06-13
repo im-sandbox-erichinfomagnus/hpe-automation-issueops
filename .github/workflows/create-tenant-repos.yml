@@ -18,6 +18,10 @@ on:
         description: Existing issue number to replay for validation or execution.
         required: true
         type: string
+      source-ref:
+        description: Branch or tag containing IssueOps automation code to execute (defaults to repository default branch).
+        required: false
+        type: string
 
 permissions:
   actions: read
@@ -38,7 +42,7 @@ jobs:
         shell: bash
     env:
       ISSUE_NUMBER: ${{ github.event.issue.number || inputs['issue-number'] || '' }}
-      TENANT_REGISTRY_REF: main
+      TENANT_REGISTRY_REF: ${{ inputs['source-ref'] || github.event.repository.default_branch || 'main' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -104,6 +108,8 @@ jobs:
           PARSED_TENANT_NAME: ${{ steps.parse_request.outputs.parsed_tenant_name }}
           PARSED_REPOSITORY_NAME: ${{ steps.parse_request.outputs.parsed_repository_name }}
           PARSED_REPOSITORY_VISIBILITY: ${{ steps.parse_request.outputs.parsed_repository_visibility }}
+          PARSED_PRIMARY_CONTACT: ${{ steps.parse_request.outputs.parsed_primary_contact }}
+          PARSED_SECONDARY_CONTACT: ${{ steps.parse_request.outputs.parsed_secondary_contact }}
           PARSED_DESIGNATED_APPROVER: ${{ steps.parse_request.outputs.parsed_designated_approver }}
           PARSED_DRY_RUN: ${{ steps.parse_request.outputs.parsed_dry_run }}
           PARSED_JUSTIFICATION: ${{ steps.parse_request.outputs.parsed_justification }}
@@ -179,11 +185,14 @@ jobs:
             echo "Approval status: ${{ steps.approval_gate.outputs['approval-status'] || 'unknown' }}"
             echo "Execution status: ${{ steps.approved_execution.outputs['execution-status'] || 'not_requested' }}"
             echo "Audit artifact path: ${{ steps.approved_execution.outputs['audit-artifact-path'] || steps.approval_gate.outputs['audit-artifact-path'] || steps.request_validation.outputs['audit-artifact-path'] || steps.request_validation.outputs.artifact_path || 'n/a' }}"
+            echo "Source ref used: ${{ env.TENANT_REGISTRY_REF }}"
             echo "Parsed organization: ${{ steps.parse_request.outputs.parsed_organization || '' }}"
             echo "Parsed tenant name: ${{ steps.parse_request.outputs.parsed_tenant_name || '' }}"
             echo "Parsed repository name: ${{ steps.parse_request.outputs.parsed_repository_name || '' }}"
             raw_visibility="${{ steps.parse_request.outputs.parsed_repository_visibility || 'private' }}"
             echo "Parsed repository visibility: ${raw_visibility//[\[\]]/}"
+            echo "Parsed primary contact: ${{ steps.parse_request.outputs.parsed_primary_contact || '' }}"
+            echo "Parsed secondary contact: ${{ steps.parse_request.outputs.parsed_secondary_contact || '' }}"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Approved execution note

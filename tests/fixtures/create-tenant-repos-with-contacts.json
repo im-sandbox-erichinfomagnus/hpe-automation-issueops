@@ -1,0 +1,165 @@
+{
+  "both_contacts_as_handles": {
+    "parsedRequest": {
+      "organization": "octo-org",
+      "tenant_name": "Tenant A",
+      "repository_name": "acme-platform-service",
+      "repository_visibility": "private",
+      "primary_contact": "octocat",
+      "secondary_contact": "hubot",
+      "designated_approver": "org-owner-user",
+      "dry_run": "true",
+      "justification": "Create tenant repository"
+    },
+    "issue": {
+      "number": 201,
+      "user": {
+        "login": "tenant-admin-user"
+      }
+    }
+  },
+  "primary_as_prefixed_handle": {
+    "parsedRequest": {
+      "organization": "octo-org",
+      "tenant_name": "Tenant A",
+      "repository_name": "acme-platform-service",
+      "repository_visibility": "private",
+      "primary_contact": "@octocat",
+      "designated_approver": "org-owner-user",
+      "dry_run": "true",
+      "justification": "Create tenant repository"
+    },
+    "issue": {
+      "number": 202,
+      "user": {
+        "login": "tenant-admin-user"
+      }
+    }
+  },
+  "primary_as_email": {
+    "parsedRequest": {
+      "organization": "octo-org",
+      "tenant_name": "Tenant A",
+      "repository_name": "acme-platform-service",
+      "repository_visibility": "private",
+      "primary_contact": "alice@example.com",
+      "designated_approver": "org-owner-user",
+      "dry_run": "true",
+      "justification": "Create tenant repository"
+    },
+    "issue": {
+      "number": 203,
+      "user": {
+        "login": "tenant-admin-user"
+      }
+    }
+  },
+  "missing_primary_contact": {
+    "parsedRequest": {
+      "organization": "octo-org",
+      "tenant_name": "Tenant A",
+      "repository_name": "acme-platform-service",
+      "repository_visibility": "private",
+      "designated_approver": "org-owner-user",
+      "dry_run": "true",
+      "justification": "Create tenant repository"
+    },
+    "issue": {
+      "number": 204,
+      "user": {
+        "login": "tenant-admin-user"
+      }
+    }
+  },
+  "both_contacts_as_emails": {
+    "parsedRequest": {
+      "organization": "octo-org",
+      "tenant_name": "Tenant A",
+      "repository_name": "acme-platform-service",
+      "repository_visibility": "private",
+      "primary_contact": "alice@example.com",
+      "secondary_contact": "bob@example.com",
+      "designated_approver": "org-owner-user",
+      "dry_run": "true",
+      "justification": "Create tenant repository"
+    },
+    "issue": {
+      "number": 205,
+      "user": {
+        "login": "tenant-admin-user"
+      }
+    }
+  },
+  "secondary_absent_with_valid_primary": {
+    "parsedRequest": {
+      "organization": "octo-org",
+      "tenant_name": "Tenant A",
+      "repository_name": "acme-platform-service",
+      "repository_visibility": "private",
+      "primary_contact": "octocat",
+      "designated_approver": "org-owner-user",
+      "dry_run": "true",
+      "justification": "Create tenant repository"
+    },
+    "issue": {
+      "number": 206,
+      "user": {
+        "login": "tenant-admin-user"
+      }
+    }
+  },
+  "pre_enhancement_no_contacts": {
+    "parsedRequest": {
+      "organization": "octo-org",
+      "tenant_name": "Tenant A",
+      "repository_name": "acme-platform-service",
+      "repository_visibility": "private",
+      "designated_approver": "org-owner-user",
+      "dry_run": "true",
+      "justification": "Create tenant repository"
+    },
+    "issue": {
+      "number": 207,
+      "user": {
+        "login": "tenant-admin-user"
+      }
+    }
+  },
+  "invalid_primary_freeform": {
+    "parsedRequest": {
+      "organization": "octo-org",
+      "tenant_name": "Tenant A",
+      "repository_name": "acme-platform-service",
+      "repository_visibility": "private",
+      "primary_contact": "Not A Handle",
+      "designated_approver": "org-owner-user",
+      "dry_run": "true",
+      "justification": "Create tenant repository"
+    },
+    "issue": {
+      "number": 208,
+      "user": {
+        "login": "tenant-admin-user"
+      }
+    }
+  },
+  "invalid_secondary_url": {
+    "parsedRequest": {
+      "organization": "octo-org",
+      "tenant_name": "Tenant A",
+      "repository_name": "acme-platform-service",
+      "repository_visibility": "private",
+      "primary_contact": "octocat",
+      "secondary_contact": "https://example.com/profile",
+      "designated_approver": "org-owner-user",
+      "dry_run": "true",
+      "justification": "Create tenant repository"
+    },
+    "issue": {
+      "number": 209,
+      "user": {
+        "login": "tenant-admin-user"
+      }
+    }
+  }
+}
