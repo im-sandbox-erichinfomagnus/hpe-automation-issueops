@@ -206,6 +206,100 @@ test('runApprovedExecution for create-tenant-model completes full tenant bootstr
   assert.match(result.execution.summary, /authenticated creator a team maintainer/i);
 });
 
+test('runApprovedExecution for create-tenant-model applies normalized tenant terminal status label', async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'create-tenant-model-label-'));
+  const artifactPath = path.join(workspace, 'audit.json');
+  const registryDirectory = path.join(workspace, 'tenant-registry');
+  fs.mkdirSync(registryDirectory, { recursive: true });
+
+  const state = {
+    nextTeamId: 1500,
+    teams: [],
+    memberships: [],
+  };
+
+  const appliedLabels = [];
+
+  await runRequestValidation({
+    env: {
+      GITHUB_REPOSITORY: 'im-sandbox-himanshu/issueops-speckit',
+      ISSUE_NUMBER: '211',
+      REQUESTER_LOGIN: 'himanshu-im',
+      PARSED_ORGANIZATION: 'im-sandbox-himanshu',
+      PARSED_TENANT_NAME: 'Northwind',
+      PARSED_DESIGNATED_APPROVER: 'himanshu-im',
+      PARSED_JUSTIFICATION: 'Bootstrap Northwind tenant',
+      PARSED_DRY_RUN: 'false',
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      AUDIT_ARTIFACT_PATH: artifactPath,
+      GITHUB_RUN_ID: '26559705799',
+      GITHUB_RUN_ATTEMPT: '1',
+    },
+    api: {
+      getOrganization: async () => ({ exists: true }),
+      getOrganizationMembership: async () => ({
+        exists: true,
+        membership: { role: 'admin', state: 'active' },
+      }),
+      listOrgTeams: async () => [],
+    },
+    setProcessExitCode: false,
+  });
+
+  await runApprovalGate({
+    env: {
+      AUDIT_ARTIFACT_PATH: artifactPath,
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      GITHUB_TOKEN: 'repo-token',
+    },
+    api: {
+      getAssignableOwners: async () => ['aeruvakalpanaa'],
+      addIssueAssignees: async () => ({ status: 'assigned' }),
+      listIssueComments: async () => [
+        {
+          id: 321,
+          body: 'approved',
+          created_at: '2026-05-28T12:00:00Z',
+          user: { login: 'himanshu-im' },
+        },
+      ],
+      getOrganizationMembership: async () => ({
+        exists: true,
+        membership: { role: 'admin', state: 'active' },
+      }),
+    },
+    setProcessExitCode: false,
+  });
+
+  await runApprovedExecution({
+    env: {
+      AUDIT_ARTIFACT_PATH: artifactPath,
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      GITHUB_RUN_ID: '26559705799',
+      GITHUB_RUN_ATTEMPT: '1',
+      TENANT_REGISTRY_DIR: registryDirectory,
+      TENANT_REGISTRY_PERSISTENCE_MODE: 'repo',
+      TENANT_REGISTRY_REQUIRE_DIRECTORY: 'true',
+    },
+    createApi: () => ({
+      ...buildExecutionApi(state),
+      addIssueLabels: async ({ labels }) => {
+        appliedLabels.push(...labels);
+      },
+    }),
+    tokenInfo: {
+      token: 'pat-token',
+      source: 'ISSUEOPS_GITHUB_TOKEN',
+      token_kind: 'pat',
+      is_pat_backed: true,
+      supports_team_hierarchy_mutation: true,
+    },
+    setProcessExitCode: false,
+  });
+
+  assert.ok(appliedLabels.includes('issueops:create-tenant:executed'));
+});
+
 test('runApprovedExecution for create-tenant-model rerun stays idempotent for converged tenant state', async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'create-tenant-model-rerun-'));
   const artifactPath = path.join(workspace, 'audit.json');
@@ -329,6 +423,8 @@ test('runApprovedExecution for create-tenant-model rerun stays idempotent for co
   assert.equal(state.teams.length, 2);
   assert.equal(state.memberships.length, 1);
   assert.equal(fs.readFileSync(registryPath, 'utf8'), registryAfterFirstRun);
+  assert.match(rerun.execution.summary, /Request is already satisfied\./i);
+  assert.match(rerun.execution.summary, /Additional approval comments do not trigger a new tenant bootstrap mutation run\./i);
   assert.match(rerun.execution.summary, /Processed 0 tenant_bootstrap\(ies\), 4 no-op tenant_bootstrap\(ies\)/i);
 });
 

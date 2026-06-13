@@ -222,7 +222,7 @@ function terminalStateLabelPrefix(operation) {
     team_repo_access: 'issueops:add-team-repo-access:',
     team_repo_access_removal: 'issueops:remove-team-repo-access:',
     tenant_repo_creation: 'issueops:create-tenant-repos:',
-    tenant_creation: 'issueops:create-tenant-model:',
+    tenant_creation: 'issueops:create-tenant:',
   };
   return operationPrefixes[operation] || 'issueops:add-team-members:';
 }
@@ -243,10 +243,17 @@ function readIssueLabelsFromEnv(env = process.env) {
 }
 
 function deriveTerminalStatusFromIssueLabels(labels = [], operation = null) {
-  const prefix = terminalStateLabelPrefix(operation);
+  const prefixes = [terminalStateLabelPrefix(operation)];
+  if (operation === 'tenant_creation') {
+    // Backward compatibility for existing labels written before prefix normalization.
+    prefixes.push('issueops:create-tenant-model:');
+  }
+
   for (const status of ['executed', 'partially_executed', 'failed_after_approved_execution', 'failed']) {
-    if (labels.includes(`${prefix}${status}`)) {
-      return status;
+    for (const prefix of prefixes) {
+      if (labels.includes(`${prefix}${status}`)) {
+        return status;
+      }
     }
   }
 
