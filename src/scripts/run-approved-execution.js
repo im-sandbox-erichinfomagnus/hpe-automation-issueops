@@ -198,6 +198,123 @@ function classifyFailureReason(error = {}) {
   return 'unknown_error';
 }
 
+async function ensureTenantRepoCustomPropertyDefinitions(options = {}) {
+  const api = options.api;
+  const organization = options.organization;
+  const properties = Array.isArray(options.properties) ? options.properties : [];
+  const executeWithRetry = options.executeWithRetry;
+  const maxRetries = options.maxRetries || 2;
+  const sleep = options.sleep;
+
+  if (!organization || properties.length === 0) {
+    return {
+      ok: true,
+      created: [],
+      failed: [],
+      rate_limit_snapshot: null,
+    };
+  }
+
+  if (
+    !api ||
+    typeof api.getOrganizationCustomPropertiesSchema !== 'function' ||
+    typeof api.createOrUpdateOrganizationCustomProperty !== 'function'
+  ) {
+    return {
+      ok: true,
+      created: [],
+      failed: [],
+      skipped: true,
+      rate_limit_snapshot: null,
+    };
+  }
+
+  const schemaResult = await executeWithRetry(
+    () => api.getOrganizationCustomPropertiesSchema({ organization }),
+    {
+      maxRetries,
+      sleep,
+    }
+  );
+
+  let latestRateLimitSnapshot = schemaResult.retry_plan.rate_limit_snapshot || null;
+
+  if (!schemaResult.ok) {
+    return {
+      ok: false,
+      created: [],
+      failed: [
+        {
+          property_name: null,
+          failure_reason: classifyFailureReason(schemaResult.error),
+          status_code: schemaResult.error && schemaResult.error.status ? schemaResult.error.status : null,
+          detail: schemaResult.error && schemaResult.error.payload && schemaResult.error.payload.message
+            ? schemaResult.error.payload.message
+            : schemaResult.error && schemaResult.error.message
+              ? schemaResult.error.message
+              : null,
+        },
+      ],
+      rate_limit_snapshot: latestRateLimitSnapshot,
+    };
+  }
+
+  const existingPropertyNames = new Set(
+    (schemaResult.value || [])
+      .map((entry) => String(entry && entry.property_name || '').trim().toLowerCase())
+      .filter(Boolean)
+  );
+  const missingPropertyNames = [...new Set(
+    properties
+      .map((entry) => String(entry && entry.property_name || '').trim())
+      .filter(Boolean)
+  )].filter((propertyName) => !existingPropertyNames.has(propertyName.toLowerCase()));
+
+  const created = [];
+  const failed = [];
+
+  for (const propertyName of missingPropertyNames) {
+    const upsertResult = await executeWithRetry(
+      () => api.createOrUpdateOrganizationCustomProperty({
+        organization,
+        property_name: propertyName,
+        value_type: 'string',
+        description: `Managed by IssueOps for tenant repository contact metadata: ${propertyName}`,
+        values_editable_by: 'org_actors',
+      }),
+      {
+        maxRetries,
+        sleep,
+      }
+    );
+
+    latestRateLimitSnapshot = upsertResult.retry_plan.rate_limit_snapshot || latestRateLimitSnapshot;
+
+    if (upsertResult.ok) {
+      created.push(propertyName);
+      continue;
+    }
+
+    failed.push({
+      property_name: propertyName,
+      failure_reason: classifyFailureReason(upsertResult.error),
+      status_code: upsertResult.error && upsertResult.error.status ? upsertResult.error.status : null,
+      detail: upsertResult.error && upsertResult.error.payload && upsertResult.error.payload.message
+        ? upsertResult.error.payload.message
+        : upsertResult.error && upsertResult.error.message
+          ? upsertResult.error.message
+          : null,
+    });
+  }
+
+  return {
+    ok: failed.length === 0,
+    created,
+    failed,
+    rate_limit_snapshot: latestRateLimitSnapshot,
+  };
+}
+
 function deriveRequestStatus(executionOutcome) {
   if (executionOutcome.failure_count === 0) {
     return 'executed';
@@ -753,20 +870,32 @@ async function runApprovedExecution(options = {}) {
       reconciliationPlan.actual_visibility = reconciliationPlan.existing_visibility || reconciliationPlan.requested_visibility || reconciliationPlan.actual_visibility;
       executionResults.push({
         repository_full_name: reconciliationPlan.repository_full_name,
+        result_kind: 'repository_creation',
         execution_result: 'noop',
         failure_reason: null,
       });
     } else if (reconciliationPlan.creation_action === 'reject') {
       executionResults.push({
         repository_full_name: reconciliationPlan.repository_full_name,
+        result_kind: 'repository_creation',
         execution_result: 'failed',
         failure_reason: reconciliationPlan.blocked_reason || 'boundary_revalidation_mismatch',
       });
     }
 
+    if (reconciliationPlan.custom_properties_action === 'noop') {
+      executionResults.push({
+        repository_full_name: reconciliationPlan.repository_full_name,
+        result_kind: 'custom_properties',
+        execution_result: 'noop',
+        failure_reason: null,
+      });
+    }
+
     if (reconciliationPlan.permission_action === 'noop') {
       executionResults.push({
-        team_slug: auditArtifact.request.repo_admin_team_slug || null,
+        repository_full_name: reconciliationPlan.repository_full_name,
+        result_kind: 'repo_admin_grant',
         execution_result: 'noop',
         failure_reason: null,
       });
@@ -910,6 +1039,7 @@ async function runApprovedExecution(options = {}) {
 
           executionResults.push({
             repository_full_name: reconciliationPlan.repository_full_name,
+            result_kind: 'repository_creation',
             execution_result: attemptResult.ok ? 'created' : 'failed',
             failure_reason: attemptResult.ok ? null : classifyFailureReason(attemptResult.error),
           });
@@ -917,6 +1047,7 @@ async function runApprovedExecution(options = {}) {
           reconciliationPlan.actual_visibility = reconciliationPlan.existing_visibility || reconciliationPlan.requested_visibility || reconciliationPlan.actual_visibility;
           executionResults.push({
             repository_full_name: reconciliationPlan.repository_full_name,
+            result_kind: 'repository_creation',
             execution_result: 'noop',
             failure_reason: null,
           });
@@ -924,6 +1055,7 @@ async function runApprovedExecution(options = {}) {
           reconciliationPlan.actual_visibility = reconciliationPlan.existing_visibility || reconciliationPlan.actual_visibility;
           executionResults.push({
             repository_full_name: reconciliationPlan.repository_full_name,
+            result_kind: 'repository_creation',
             execution_result: 'failed',
             failure_reason: reconciliationPlan.blocked_reason || 'creation_rejected',
           });
@@ -931,9 +1063,108 @@ async function runApprovedExecution(options = {}) {
 
         const creationFailed = executionResults.some((result) =>
           result.repository_full_name === reconciliationPlan.repository_full_name &&
+          result.result_kind === 'repository_creation' &&
           result.execution_result === 'failed' &&
           result.failure_reason !== 'permission_rejected'
         );
+
+        if (reconciliationPlan.custom_properties_action === 'set') {
+          if (creationFailed) {
+            console.log(`[tenant_repo_creation] Skipping repository custom properties because repository creation failed for ${reconciliationPlan.repository_full_name}.`);
+            executionResults.push({
+              repository_full_name: reconciliationPlan.repository_full_name,
+              result_kind: 'custom_properties',
+              execution_result: 'failed',
+              failure_reason: 'repository_creation_failed',
+            });
+          } else if (typeof api.setRepositoryCustomProperties !== 'function') {
+            console.log(`[tenant_repo_creation] Repository API adapter does not expose setRepositoryCustomProperties; recording noop for ${reconciliationPlan.repository_full_name}.`);
+            executionResults.push({
+              repository_full_name: reconciliationPlan.repository_full_name,
+              result_kind: 'custom_properties',
+              execution_result: 'noop',
+              failure_reason: null,
+            });
+          } else {
+            const schemaEnsureResult = await ensureTenantRepoCustomPropertyDefinitions({
+              api,
+              organization: repoOwner,
+              properties: reconciliationPlan.desired_repository_custom_properties || [],
+              executeWithRetry: executeWithBoundedRetry,
+              maxRetries: options.maxRetries || 2,
+              sleep: options.sleep,
+            });
+            latestRateLimitSnapshot = schemaEnsureResult.rate_limit_snapshot || latestRateLimitSnapshot;
+
+            if (!schemaEnsureResult.ok) {
+              const firstFailure = schemaEnsureResult.failed && schemaEnsureResult.failed.length > 0
+                ? schemaEnsureResult.failed[0]
+                : null;
+              executionResults.push({
+                repository_full_name: reconciliationPlan.repository_full_name,
+                result_kind: 'custom_properties',
+                execution_result: 'failed',
+                failure_reason: firstFailure && firstFailure.failure_reason ? firstFailure.failure_reason : 'custom_property_schema_failed',
+                status_code: firstFailure && firstFailure.status_code != null ? firstFailure.status_code : null,
+                detail: firstFailure && firstFailure.detail ? firstFailure.detail : 'Failed to ensure required organization custom property definitions.',
+              });
+            } else {
+              const desiredPropertyCount = Array.isArray(reconciliationPlan.desired_repository_custom_properties)
+                ? reconciliationPlan.desired_repository_custom_properties.length
+                : 0;
+              console.log(`[tenant_repo_creation] Applying ${desiredPropertyCount} repository custom properties to ${repoOwner}/${repoName}.`);
+              const attemptResult = await executeWithBoundedRetry(
+                () => api.setRepositoryCustomProperties({
+                  owner: repoOwner,
+                  repo: repoName,
+                  properties: reconciliationPlan.desired_repository_custom_properties || [],
+                }),
+                {
+                  maxRetries: options.maxRetries || 2,
+                  sleep: options.sleep,
+                }
+              );
+
+              latestRateLimitSnapshot = attemptResult.retry_plan.rate_limit_snapshot || latestRateLimitSnapshot;
+
+              if (attemptResult.ok) {
+                console.log(`[tenant_repo_creation] Repository custom properties updated for ${repoOwner}/${repoName}.`);
+              } else {
+                const statusCode = attemptResult.error && attemptResult.error.status ? attemptResult.error.status : 'unknown';
+                const message = attemptResult.error && attemptResult.error.payload && attemptResult.error.payload.message
+                  ? attemptResult.error.payload.message
+                  : attemptResult.error && attemptResult.error.message
+                    ? attemptResult.error.message
+                    : 'unknown error';
+                console.log(`[tenant_repo_creation] Repository custom properties update failed for ${repoOwner}/${repoName} (status=${statusCode}): ${message}`);
+              }
+
+              executionResults.push({
+                repository_full_name: reconciliationPlan.repository_full_name,
+                result_kind: 'custom_properties',
+                execution_result: attemptResult.ok ? 'mutated' : 'failed',
+                failure_reason: attemptResult.ok ? null : classifyFailureReason(attemptResult.error),
+                status_code: attemptResult.ok ? null : (attemptResult.error && attemptResult.error.status ? attemptResult.error.status : null),
+                detail: attemptResult.ok
+                  ? null
+                  : (
+                    attemptResult.error && attemptResult.error.payload && attemptResult.error.payload.message
+                      ? attemptResult.error.payload.message
+                      : attemptResult.error && attemptResult.error.message
+                        ? attemptResult.error.message
+                        : null
+                  ),
+              });
+            }
+          }
+        } else if (reconciliationPlan.custom_properties_action === 'reject') {
+          executionResults.push({
+            repository_full_name: reconciliationPlan.repository_full_name,
+            result_kind: 'custom_properties',
+            execution_result: 'failed',
+            failure_reason: reconciliationPlan.blocked_reason || 'custom_properties_rejected',
+          });
+        }
 
         if (!creationFailed && reconciliationPlan.permission_action === 'grant_admin') {
           let permissionPolicyAllowed = true;
@@ -950,6 +1181,7 @@ async function runApprovedExecution(options = {}) {
             permissionPolicyAllowed = false;
             executionResults.push({
               repository_full_name: reconciliationPlan.repository_full_name,
+              result_kind: 'repo_admin_grant',
               execution_result: 'failed',
               failure_reason: 'permission_policy_blocked',
               detail: error.message,
@@ -975,6 +1207,7 @@ async function runApprovedExecution(options = {}) {
 
             executionResults.push({
               repository_full_name: reconciliationPlan.repository_full_name,
+              result_kind: 'repo_admin_grant',
               execution_result: attemptResult.ok ? 'granted' : 'failed',
               failure_reason: attemptResult.ok ? null : classifyFailureReason(attemptResult.error),
             });
@@ -982,12 +1215,14 @@ async function runApprovedExecution(options = {}) {
         } else if (reconciliationPlan.permission_action === 'noop') {
           executionResults.push({
             repository_full_name: reconciliationPlan.repository_full_name,
+            result_kind: 'repo_admin_grant',
             execution_result: 'noop',
             failure_reason: null,
           });
         } else if (reconciliationPlan.permission_action === 'reject') {
           executionResults.push({
             repository_full_name: reconciliationPlan.repository_full_name,
+            result_kind: 'repo_admin_grant',
             execution_result: 'failed',
             failure_reason: reconciliationPlan.blocked_reason || 'permission_rejected',
           });
@@ -1540,13 +1775,22 @@ async function runApprovedExecution(options = {}) {
   const tenantRepoCreationExecutionResult = isTenantRepoCreation
     ? executionResults.find((result) =>
         result.repository_full_name === reconciliationPlan.repository_full_name &&
+        result.result_kind === 'repository_creation' &&
         (result.execution_result === 'created' || result.execution_result === 'failed' || result.execution_result === 'noop')
       )
     : null;
   const tenantRepoPermissionExecutionResult = isTenantRepoCreation
     ? [...executionResults].reverse().find((result) =>
         result.repository_full_name === reconciliationPlan.repository_full_name &&
+        result.result_kind === 'repo_admin_grant' &&
         (result.execution_result === 'granted' || result.execution_result === 'failed' || result.execution_result === 'noop')
+      )
+    : null;
+  const tenantRepoCustomPropertiesExecutionResult = isTenantRepoCreation
+    ? [...executionResults].reverse().find((result) =>
+        result.repository_full_name === reconciliationPlan.repository_full_name &&
+        result.result_kind === 'custom_properties' &&
+        (result.execution_result === 'mutated' || result.execution_result === 'failed' || result.execution_result === 'noop')
       )
     : null;
 
@@ -1588,7 +1832,30 @@ async function runApprovedExecution(options = {}) {
           ? 'failed'
           : 'noop'
       : null,
+    repository_custom_properties_result: isTenantRepoCreation
+      ? tenantRepoCustomPropertiesExecutionResult && tenantRepoCustomPropertiesExecutionResult.execution_result === 'mutated'
+        ? 'mutated'
+        : tenantRepoCustomPropertiesExecutionResult && tenantRepoCustomPropertiesExecutionResult.execution_result === 'failed'
+          ? 'failed'
+          : 'noop'
+      : null,
+    repository_custom_properties_failure_reason: isTenantRepoCreation && tenantRepoCustomPropertiesExecutionResult && tenantRepoCustomPropertiesExecutionResult.execution_result === 'failed'
+      ? tenantRepoCustomPropertiesExecutionResult.failure_reason || 'unknown_error'
+      : null,
+    repository_custom_properties_failure_status_code: isTenantRepoCreation && tenantRepoCustomPropertiesExecutionResult && tenantRepoCustomPropertiesExecutionResult.execution_result === 'failed'
+      ? tenantRepoCustomPropertiesExecutionResult.status_code || null
+      : null,
+    repository_custom_properties_failure_detail: isTenantRepoCreation && tenantRepoCustomPropertiesExecutionResult && tenantRepoCustomPropertiesExecutionResult.execution_result === 'failed'
+      ? tenantRepoCustomPropertiesExecutionResult.detail || null
+      : null,
     audit_persistence_result: isTenantRepoCreation ? 'pending' : null,
+    mutation_token_source: mutationDecision && mutationDecision.tokenInfo && mutationDecision.tokenInfo.source
+      ? mutationDecision.tokenInfo.source
+      : null,
+    mutation_token_kind: mutationDecision && mutationDecision.tokenInfo && mutationDecision.tokenInfo.token_kind
+      ? mutationDecision.tokenInfo.token_kind
+      : null,
+    mutation_token_is_pat_backed: Boolean(mutationDecision && mutationDecision.tokenInfo && mutationDecision.tokenInfo.is_pat_backed),
     artifact_path: artifactPath,
     rate_limit_snapshot: latestRateLimitSnapshot,
   });
