@@ -349,6 +349,61 @@ function deriveApprovedExecutionTerminalState(executionOutcome, options = {}) {
   return baseStatus;
 }
 
+function validateTenantBoundaryGuardrails(request = {}) {
+  const accessModel = request.topology && request.topology.accessModel || {};
+  const expectedRoles = ['tenant-admin', 'repo-admin', 'developer', 'viewer'];
+  const roles = Array.isArray(accessModel.roles) ? accessModel.roles : [];
+
+  const enforcementValid = accessModel.enforcement === 'tenant-boundary';
+  const rolesValid = roles.length === expectedRoles.length &&
+    expectedRoles.every((role, index) => roles[index] === role);
+
+  if (!enforcementValid || !rolesValid) {
+    return {
+      valid: false,
+      reason: 'tenant_boundary_policy_violation',
+      detail: 'Tenant-boundary pre-mutation guardrail failed: accessModel.enforcement and canonical role ordering must match policy.',
+    };
+  }
+
+  return {
+    valid: true,
+    reason: 'tenant_boundary_policy_passed',
+  };
+}
+
+function buildTenantOrganizationRolePlan(request = {}) {
+  const accessModel = request.topology && request.topology.accessModel || {};
+  const roleOrder = Array.isArray(accessModel.roles)
+    ? accessModel.roles
+    : ['tenant-admin', 'repo-admin', 'developer', 'viewer'];
+  const roleSpecifications = Array.isArray(accessModel.organizationRoleSpecifications)
+    ? accessModel.organizationRoleSpecifications
+    : [];
+
+  return roleOrder.map((roleKey) => {
+    const specification = roleSpecifications.find((entry) => entry && entry.role_key === roleKey) || {};
+    const fallbackRoleName = `${String(request.tenant_key || 'tenant').toLowerCase()}-${roleKey}`;
+    const fallbackBaseRole = roleKey === 'viewer'
+      ? 'read'
+      : roleKey === 'developer'
+        ? 'write'
+        : 'maintain';
+
+    return {
+      role_key: roleKey,
+      role_name: String(specification.role_name || fallbackRoleName).trim(),
+      permission_intent: specification.permission_intent || null,
+      repository_base_role: fallbackBaseRole,
+      repository_permissions: [],
+    };
+  });
+}
+
+function normalizeRoleMapKey(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
 function buildPreMutationFailureArtifact(options = {}) {
   const auditArtifact = options.auditArtifact;
   const artifactPath = options.artifactPath;
@@ -574,6 +629,43 @@ async function runApprovedExecution(options = {}) {
     writeGitHubOutput('execution-status', mutationDecision.reason, env.GITHUB_OUTPUT);
     emitAuditSummary(auditArtifact, { summaryPath: env.GITHUB_STEP_SUMMARY, overwrite: true });
     return auditArtifact;
+  }
+
+  if (isTenantCreation) {
+    const tenantBoundaryGuard = validateTenantBoundaryGuardrails(auditArtifact.request || {});
+    if (!tenantBoundaryGuard.valid) {
+      auditArtifact.request.request_status = 'failed';
+      auditArtifact.execution = buildExecutionOutcome({
+        executionResults: [],
+        operationLabel: 'tenant_bootstrap',
+        runContext: {
+          run_id: env.GITHUB_RUN_ID,
+          run_attempt: env.GITHUB_RUN_ATTEMPT,
+        },
+        intake_mode: auditArtifact.request && auditArtifact.request.intake_mode,
+        duplicate_row_count: 0,
+        invalid_row_count: 0,
+      });
+      auditArtifact.execution.failure_count = 1;
+      auditArtifact.execution.rollback_status = 'manual_follow_up_required';
+      auditArtifact.execution.summary = `${tenantBoundaryGuard.detail} No tenant bootstrap mutation was attempted.`;
+
+      fs.writeFileSync(artifactPath, toAuditArtifactJson({
+        request: auditArtifact.request,
+        validation: auditArtifact.validation,
+        assignment: auditArtifact.assignment,
+        approval: auditArtifact.approval,
+        reconciliationPlan: auditArtifact.reconciliation,
+        executionOutcome: auditArtifact.execution,
+        runContext: auditArtifact.metadata,
+      }), 'utf8');
+      writeGitHubOutput('execution-status', 'failed', env.GITHUB_OUTPUT);
+      emitAuditSummary(auditArtifact, { summaryPath: env.GITHUB_STEP_SUMMARY, overwrite: true });
+      if (shouldSetExitCode) {
+        process.exitCode = 1;
+      }
+      return auditArtifact;
+    }
   }
 
   const api = options.createApi
@@ -1186,10 +1278,165 @@ async function runApprovedExecution(options = {}) {
         latestRateLimitSnapshot = refreshedTeamsResult.retry_plan.rate_limit_snapshot || latestRateLimitSnapshot;
         const refreshedTeams = refreshedTeamsResult.ok ? refreshedTeamsResult.value : currentTeams;
         const parentTeam = (refreshedTeams || []).find((team) => String(team.slug || '').toLowerCase() === String(auditArtifact.request.tenant_team_slug || '').toLowerCase());
-        const childTeam = (refreshedTeams || []).find((team) => String(team.slug || '').toLowerCase() === String(auditArtifact.request.repo_admin_team_slug || '').toLowerCase());
+        const requestedChildLinks = Array.isArray(auditArtifact.request.requested_child_links)
+          ? auditArtifact.request.requested_child_links
+          : [];
+        const desiredOrganizationRoles = buildTenantOrganizationRolePlan(auditArtifact.request || {});
+
+        reconciliationPlan.organization_roles_to_create = [];
+        reconciliationPlan.organization_roles_already_present = [];
+        reconciliationPlan.organization_roles_failed = [];
+        reconciliationPlan.organization_roles_skipped = [];
+
+        if (desiredOrganizationRoles.length > 0) {
+          const roleApiProviders = [];
+          if (typeof api.listOrganizationRoles === 'function') {
+            roleApiProviders.push({
+              kind: 'organization_role',
+              list: () => api.listOrganizationRoles({ organization: auditArtifact.request.organization }),
+              create: typeof api.createOrganizationRole === 'function'
+                ? (rolePlan) => api.createOrganizationRole({
+                  organization: auditArtifact.request.organization,
+                  name: rolePlan.role_name,
+                  description: rolePlan.permission_intent || undefined,
+                })
+                : null,
+            });
+          }
+          if (typeof api.listCustomRepositoryRoles === 'function') {
+            roleApiProviders.push({
+              kind: 'custom_repository_role',
+              list: () => api.listCustomRepositoryRoles({ organization: auditArtifact.request.organization }),
+              create: typeof api.createCustomRepositoryRole === 'function'
+                ? (rolePlan) => api.createCustomRepositoryRole({
+                  organization: auditArtifact.request.organization,
+                  name: rolePlan.role_name,
+                  description: rolePlan.permission_intent || undefined,
+                  base_role: rolePlan.repository_base_role,
+                  permissions: rolePlan.repository_permissions,
+                })
+                : null,
+            });
+          }
+
+          let selectedProvider = null;
+          let existingRoleByName = null;
+          let lastRoleApiError = null;
+          for (const provider of roleApiProviders) {
+            const existingRolesResult = await executeWithBoundedRetry(provider.list, {
+              maxRetries: options.maxRetries || 2,
+              sleep: options.sleep,
+            });
+
+            latestRateLimitSnapshot = existingRolesResult.retry_plan.rate_limit_snapshot || latestRateLimitSnapshot;
+
+            if (existingRolesResult.ok) {
+              selectedProvider = provider;
+              existingRoleByName = new Map(
+                (existingRolesResult.value || [])
+                  .filter((entry) => entry && entry.name)
+                  .map((entry) => [normalizeRoleMapKey(entry.name), entry])
+              );
+              break;
+            }
+
+            lastRoleApiError = existingRolesResult.error;
+          }
+
+          if (!selectedProvider) {
+            const failureReason = lastRoleApiError
+              ? classifyFailureReason(lastRoleApiError)
+              : 'api_unsupported';
+            const skipReason = lastRoleApiError
+              ? `organization_role_provisioning_skipped_${failureReason}`
+              : 'organization_role_api_unsupported';
+            for (const rolePlan of desiredOrganizationRoles) {
+              executionResults.push({
+                role_name: rolePlan.role_name,
+                requested_name: rolePlan.role_name,
+                execution_result: 'noop',
+                failure_reason: null,
+              });
+              reconciliationPlan.organization_roles_skipped.push({
+                ...rolePlan,
+                skip_reason: skipReason,
+              });
+            }
+          } else {
+            for (const rolePlan of desiredOrganizationRoles) {
+              const existingRole = existingRoleByName.get(normalizeRoleMapKey(rolePlan.role_name));
+              if (existingRole) {
+                executionResults.push({
+                  role_name: rolePlan.role_name,
+                  requested_name: rolePlan.role_name,
+                  execution_result: 'noop',
+                  failure_reason: null,
+                });
+                reconciliationPlan.organization_roles_already_present.push({
+                  ...rolePlan,
+                  role_id: existingRole.id || null,
+                  role_api_provider: selectedProvider.kind,
+                });
+                continue;
+              }
+
+              if (typeof selectedProvider.create !== 'function') {
+                reconciliationPlan.organization_roles_skipped.push({
+                  ...rolePlan,
+                  role_api_provider: selectedProvider.kind,
+                  skip_reason: 'organization_role_api_unsupported',
+                });
+                executionResults.push({
+                  role_name: rolePlan.role_name,
+                  requested_name: rolePlan.role_name,
+                  execution_result: 'noop',
+                  failure_reason: null,
+                });
+                continue;
+              }
+
+              const createRoleResult = await executeWithBoundedRetry(
+                () => selectedProvider.create(rolePlan),
+                {
+                  maxRetries: options.maxRetries || 2,
+                  sleep: options.sleep,
+                }
+              );
+
+              latestRateLimitSnapshot = createRoleResult.retry_plan.rate_limit_snapshot || latestRateLimitSnapshot;
+
+              if (createRoleResult.ok) {
+                executionResults.push({
+                  role_name: rolePlan.role_name,
+                  requested_name: rolePlan.role_name,
+                  execution_result: 'created',
+                  failure_reason: null,
+                });
+                reconciliationPlan.organization_roles_to_create.push({
+                  ...rolePlan,
+                  role_id: createRoleResult.value && createRoleResult.value.id || null,
+                  role_api_provider: selectedProvider.kind,
+                });
+                continue;
+              }
+
+              reconciliationPlan.organization_roles_skipped.push({
+                ...rolePlan,
+                role_api_provider: selectedProvider.kind,
+                skip_reason: `organization_role_provisioning_skipped_${classifyFailureReason(createRoleResult.error)}`,
+              });
+              executionResults.push({
+                role_name: rolePlan.role_name,
+                requested_name: rolePlan.role_name,
+                execution_result: 'noop',
+                failure_reason: null,
+              });
+            }
+          }
+        }
 
         try {
-          if (parentTeam && childTeam) {
+          if (parentTeam && requestedChildLinks.length > 0) {
             assertTenantBootstrapHierarchyAllowed({
               approval_status: auditArtifact.approval.approval_status,
               approver_login: auditArtifact.approval.approver_login,
@@ -1200,44 +1447,53 @@ async function runApprovedExecution(options = {}) {
               tokenInfo: mutationDecision.tokenInfo,
             });
 
-            const childParentSlug = childTeam.parent && childTeam.parent.slug
-              ? String(childTeam.parent.slug).toLowerCase()
-              : null;
-
-            if (!childParentSlug) {
-              const linkResult = await executeWithBoundedRetry(
-                () => api.updateTeamParent({
-                  organization: auditArtifact.request.organization,
-                  teamSlug: childTeam.slug,
-                  parentTeamId: parentTeam.id,
-                }),
-                {
-                  maxRetries: options.maxRetries || 2,
-                  sleep: options.sleep,
-                }
+            for (const childLink of requestedChildLinks) {
+              const childTeam = (refreshedTeams || []).find((team) =>
+                String(team.slug || '').toLowerCase() === String(childLink.child_team_slug || '').toLowerCase()
               );
+              if (!childTeam) {
+                continue;
+              }
 
-              latestRateLimitSnapshot = linkResult.retry_plan.rate_limit_snapshot || latestRateLimitSnapshot;
-              executionResults.push({
-                team_slug: childTeam.slug,
-                requested_name: childTeam.name,
-                execution_result: linkResult.ok ? 'linked' : 'failed',
-                failure_reason: linkResult.ok ? null : classifyFailureReason(linkResult.error),
-              });
-            } else if (childParentSlug === String(parentTeam.slug || '').toLowerCase()) {
-              executionResults.push({
-                team_slug: childTeam.slug,
-                requested_name: childTeam.name,
-                execution_result: 'noop',
-                failure_reason: null,
-              });
-            } else {
-              executionResults.push({
-                team_slug: childTeam.slug,
-                requested_name: childTeam.name,
-                execution_result: 'failed',
-                failure_reason: 'reparent_blocked',
-              });
+              const childParentSlug = childTeam.parent && childTeam.parent.slug
+                ? String(childTeam.parent.slug).toLowerCase()
+                : null;
+
+              if (!childParentSlug) {
+                const linkResult = await executeWithBoundedRetry(
+                  () => api.updateTeamParent({
+                    organization: auditArtifact.request.organization,
+                    teamSlug: childTeam.slug,
+                    parentTeamId: parentTeam.id,
+                  }),
+                  {
+                    maxRetries: options.maxRetries || 2,
+                    sleep: options.sleep,
+                  }
+                );
+
+                latestRateLimitSnapshot = linkResult.retry_plan.rate_limit_snapshot || latestRateLimitSnapshot;
+                executionResults.push({
+                  team_slug: childTeam.slug,
+                  requested_name: childTeam.name,
+                  execution_result: linkResult.ok ? 'linked' : 'failed',
+                  failure_reason: linkResult.ok ? null : classifyFailureReason(linkResult.error),
+                });
+              } else if (childParentSlug === String(parentTeam.slug || '').toLowerCase()) {
+                executionResults.push({
+                  team_slug: childTeam.slug,
+                  requested_name: childTeam.name,
+                  execution_result: 'noop',
+                  failure_reason: null,
+                });
+              } else {
+                executionResults.push({
+                  team_slug: childTeam.slug,
+                  requested_name: childTeam.name,
+                  execution_result: 'failed',
+                  failure_reason: 'reparent_blocked',
+                });
+              }
             }
 
             assertTenantBootstrapMembershipAllowed({
@@ -1312,6 +1568,10 @@ async function runApprovedExecution(options = {}) {
         });
 
         reconciliationPlan.registry_persistence_result = registryResult;
+        reconciliationPlan.compatibility_mode = reconciliationPlan.compatibility_mode || auditArtifact.request && auditArtifact.request.compatibility && auditArtifact.request.compatibility.mode || 'canonical';
+        reconciliationPlan.registry_migration_status = registryResult && registryResult.migration
+          ? registryResult.migration.status
+          : 'none';
         if (registryResult.status === 'blocked_missing_directory') {
           executionResults.push({
             execution_result: 'failed',

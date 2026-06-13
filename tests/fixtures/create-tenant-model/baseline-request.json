@@ -1,0 +1,20 @@
+{
+  "organization": "example-org",
+  "tenantName": "example-tenant",
+  "tenantType": "application",
+  "governance": {
+    "codeScanningEnabled": true,
+    "secretScanningEnabled": true,
+    "dependabotEnabled": true
+  },
+  "externalMappings": {
+    "cmdbId": "CMDB-0000",
+    "costCenter": "CC-0000",
+    "businessUnit": "platform-eng",
+    "environment": "nonprod"
+  },
+  "metadata": {
+    "primaryContact": "owner@example.com",
+    "secondaryContact": null
+  }
+}

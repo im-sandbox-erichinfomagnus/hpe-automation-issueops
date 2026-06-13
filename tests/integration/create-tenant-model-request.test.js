@@ -16,6 +16,16 @@ function buildTenantValidationEnv(artifactPath, overrides = {}) {
     REQUESTER_LOGIN: 'requester-user',
     PARSED_ORGANIZATION: 'octo-org',
     PARSED_TENANT_NAME: 'Acme Platform',
+    PARSED_TENANT_TYPE: 'application',
+    PARSED_PRIMARY_CONTACT: 'owner@example.com',
+    PARSED_SECONDARY_CONTACT: 'secondary@example.com',
+    PARSED_CMDB_ID: 'CMDB-001',
+    PARSED_COST_CENTER: 'CC-001',
+    PARSED_BUSINESS_UNIT: 'platform',
+    PARSED_ENVIRONMENT: 'nonprod',
+    PARSED_GOVERNANCE_CODE_SCANNING_ENABLED: 'true',
+    PARSED_GOVERNANCE_SECRET_SCANNING_ENABLED: 'true',
+    PARSED_GOVERNANCE_DEPENDABOT_ENABLED: 'true',
     PARSED_DESIGNATED_APPROVER: 'org-owner-user',
     PARSED_JUSTIFICATION: 'Bootstrap tenant',
     PARSED_DRY_RUN: 'false',
@@ -44,6 +54,16 @@ test('runRequestValidation for create-tenant-model dry-run emits reconciliation 
       REQUESTER_LOGIN: 'requester-user',
       PARSED_ORGANIZATION: 'octo-org',
       PARSED_TENANT_NAME: 'Acme Platform',
+      PARSED_TENANT_TYPE: 'application',
+      PARSED_PRIMARY_CONTACT: 'owner@example.com',
+      PARSED_SECONDARY_CONTACT: 'secondary@example.com',
+      PARSED_CMDB_ID: 'CMDB-001',
+      PARSED_COST_CENTER: 'CC-001',
+      PARSED_BUSINESS_UNIT: 'platform',
+      PARSED_ENVIRONMENT: 'nonprod',
+      PARSED_GOVERNANCE_CODE_SCANNING_ENABLED: 'true',
+      PARSED_GOVERNANCE_SECRET_SCANNING_ENABLED: 'true',
+      PARSED_GOVERNANCE_DEPENDABOT_ENABLED: 'true',
       PARSED_DESIGNATED_APPROVER: 'org-owner-user',
       PARSED_JUSTIFICATION: 'Bootstrap tenant',
       PARSED_DRY_RUN: 'true',
@@ -297,6 +317,44 @@ test('runRequestValidation fails closed for tenant creation when workflow token 
   assert.equal(result.validation.is_valid, false);
   assert.equal(result.validation.request_status, 'validation_failed');
   assert.match(result.validation.errors.join('\n'), /Workflow token secret is missing/i);
+});
+
+test('runRequestValidation keeps tenant model operation when parsed repository name is spillover markdown', async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'create-tenant-model-operation-spillover-'));
+  const artifactPath = path.join(workspace, 'audit.json');
+
+  const result = await runRequestValidation({
+    env: buildTenantValidationEnv(artifactPath, {
+      PARSED_REPOSITORY_NAME: '### Tenant type\nplatform',
+      PARSED_SECONDARY_CONTACT: '[himanshu.kumar@infomagnus.com](mailto:himanshu.kumar@infomagnus.com) (makme-tenant-type-platform-enable-code-scanning-true-enable-secret-scanning-true-enable-dependabot-t)',
+      PARSED_PRIMARY_CONTACT: '[himanshu.kumar@infomagnus.com](mailto:himanshu.kumar@infomagnus.com)',
+      PARSED_TENANT_NAME: 'Makme\n\n### Tenant type\nplatform',
+    }),
+    api: {
+      getOrganization: async () => ({ exists: true }),
+      getOrganizationMembership: async ({ username }) => {
+        if (username === 'org-owner-user') {
+          return {
+            exists: true,
+            membership: { role: 'admin', state: 'active' },
+          };
+        }
+
+        return {
+          exists: true,
+          membership: { role: 'member', state: 'active' },
+        };
+      },
+      listOrgTeams: async () => [],
+    },
+    setProcessExitCode: false,
+  });
+
+  assert.equal(result.auditArtifact.metadata.operation, 'tenant_creation');
+  assert.equal(result.auditArtifact.request.tenant_display_name, 'Makme');
+  assert.equal(result.auditArtifact.request.primary_contact, 'himanshu.kumar@infomagnus.com');
+  assert.equal(result.auditArtifact.request.secondary_contact, 'himanshu.kumar@infomagnus.com');
+  assert.equal(result.validation.is_valid, true);
 });
 
 test('runRequestValidation fails closed for tenant creation when token lacks org-read capability', async () => {

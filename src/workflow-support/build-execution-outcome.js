@@ -25,6 +25,7 @@ function summarizeResults(results, options = {}) {
   const operationLabel = options.operationLabel || 'entity';
   const summary = {
     mutated: [],
+    removed: [],
     noop: [],
     rejected: [],
     pending: [],
@@ -35,6 +36,9 @@ function summarizeResults(results, options = {}) {
   for (const result of results.map(normalizeExecutionResult)) {
     if (['added', 'created', 'mutated', 'linked', 'removed'].includes(result.result)) {
       summary.mutated.push(result);
+      if (result.result === 'removed') {
+        summary.removed.push(result);
+      }
     } else if (result.result === 'granted') {
       summary.mutated.push(result);
     } else if (result.result === 'noop') {

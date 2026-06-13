@@ -77,6 +77,24 @@ function mapTeamState(team) {
   };
 }
 
+function mapOrganizationRoleState(role) {
+  return {
+    id: role.id || null,
+    name: String(role.name || '').trim(),
+    description: role.description || null,
+  };
+}
+
+function mapCustomRepositoryRoleState(role) {
+  return {
+    id: role.id || null,
+    name: String(role.name || '').trim(),
+    description: role.description || null,
+    base_role: role.base_role || null,
+    permissions: Array.isArray(role.permissions) ? role.permissions : [],
+  };
+}
+
 function createGitHubTeamApi(options = {}) {
   const token = options.token;
   const fetchImpl = options.fetchImpl || getGlobalFetch();
@@ -330,6 +348,97 @@ function createGitHubTeamApi(options = {}) {
       }
 
       return mapTeamState(result.payload || {});
+    },
+
+    async listOrganizationRoles({ organization }) {
+      const result = await request(`/orgs/${organization}/organization-roles?per_page=100`);
+      if (!result.ok) {
+        throw Object.assign(new Error('Failed to list organization roles'), result);
+      }
+      return (result.payload || []).map(mapOrganizationRoleState);
+    },
+
+    async createOrganizationRole({ organization, name, description = null, permissions = null }) {
+      const body = {
+        name,
+      };
+
+      if (description != null && String(description).trim() !== '') {
+        body.description = description;
+      }
+
+      if (Array.isArray(permissions) && permissions.length > 0) {
+        body.permissions = permissions;
+      }
+
+      const result = await request(`/orgs/${organization}/organization-roles`, {
+        method: 'POST',
+        body,
+      });
+
+      if (!result.ok) {
+        throw Object.assign(new Error('Failed to create organization role'), result, {
+          retry_after: getHeader(result.headers, 'retry-after'),
+        });
+      }
+
+      return mapOrganizationRoleState(result.payload || {});
+    },
+
+    async assignTeamOrganizationRole({ organization, teamSlug, roleId }) {
+      const result = await request(`/orgs/${organization}/organization-roles/teams/${teamSlug}/${roleId}`, {
+        method: 'PUT',
+      });
+
+      if (!result.ok) {
+        throw Object.assign(new Error('Failed to assign organization role to team'), result, {
+          retry_after: getHeader(result.headers, 'retry-after'),
+        });
+      }
+
+      return {
+        team_slug: String(teamSlug || '').toLowerCase(),
+        role_id: roleId,
+      };
+    },
+
+    async listCustomRepositoryRoles({ organization }) {
+      const result = await request(`/orgs/${organization}/custom-repository-roles?per_page=100`);
+      if (!result.ok) {
+        throw Object.assign(new Error('Failed to list custom repository roles'), result);
+      }
+
+      const roles = result.payload && Array.isArray(result.payload.custom_roles)
+        ? result.payload.custom_roles
+        : Array.isArray(result.payload)
+          ? result.payload
+          : [];
+      return roles.map(mapCustomRepositoryRoleState);
+    },
+
+    async createCustomRepositoryRole({ organization, name, description = null, base_role = 'read', permissions = [] }) {
+      const body = {
+        name,
+        base_role,
+        permissions: Array.isArray(permissions) ? permissions : [],
+      };
+
+      if (description != null && String(description).trim() !== '') {
+        body.description = description;
+      }
+
+      const result = await request(`/orgs/${organization}/custom-repository-roles`, {
+        method: 'POST',
+        body,
+      });
+
+      if (!result.ok) {
+        throw Object.assign(new Error('Failed to create custom repository role'), result, {
+          retry_after: getHeader(result.headers, 'retry-after'),
+        });
+      }
+
+      return mapCustomRepositoryRoleState(result.payload || {});
     },
   };
 }

@@ -2,6 +2,44 @@
 
 const { parseTenantCreationRequest } = require('./parse-tenant-creation-request');
 
+function isValidEmail(value) {
+  if (!value) {
+    return false;
+  }
+
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value).trim());
+}
+
+function validateCanonicalTopology(topology = {}, tenantKey = '') {
+  const findings = [];
+
+  const expectedRootSlug = `${tenantKey}-root`;
+  const expectedAdminSlug = `${tenantKey}-admin`;
+  const expectedRepoAdminSlug = `${tenantKey}-repo-admin`;
+
+  const structure = topology.teams && Array.isArray(topology.teams.structure)
+    ? topology.teams.structure
+    : [];
+
+  const rootNode = structure.find((entry) => entry && entry.type === 'root');
+  const adminNode = structure.find((entry) => entry && entry.type === 'admin');
+  const repoAdminNode = structure.find((entry) => entry && entry.type === 'repo-admin');
+
+  if (!rootNode || rootNode.team !== expectedRootSlug || rootNode.parent != null) {
+    findings.push('Canonical topology root node is invalid.');
+  }
+
+  if (!adminNode || adminNode.team !== expectedAdminSlug || adminNode.parent !== expectedRootSlug) {
+    findings.push('Canonical topology admin node is invalid.');
+  }
+
+  if (!repoAdminNode || repoAdminNode.team !== expectedRepoAdminSlug || repoAdminNode.parent !== expectedRootSlug) {
+    findings.push('Canonical topology repo-admin node is invalid.');
+  }
+
+  return findings;
+}
+
 function isSafeTenantKey(value) {
   return /^[a-z0-9][a-z0-9_-]*$/.test(String(value || ''));
 }
@@ -31,6 +69,69 @@ async function validateTenantCreationRequest(input = {}, options = {}) {
     errors.push('A designated approver is required.');
   }
 
+  const allowedTenantTypes = ['application', 'platform', 'shared-services'];
+  if (!allowedTenantTypes.includes(String(request.tenant_type || '').toLowerCase())) {
+    errors.push('tenant_type must be one of application, platform, shared-services.');
+  }
+
+  const environment = request.external_mappings && request.external_mappings.environment;
+  if (!['prod', 'nonprod'].includes(String(environment || '').toLowerCase())) {
+    errors.push('environment must be one of prod, nonprod.');
+  }
+
+  const governance = request.governance || {};
+  const governanceValues = [
+    governance.code_scanning && governance.code_scanning.enabled,
+    governance.secret_scanning && governance.secret_scanning.enabled,
+    governance.dependabot && governance.dependabot.enabled,
+  ];
+  if (governanceValues.some((entry) => typeof entry !== 'boolean')) {
+    errors.push('governance enabled values must parse to booleans.');
+  }
+
+  const governanceMandatorySatisfied = Boolean(
+    governance.code_scanning && governance.code_scanning.mandatory === true &&
+    governance.secret_scanning && governance.secret_scanning.mandatory === true
+  );
+  if (!governanceMandatorySatisfied) {
+    errors.push('code_scanning.mandatory and secret_scanning.mandatory must remain true.');
+  }
+
+  const accessModel = request.topology && request.topology.accessModel || {};
+  const expectedRoles = ['tenant-admin', 'repo-admin', 'developer', 'viewer'];
+  const roles = Array.isArray(accessModel.roles) ? accessModel.roles : [];
+  const organizationRoleSpecifications = Array.isArray(accessModel.organizationRoleSpecifications)
+    ? accessModel.organizationRoleSpecifications
+    : [];
+  const accessModelValid = accessModel.enforcement === 'tenant-boundary' &&
+    roles.length === expectedRoles.length &&
+    expectedRoles.every((role, index) => roles[index] === role);
+  if (!accessModelValid) {
+    errors.push('topology.accessModel must enforce tenant-boundary with canonical role ordering.');
+  }
+
+  const organizationRoleSpecsValid = expectedRoles.every((roleKey) =>
+    organizationRoleSpecifications.some((entry) =>
+      entry &&
+      entry.role_key === roleKey &&
+      typeof entry.role_name === 'string' &&
+      String(entry.role_name).trim() !== '' &&
+      typeof entry.permission_intent === 'string' &&
+      String(entry.permission_intent).trim() !== ''
+    )
+  );
+  if (!organizationRoleSpecsValid) {
+    errors.push('topology.accessModel.organizationRoleSpecifications must define canonical role-name and permission-intent mappings.');
+  }
+
+  if (!isValidEmail(request.primary_contact)) {
+    errors.push('primary_contact is required and must match email format.');
+  }
+
+  if (request.secondary_contact && !isValidEmail(request.secondary_contact)) {
+    errors.push('secondary_contact is optional and must match email format when provided.');
+  }
+
   if (!request.tenant_team_slug || !request.repo_admin_team_slug) {
     errors.push('Derived tenant team slugs are required.');
   }
@@ -38,6 +139,9 @@ async function validateTenantCreationRequest(input = {}, options = {}) {
   if (request.tenant_team_slug && request.repo_admin_team_slug && request.tenant_team_slug === request.repo_admin_team_slug) {
     errors.push('Derived tenant team slugs conflict and must be unique.');
   }
+
+  const topologyErrors = validateCanonicalTopology(request.topology || {}, request.tenant_key || '');
+  errors.push(...topologyErrors);
 
   let organizationVisible = false;
   if (request.organization && typeof options.getOrganization === 'function') {
@@ -123,9 +227,7 @@ async function validateTenantCreationRequest(input = {}, options = {}) {
   });
 
   const tenantParentSlug = String(request.tenant_team_slug || request.parent_team_slug || '').toLowerCase();
-  const repoAdminSlug = String(request.repo_admin_team_slug || '').toLowerCase();
   const existingParent = existingBySlug.get(tenantParentSlug) || null;
-  const existingChild = existingBySlug.get(repoAdminSlug) || null;
 
   let requestedChildLinks = (request.requested_child_links || []).map((link) => ({
     ...link,
@@ -134,31 +236,40 @@ async function validateTenantCreationRequest(input = {}, options = {}) {
     failure_reason: null,
   }));
 
-  if (existingChild && existingChild.parent && existingChild.parent.slug) {
-    const existingChildParentSlug = String(existingChild.parent.slug).toLowerCase();
-    if (existingChildParentSlug !== tenantParentSlug) {
-      errors.push('Derived repo-admin team is already linked under a different parent and re-parenting is blocked in this version.');
-      requestedChildLinks = requestedChildLinks.map((link) => ({
+  requestedChildLinks = requestedChildLinks.map((link) => {
+    const childSlug = String(link.child_team_slug || '').toLowerCase();
+    const existingChild = existingBySlug.get(childSlug) || null;
+
+    if (!existingParent || !existingChild) {
+      return {
         ...link,
-        desired_action: 'reject',
-        validation_status: 'reparent_blocked',
-        failure_reason: 'reparent_blocked',
-        current_parent_slug: existingChildParentSlug,
-      }));
-    } else {
-      requestedChildLinks = requestedChildLinks.map((link) => ({
+        desired_action: 'pending_teams',
+        validation_status: 'pending_teams',
+      };
+    }
+
+    if (existingChild.parent && existingChild.parent.slug) {
+      const existingChildParentSlug = String(existingChild.parent.slug).toLowerCase();
+      if (existingChildParentSlug !== tenantParentSlug) {
+        errors.push(`Derived team ${childSlug} is already linked under a different parent and re-parenting is blocked in this version.`);
+        return {
+          ...link,
+          desired_action: 'reject',
+          validation_status: 'reparent_blocked',
+          failure_reason: 'reparent_blocked',
+          current_parent_slug: existingChildParentSlug,
+        };
+      }
+
+      return {
         ...link,
         desired_action: 'noop',
         validation_status: 'already_linked',
-      }));
+      };
     }
-  } else if (!existingParent || !existingChild) {
-    requestedChildLinks = requestedChildLinks.map((link) => ({
-      ...link,
-      desired_action: 'pending_teams',
-      validation_status: 'pending_teams',
-    }));
-  }
+
+    return link;
+  });
 
   if (request.dry_run) {
     warnings.push('Dry-run is enabled; validation emits reconciliation intent and no mutation is attempted.');
@@ -180,6 +291,18 @@ async function validateTenantCreationRequest(input = {}, options = {}) {
     parent_team_exists: Boolean(existingBySlug.get(String(request.parent_team_slug || '').toLowerCase())),
     validation_findings: {
       tenant_key_safety: request.tenant_key && isSafeTenantKey(request.tenant_key) ? 'safe' : 'unsafe_or_missing',
+      tenant_type_validation: allowedTenantTypes.includes(String(request.tenant_type || '').toLowerCase()) ? 'valid' : 'invalid',
+      environment_validation: ['prod', 'nonprod'].includes(String(environment || '').toLowerCase()) ? 'valid' : 'invalid',
+      governance_boolean_validation: governanceValues.every((entry) => typeof entry === 'boolean') ? 'valid' : 'invalid',
+      governance_mandatory_validation: governanceMandatorySatisfied ? 'valid' : 'invalid',
+      access_model_validation: accessModelValid ? 'valid' : 'invalid',
+      organization_role_spec_validation: organizationRoleSpecsValid ? 'valid' : 'invalid',
+      primary_contact_validation: isValidEmail(request.primary_contact) ? 'valid' : 'invalid',
+      secondary_contact_validation: request.secondary_contact
+        ? (isValidEmail(request.secondary_contact) ? 'valid' : 'invalid')
+        : 'absent',
+      topology_draft_validation: topologyErrors.length === 0 ? 'valid' : 'invalid',
+      compatibility_mode: request.compatibility && request.compatibility.mode ? request.compatibility.mode : 'canonical',
       hierarchy_precondition: requestedChildLinks.some((entry) => entry.validation_status === 'reparent_blocked')
         ? 'reparent_blocked'
         : 'satisfied_or_pending',
