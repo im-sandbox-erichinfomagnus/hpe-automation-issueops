@@ -4,6 +4,7 @@ function normalizeExecutionResult(result) {
   const entityId = result.repository_full_name || result.username || result.normalized_slug || result.team_slug || result.requested_name;
   return {
     entity_id: entityId,
+    result_kind: result.result_kind || null,
     requested_name: result.requested_name || null,
     normalized_slug: result.normalized_slug || null,
     team_slug: result.team_slug || null,
@@ -15,6 +16,8 @@ function normalizeExecutionResult(result) {
     current_team_id: result.current_team_id || null,
     result: result.result || result.execution_result || 'not_started',
     failure_reason: result.failure_reason || null,
+    detail: result.detail || null,
+    status_code: result.status_code || null,
   };
 }
 
@@ -143,12 +146,17 @@ function buildExecutionOutcome(input = {}) {
   const rollbackStatus = deriveRollbackStatus(summary);
   const ownedTopologyAction = deriveOwnedTopologyAction(input);
   const contextBindingStatus = deriveContextBindingStatus(input);
+  const isTenantRepositoryOperation = summary.operation_label === 'tenant_repository';
   const processedLabel = summary.operation_label === 'membership'
     ? 'member(s)'
-    : `${summary.operation_label}(ies)`;
+    : isTenantRepositoryOperation
+      ? 'tenant repository action(s)'
+      : `${summary.operation_label}(ies)`;
   const groupedLabel = summary.operation_label === 'membership'
     ? 'membership(s)'
-    : `${summary.operation_label}(ies)`;
+    : isTenantRepositoryOperation
+      ? 'tenant repository action(s)'
+      : `${summary.operation_label}(ies)`;
   const terminalState = input.terminal_state || 'not_started';
   const waitingSummary = terminalState === 'waiting_for_attachment'
     ? 'Request metadata is valid, but execution remains blocked until the requester posts a qualifying CSV attachment comment.'
@@ -195,8 +203,15 @@ function buildExecutionOutcome(input = {}) {
     cicd_topology_update_outcome: input.cicd_topology_update_outcome || input.cicdTopologyUpdateOutcome || null,
     repository_creation_result: input.repository_creation_result || null,
     repo_admin_grant_result: input.repo_admin_grant_result || null,
+    repository_custom_properties_result: input.repository_custom_properties_result || null,
+    repository_custom_properties_failure_reason: input.repository_custom_properties_failure_reason || null,
+    repository_custom_properties_failure_status_code: input.repository_custom_properties_failure_status_code || null,
+    repository_custom_properties_failure_detail: input.repository_custom_properties_failure_detail || null,
     audit_persistence_result: input.audit_persistence_result || null,
     topology_persistence_result: input.topology_persistence_result || input.topologyPersistenceResult || null,
+    mutation_token_source: input.mutation_token_source || null,
+    mutation_token_kind: input.mutation_token_kind || null,
+    mutation_token_is_pat_backed: input.mutation_token_is_pat_backed === true,
     failed_subset: summary.failed,
     rejected_subset: summary.rejected,
     mutated_repositories: summary.mutated.map((entry) => entry.repository_full_name).filter(Boolean),
