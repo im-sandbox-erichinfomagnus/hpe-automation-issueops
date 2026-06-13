@@ -118,6 +118,7 @@ function deriveTenantTeams(tenantDisplayName) {
   const rootTeamName = `${normalizedTenant}-root`;
   const adminTeamName = `${normalizedTenant}-admin`;
   const repoAdminsTeamName = `${normalizedTenant}-repo-admin`;
+  const cicdAdminTeamName = `${normalizedTenant}-cicd-admin`;
 
   return {
     tenant_team_name: rootTeamName,
@@ -126,6 +127,8 @@ function deriveTenantTeams(tenantDisplayName) {
     admin_team_slug: normalizeSlug(adminTeamName),
     repo_admin_team_name: repoAdminsTeamName,
     repo_admin_team_slug: normalizeSlug(repoAdminsTeamName),
+    cicd_admin_team_name: cicdAdminTeamName,
+    cicd_admin_team_slug: normalizeSlug(cicdAdminTeamName),
   };
 }
 
@@ -161,6 +164,7 @@ function deriveCanonicalTopologyDraft(tenantDisplayName, organization) {
   const rootSlug = `${normalizedTenant}-root`;
   const adminSlug = `${normalizedTenant}-admin`;
   const repoAdminSlug = `${normalizedTenant}-repo-admin`;
+  const cicdAdminSlug = `${normalizedTenant}-cicd-admin`;
 
   return {
     organization: {
@@ -183,6 +187,11 @@ function deriveCanonicalTopologyDraft(tenantDisplayName, organization) {
           team: repoAdminSlug,
           parent: rootSlug,
           type: 'repo-admin',
+        },
+        {
+          team: cicdAdminSlug,
+          parent: rootSlug,
+          type: 'cicd-admin',
         },
       ],
     },
@@ -232,6 +241,46 @@ function buildRequestId(repository, issueNumber, runId, runAttempt) {
   const runPart = runId != null ? String(runId) : 'local';
   const attemptPart = runAttempt != null ? String(runAttempt) : '1';
   return `${repository || 'unknown-repo'}#${issuePart}/${runPart}.${attemptPart}`;
+}
+
+function parseCicdCapabilityIntent(parsed = {}, input = {}) {
+  return {
+    requested: normalizeBoolean(
+      readField(parsed, ['cicd_capability_requested', 'parsed_cicd_capability_requested']) || input.cicd_capability_requested,
+      true
+    ),
+    primary_path_available: normalizeBoolean(
+      readField(parsed, ['cicd_primary_path_available', 'parsed_cicd_primary_path_available']) || input.cicd_primary_path_available,
+      true
+    ),
+    primary_policy_approved: normalizeBoolean(
+      readField(parsed, ['cicd_primary_policy_approved', 'parsed_cicd_primary_policy_approved']) || input.cicd_primary_policy_approved,
+      true
+    ),
+    fallback_path_available: normalizeBoolean(
+      readField(parsed, ['cicd_fallback_path_available', 'parsed_cicd_fallback_path_available']) || input.cicd_fallback_path_available,
+      true
+    ),
+    fallback_policy_approved: normalizeBoolean(
+      readField(parsed, ['cicd_fallback_policy_approved', 'parsed_cicd_fallback_policy_approved']) || input.cicd_fallback_policy_approved,
+      true
+    ),
+    tenant_scope_resolvable: normalizeBoolean(
+      readField(parsed, ['cicd_tenant_scope_resolvable', 'parsed_cicd_tenant_scope_resolvable']) || input.cicd_tenant_scope_resolvable,
+      true
+    ),
+    requested_scope: normalizeText(
+      readField(parsed, ['cicd_requested_scope', 'parsed_cicd_requested_scope']) || input.cicd_requested_scope || 'tenant'
+    ).toLowerCase(),
+    requires_broad_org_scope: normalizeBoolean(
+      readField(parsed, ['cicd_requires_broad_org_scope', 'parsed_cicd_requires_broad_org_scope']) || input.cicd_requires_broad_org_scope,
+      false
+    ),
+    requires_org_owner_grant: normalizeBoolean(
+      readField(parsed, ['cicd_requires_org_owner_grant', 'parsed_cicd_requires_org_owner_grant']) || input.cicd_requires_org_owner_grant,
+      false
+    ),
+  };
 }
 
 function parseTenantCreationRequest(input = {}) {
@@ -308,6 +357,7 @@ function parseTenantCreationRequest(input = {}) {
   const tenantKey = normalizeSlug(tenantDisplayName);
   const derivedTeams = deriveTenantTeams(tenantDisplayName);
   const topologyDraft = deriveCanonicalTopologyDraft(tenantDisplayName, organization);
+  const cicdCapabilityIntent = parseCicdCapabilityIntent(parsed, input);
 
   return {
     request_id: requestId,
@@ -391,6 +441,14 @@ function parseTenantCreationRequest(input = {}) {
         execution_result: 'not_started',
         failure_reason: null,
       },
+      {
+        requested_name: derivedTeams.cicd_admin_team_name,
+        normalized_slug: derivedTeams.cicd_admin_team_slug,
+        desired_action: 'create_team',
+        validation_status: 'valid',
+        execution_result: 'not_started',
+        failure_reason: null,
+      },
     ],
     parent_team_slug: derivedTeams.tenant_team_slug,
     requested_child_links: [
@@ -410,6 +468,14 @@ function parseTenantCreationRequest(input = {}) {
         execution_result: 'not_started',
         failure_reason: null,
       },
+      {
+        child_team_slug: derivedTeams.cicd_admin_team_slug,
+        requested_child_name: derivedTeams.cicd_admin_team_name,
+        desired_action: 'link_child',
+        validation_status: 'valid',
+        execution_result: 'not_started',
+        failure_reason: null,
+      },
     ],
     tenant_team_name: derivedTeams.tenant_team_name,
     tenant_team_slug: derivedTeams.tenant_team_slug,
@@ -417,6 +483,9 @@ function parseTenantCreationRequest(input = {}) {
     admin_team_slug: derivedTeams.admin_team_slug,
     repo_admin_team_name: derivedTeams.repo_admin_team_name,
     repo_admin_team_slug: derivedTeams.repo_admin_team_slug,
+    cicd_admin_team_name: derivedTeams.cicd_admin_team_name,
+    cicd_admin_team_slug: derivedTeams.cicd_admin_team_slug,
+    cicd_capability_intent: cicdCapabilityIntent,
   };
 }
 

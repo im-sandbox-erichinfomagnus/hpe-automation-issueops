@@ -143,6 +143,16 @@ function buildTopologyRegistryReadRateLimitContext(error = {}, options = {}) {
   });
 }
 
+function buildCapabilityAssignmentRateLimitContext(error = {}, options = {}) {
+  return buildRateLimitContext(error, {
+    operation: options.operation || 'tenant_cicd_capability_assignment',
+    attempt: options.attempt || 1,
+    maxRetries: options.maxRetries || 3,
+    baseDelayMs: options.baseDelayMs,
+    maxDelayMs: options.maxDelayMs,
+  });
+}
+
 function buildOwnedTopologyPersistenceRateLimitContext(error = {}, options = {}) {
   return buildRateLimitContext(error, {
     operation: options.operation || 'tenant_topology_owned_persistence',
@@ -225,7 +235,17 @@ async function executeWithBoundedRetry(operation, options = {}) {
   };
 }
 
+async function executeCapabilityOperationWithRetry(operation, options = {}) {
+  return executeWithBoundedRetry(operation, {
+    maxRetries: options.maxRetries || 3,
+    sleep: options.sleep,
+    baseDelayMs: options.baseDelayMs || 1000,
+    maxDelayMs: options.maxDelayMs || 30000,
+  });
+}
+
 module.exports = {
+  buildCapabilityAssignmentRateLimitContext,
   buildRepositoryGrantRateLimitContext,
   buildTenantRepoCreationRateLimitContext,
   buildTenantBootstrapRateLimitContext,
@@ -234,6 +254,7 @@ module.exports = {
   buildTopologyRegistryReadRateLimitContext,
   computeRetryDelayMs,
   createRetryPlan,
+  executeCapabilityOperationWithRetry,
   executeWithBoundedRetry,
   isRetryableGitHubFailure,
   parseRateLimitHeaders,

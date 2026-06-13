@@ -17,7 +17,7 @@ const { parseTeamRepoAccessRequest } = require('../workflow-support/parse-team-r
 const { parseTeamRepoAccessRemovalRequest } = require('../workflow-support/parse-team-repo-access-removal-request');
 const { reconcileTeamCreation } = require('../workflow-support/reconcile-team-creation');
 const { reconcileTenantRepoCreation } = require('../workflow-support/reconcile-tenant-repo-creation');
-const { reconcileTenantCreation } = require('../workflow-support/reconcile-tenant-creation');
+const { evaluateCicdCapabilityPath, reconcileTenantCreation } = require('../workflow-support/reconcile-tenant-creation');
 const { reconcileTeamHierarchy } = require('../workflow-support/reconcile-team-hierarchy');
 const { reconcileTeamRepoAccess } = require('../workflow-support/reconcile-team-repo-access');
 const { reconcileTeamRepoAccessRemoval } = require('../workflow-support/reconcile-team-repo-access-removal');
@@ -118,6 +118,24 @@ function readParsedRequestFromEnv(env = process.env) {
     bulk_csv_requested_people: env.PARSED_BULK_CSV_REQUESTED_PEOPLE || '',
     business_justification: env.PARSED_BUSINESS_JUSTIFICATION || '',
     justification: env.PARSED_JUSTIFICATION || env.PARSED_BUSINESS_JUSTIFICATION || '',
+    cicd_capability_requested: env.PARSED_CICD_CAPABILITY_REQUESTED || '',
+    parsed_cicd_capability_requested: env.PARSED_CICD_CAPABILITY_REQUESTED || '',
+    cicd_primary_path_available: env.PARSED_CICD_PRIMARY_PATH_AVAILABLE || '',
+    parsed_cicd_primary_path_available: env.PARSED_CICD_PRIMARY_PATH_AVAILABLE || '',
+    cicd_primary_policy_approved: env.PARSED_CICD_PRIMARY_POLICY_APPROVED || '',
+    parsed_cicd_primary_policy_approved: env.PARSED_CICD_PRIMARY_POLICY_APPROVED || '',
+    cicd_fallback_path_available: env.PARSED_CICD_FALLBACK_PATH_AVAILABLE || '',
+    parsed_cicd_fallback_path_available: env.PARSED_CICD_FALLBACK_PATH_AVAILABLE || '',
+    cicd_fallback_policy_approved: env.PARSED_CICD_FALLBACK_POLICY_APPROVED || '',
+    parsed_cicd_fallback_policy_approved: env.PARSED_CICD_FALLBACK_POLICY_APPROVED || '',
+    cicd_tenant_scope_resolvable: env.PARSED_CICD_TENANT_SCOPE_RESOLVABLE || '',
+    parsed_cicd_tenant_scope_resolvable: env.PARSED_CICD_TENANT_SCOPE_RESOLVABLE || '',
+    cicd_requested_scope: env.PARSED_CICD_REQUESTED_SCOPE || '',
+    parsed_cicd_requested_scope: env.PARSED_CICD_REQUESTED_SCOPE || '',
+    cicd_requires_broad_org_scope: env.PARSED_CICD_REQUIRES_BROAD_ORG_SCOPE || '',
+    parsed_cicd_requires_broad_org_scope: env.PARSED_CICD_REQUIRES_BROAD_ORG_SCOPE || '',
+    cicd_requires_org_owner_grant: env.PARSED_CICD_REQUIRES_ORG_OWNER_GRANT || '',
+    parsed_cicd_requires_org_owner_grant: env.PARSED_CICD_REQUIRES_ORG_OWNER_GRANT || '',
     dry_run: env.PARSED_DRY_RUN || 'true',
   };
 }
@@ -1000,6 +1018,23 @@ async function runRequestValidation(options = {}) {
             { maxRetries: options.maxRetries || 2, sleep: options.sleep }
           ),
         });
+        const cicdCapabilityIntent = validation.request && validation.request.cicd_capability_intent
+          ? validation.request.cicd_capability_intent
+          : {
+              requested: true,
+              primary_path_available: true,
+              primary_policy_approved: true,
+              fallback_path_available: true,
+              fallback_policy_approved: true,
+              tenant_scope_resolvable: true,
+            };
+        const cicdCapabilityDecision = evaluateCicdCapabilityPath(cicdCapabilityIntent);
+        validation.request = {
+          ...validation.request,
+          cicd_capability_intent: cicdCapabilityIntent,
+          cicd_capability_status: cicdCapabilityDecision.status,
+          cicd_capability_reason_code: cicdCapabilityDecision.reason_code,
+        };
         reconciliationPlan = reconcileTenantCreation({
           request: validation.request,
           requested_teams: validation.requested_teams,
@@ -1007,6 +1042,7 @@ async function runRequestValidation(options = {}) {
           organization_exists: validation.organization_visible,
           dry_run: validation.request.dry_run,
         });
+        reconciliationPlan.cicd_capability_decision = cicdCapabilityDecision;
       } else if (isTeamCreation) {
         const issueComments = env.ISSUE_NUMBER
           ? typeof api.listIssueComments === 'function'
@@ -1179,6 +1215,12 @@ async function runRequestValidation(options = {}) {
       ? validation.request.bulk_csv_submission.invalid_row_count
       : 0,
     attachment_rate_limit_snapshot: validation.attachment_rate_limit_snapshot || null,
+    cicd_capability: reconciliationPlan && reconciliationPlan.cicd_capability_decision
+      ? reconciliationPlan.cicd_capability_decision
+      : null,
+    cicd_topology_update_outcome: reconciliationPlan && reconciliationPlan.cicd_topology_update_result
+      ? reconciliationPlan.cicd_topology_update_result.status || null
+      : null,
   });
 
   if (!approvalArtifact) {

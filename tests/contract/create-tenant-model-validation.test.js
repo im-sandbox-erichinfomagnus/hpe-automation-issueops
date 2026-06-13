@@ -6,6 +6,7 @@ const test = require('node:test');
 const { parseTenantCreationRequest } = require('../../src/workflow-support/parse-tenant-creation-request');
 const { validateTenantCreationRequest } = require('../../src/workflow-support/validate-tenant-creation-request');
 const { evaluateApprovalGate } = require('../../src/workflow-support/approval-gate');
+const { evaluateCicdCapabilityPath } = require('../../src/workflow-support/reconcile-tenant-creation');
 const { assertTeamHierarchyAllowed } = require('../../src/actions/team-hierarchy-policy');
 
 function buildValidParsedRequest(overrides = {}) {
@@ -165,7 +166,43 @@ test('parseTenantCreationRequest normalizes tenant topology enhancement fields',
   assert.equal(parsed.governance.dependabot.enabled, false);
   assert.equal(parsed.secondary_contact, null);
   assert.equal(parsed.topology.teams.tenantRootTeam, 'acme-platform-root');
-  assert.equal(parsed.topology.teams.structure.length, 3);
+  assert.equal(parsed.topology.teams.structure.length, 4);
+});
+
+test('validateTenantCreationRequest rejects CICD slug collision with existing derived slug', async () => {
+  const request = parseTenantCreationRequest({
+    parsedRequest: buildValidParsedRequest(),
+    issue: { number: 9092, user: { login: 'requester-user' } },
+    repository: 'octo-org/issueops-speckit',
+  });
+  request.cicd_admin_team_slug = request.repo_admin_team_slug;
+
+  const validation = await validateTenantCreationRequest(request, baseValidationOptions());
+
+  assert.equal(validation.is_valid, false);
+  assert.match(validation.errors.join('\n'), /slugs conflict and must be unique/i);
+});
+
+test('validateTenantCreationRequest blocks CICD topology parent-child conflict', async () => {
+  const request = parseTenantCreationRequest({
+    parsedRequest: buildValidParsedRequest(),
+    issue: { number: 9093, user: { login: 'requester-user' } },
+    repository: 'octo-org/issueops-speckit',
+  });
+  request.topology.teams.structure = request.topology.teams.structure.map((entry) => {
+    if (entry && entry.type === 'cicd-admin') {
+      return {
+        ...entry,
+        parent: 'unexpected-parent',
+      };
+    }
+    return entry;
+  });
+
+  const validation = await validateTenantCreationRequest(request, baseValidationOptions());
+
+  assert.equal(validation.is_valid, false);
+  assert.match(validation.errors.join('\n'), /Canonical topology cicd-admin node is invalid/i);
 });
 
 test('validateTenantCreationRequest rejects invalid tenant topology enhancement fields', async () => {
@@ -307,4 +344,49 @@ test('tenant bootstrap guard fails closed when token is not PAT-backed for hiera
       }),
     /not PAT-backed for org mutation/i
   );
+});
+
+test('evaluateCicdCapabilityPath selects primary path when prerequisites are satisfied', () => {
+  const decision = evaluateCicdCapabilityPath({
+    requested: true,
+    primary_path_available: true,
+    primary_policy_approved: true,
+    fallback_path_available: true,
+    fallback_policy_approved: true,
+    tenant_scope_resolvable: true,
+  });
+
+  assert.equal(decision.selected_path, 'primary');
+  assert.equal(decision.status, 'applied');
+  assert.equal(decision.reason_code, null);
+});
+
+test('evaluateCicdCapabilityPath selects fallback when primary is unavailable', () => {
+  const decision = evaluateCicdCapabilityPath({
+    requested: true,
+    primary_path_available: false,
+    primary_policy_approved: false,
+    fallback_path_available: true,
+    fallback_policy_approved: true,
+    tenant_scope_resolvable: true,
+  });
+
+  assert.equal(decision.selected_path, 'fallback');
+  assert.equal(decision.status, 'applied');
+  assert.equal(decision.reason_code, null);
+});
+
+test('evaluateCicdCapabilityPath selects none when no safe path exists', () => {
+  const decision = evaluateCicdCapabilityPath({
+    requested: true,
+    primary_path_available: false,
+    primary_policy_approved: false,
+    fallback_path_available: false,
+    fallback_policy_approved: false,
+    tenant_scope_resolvable: false,
+  });
+
+  assert.equal(decision.selected_path, 'none');
+  assert.equal(decision.status, 'unavailable');
+  assert.equal(decision.reason_code, 'capability_unavailable');
 });

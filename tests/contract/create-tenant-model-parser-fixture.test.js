@@ -43,10 +43,14 @@ test('parseTenantCreationRequest parses required fields and derives deterministi
   assert.equal(parsed.designated_approver_login, 'org-owner-user');
   assert.equal(parsed.dry_run, true);
   assert.equal(parsed.business_justification, 'Bootstrap tenant for platform team');
-  assert.equal(parsed.tenant_team_name, 'Acme_Platform_Tenant');
-  assert.equal(parsed.repo_admin_team_name, 'Acme_Platform_RepoAdmins');
-  assert.equal(parsed.tenant_team_slug, 'acme_platform_tenant');
-  assert.equal(parsed.repo_admin_team_slug, 'acme_platform_repoadmins');
+  assert.equal(parsed.tenant_team_name, 'acme-platform-root');
+  assert.equal(parsed.repo_admin_team_name, 'acme-platform-repo-admin');
+  assert.equal(parsed.cicd_admin_team_name, 'acme-platform-cicd-admin');
+  assert.equal(parsed.tenant_team_slug, 'acme-platform-root');
+  assert.equal(parsed.repo_admin_team_slug, 'acme-platform-repo-admin');
+  assert.equal(parsed.cicd_admin_team_slug, 'acme-platform-cicd-admin');
+  assert.equal(parsed.requested_teams.length, 4);
+  assert.equal(parsed.requested_child_links.length, 3);
 });
 
 test('parseTenantCreationRequest normalizes boolean dry_run and approver login casing', () => {

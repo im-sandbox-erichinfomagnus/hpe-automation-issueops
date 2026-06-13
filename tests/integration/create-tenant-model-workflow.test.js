@@ -188,19 +188,20 @@ test('runApprovedExecution for create-tenant-model completes full tenant bootstr
   assert.equal(result.assignment.assigned_login, 'aeruvakalpanaa');
   assert.equal(result.approval.approval_status, 'approved');
   assert.equal(result.validation.is_valid, true);
-  assert.equal(result.reconciliation.teams_to_create.length, 3);
+  assert.equal(result.reconciliation.teams_to_create.length, 4);
   assert.equal(result.reconciliation.teams_already_present.length, 0);
   assert.equal(result.reconciliation.child_links_to_apply.length, 0);
+  assert.equal(result.reconciliation.cicd_admin_team_requested, true);
   assert.equal(result.reconciliation.requester_bootstrap_action, 'ensure_maintainer');
   assert.equal(result.reconciliation.registry_persistence_action, 'write');
   assert.equal(result.reconciliation.registry_persistence_result.status, 'created');
-  assert.equal(result.execution.mutation_count, 6);
+  assert.equal(result.execution.mutation_count, 8);
   assert.equal(result.execution.noop_count, 4);
   assert.equal(result.execution.pending_count, 0);
   assert.equal(result.execution.failure_count, 0);
   assert.equal(result.execution.rollback_status, 'not_needed');
   assert.equal(fs.existsSync(registryPath), true);
-  assert.equal(state.teams.length, 3);
+  assert.equal(state.teams.length, 4);
   assert.equal(state.memberships.length, 1);
   assert.equal(state.memberships[0].teamSlug, 'fabrikam-root');
   assert.equal(state.memberships[0].username, 'himanshu-im');
@@ -209,10 +210,11 @@ test('runApprovedExecution for create-tenant-model completes full tenant bootstr
   assert.equal(registryRecord.tenant_key, 'fabrikam');
   assert.equal(registryRecord.tenant_team_slug, 'fabrikam-root');
   assert.equal(registryRecord.repo_admin_team_slug, 'fabrikam-repo-admin');
+  assert.equal(registryRecord.cicd_admin_team_slug, 'fabrikam-cicd-admin');
   assert.equal(registryRecord.requester_login, 'himanshu-im');
   assert.equal(registryRecord.approver_login, 'himanshu-im');
   assert.match(result.execution.summary, /Approved tenant bootstrap execution completed\./i);
-  assert.match(result.execution.summary, /Processed 6 tenant_bootstrap\(ies\), 4 no-op tenant_bootstrap\(ies\)/i);
+  assert.match(result.execution.summary, /Processed 8 tenant_bootstrap\(ies\), 4 no-op tenant_bootstrap\(ies\)/i);
   assert.match(result.execution.summary, /authenticated creator a team maintainer/i);
 });
 
@@ -337,8 +339,8 @@ test('runApprovedExecution for create-tenant-model provisions canonical organiza
   );
   assert.equal(result.reconciliation.organization_roles_to_create.length, 4);
   assert.equal(result.reconciliation.organization_roles_failed.length, 0);
-  assert.equal(result.execution.mutation_count, 10);
-  assert.match(result.execution.summary, /Processed 10 tenant_bootstrap\(ies\)/i);
+  assert.equal(result.execution.mutation_count, 12);
+  assert.match(result.execution.summary, /Processed 12 tenant_bootstrap\(ies\)/i);
 });
 
 test('runApprovedExecution for create-tenant-model skips org-role provisioning when endpoint is unavailable', async () => {
@@ -451,9 +453,9 @@ test('runApprovedExecution for create-tenant-model skips org-role provisioning w
   assert.equal(result.reconciliation.organization_roles_skipped.length, 4);
   assert.ok(result.reconciliation.organization_roles_skipped.every((entry) => entry.skip_reason === 'organization_role_provisioning_skipped_http_404'));
   assert.equal(result.execution.failure_count, 0);
-  assert.equal(result.execution.mutation_count, 6);
+  assert.equal(result.execution.mutation_count, 8);
   assert.equal(result.execution.noop_count, 4);
-  assert.match(result.execution.summary, /processed 6 tenant_bootstrap\(ies\), 4 no-op tenant_bootstrap\(ies\)/i);
+  assert.match(result.execution.summary, /processed 8 tenant_bootstrap\(ies\), 4 no-op tenant_bootstrap\(ies\)/i);
 });
 
 test('runApprovedExecution for create-tenant-model skips org-role provisioning on generic role API failures', async () => {
@@ -563,9 +565,9 @@ test('runApprovedExecution for create-tenant-model skips org-role provisioning o
   assert.equal(result.reconciliation.organization_roles_skipped.length, 4);
   assert.ok(result.reconciliation.organization_roles_skipped.every((entry) => entry.skip_reason === 'organization_role_provisioning_skipped_http_403'));
   assert.equal(result.execution.failure_count, 0);
-  assert.equal(result.execution.mutation_count, 6);
+  assert.equal(result.execution.mutation_count, 8);
   assert.equal(result.execution.noop_count, 4);
-  assert.match(result.execution.summary, /processed 6 tenant_bootstrap\(ies\), 4 no-op tenant_bootstrap\(ies\)/i);
+  assert.match(result.execution.summary, /processed 8 tenant_bootstrap\(ies\), 4 no-op tenant_bootstrap\(ies\)/i);
 });
 
 test('runApprovedExecution for create-tenant-model falls back to custom repository role APIs', async () => {
@@ -691,8 +693,8 @@ test('runApprovedExecution for create-tenant-model falls back to custom reposito
   assert.equal(result.reconciliation.organization_roles_skipped.length, 0);
   assert.ok(result.reconciliation.organization_roles_to_create.every((entry) => entry.role_api_provider === 'custom_repository_role'));
   assert.equal(result.execution.failure_count, 0);
-  assert.equal(result.execution.mutation_count, 10);
-  assert.match(result.execution.summary, /Processed 10 tenant_bootstrap\(ies\)/i);
+  assert.equal(result.execution.mutation_count, 12);
+  assert.match(result.execution.summary, /Processed 12 tenant_bootstrap\(ies\)/i);
 });
 
 test('runApprovedExecution for create-tenant-model persists canonical topology-first record fields', async () => {
@@ -1027,22 +1029,23 @@ test('runApprovedExecution for create-tenant-model rerun stays idempotent for co
 
   assert.equal(rerun.request.request_status, 'executed');
   assert.equal(rerun.reconciliation.teams_to_create.length, 0);
-  assert.equal(rerun.reconciliation.teams_already_present.length, 3);
+  assert.equal(rerun.reconciliation.teams_already_present.length, 4);
   assert.equal(rerun.reconciliation.child_links_to_apply.length, 0);
-  assert.equal(rerun.reconciliation.child_links_already_present.length, 2);
+  assert.equal(rerun.reconciliation.child_links_already_present.length, 3);
   assert.equal(rerun.reconciliation.requester_bootstrap_action, 'noop');
   assert.equal(rerun.reconciliation.registry_persistence_result.status, 'unchanged');
   assert.equal(rerun.reconciliation.registry_commit_result.status, 'noop');
   assert.equal(rerun.execution.mutation_count, 0);
-  assert.equal(rerun.execution.noop_count, 10);
+  assert.equal(rerun.execution.noop_count, 12);
   assert.equal(rerun.execution.failure_count, 0);
   assert.equal(rerun.execution.rollback_status, 'not_needed');
-  assert.equal(state.teams.length, 3);
+  assert.equal(state.teams.length, 4);
+  assert.equal(state.teams.filter((team) => team.slug === 'contoso-cicd-admin').length, 1);
   assert.equal(state.memberships.length, 1);
   assert.equal(fs.readFileSync(registryPath, 'utf8'), registryAfterFirstRun);
   assert.match(rerun.execution.summary, /Request is already satisfied\./i);
   assert.match(rerun.execution.summary, /Additional approval comments do not trigger a new tenant bootstrap mutation run\./i);
-  assert.match(rerun.execution.summary, /Processed 0 tenant_bootstrap\(ies\), 10 no-op tenant_bootstrap\(ies\)/i);
+  assert.match(rerun.execution.summary, /Processed 0 tenant_bootstrap\(ies\), 12 no-op tenant_bootstrap\(ies\)/i);
 });
 
 test('runApprovedExecution for create-tenant-model promotes requester from member to maintainer', async () => {
@@ -1065,6 +1068,12 @@ test('runApprovedExecution for create-tenant-model promotes requester from membe
         id: 3002,
         name: 'litware-repo-admin',
         slug: 'litware-repo-admin',
+        parent: { id: 3000, slug: 'litware-root' },
+      },
+      {
+        id: 3003,
+        name: 'litware-cicd-admin',
+        slug: 'litware-cicd-admin',
         parent: { id: 3000, slug: 'litware-root' },
       },
     ],
@@ -1157,15 +1166,15 @@ test('runApprovedExecution for create-tenant-model promotes requester from membe
 
   assert.equal(result.request.request_status, 'executed');
   assert.equal(result.reconciliation.teams_to_create.length, 0);
-  assert.equal(result.reconciliation.teams_already_present.length, 3);
-  assert.equal(result.reconciliation.child_links_already_present.length, 2);
+  assert.equal(result.reconciliation.teams_already_present.length, 4);
+  assert.equal(result.reconciliation.child_links_already_present.length, 3);
   assert.equal(result.reconciliation.requester_bootstrap_action, 'ensure_maintainer');
   assert.equal(result.execution.mutation_count, 1);
-  assert.equal(result.execution.noop_count, 9);
+  assert.equal(result.execution.noop_count, 11);
   assert.equal(result.execution.failure_count, 0);
   assert.equal(state.memberships.length, 1);
   assert.equal(state.memberships[0].role, 'maintainer');
-  assert.match(result.execution.summary, /Processed 1 tenant_bootstrap\(ies\), 9 no-op tenant_bootstrap\(ies\)/i);
+  assert.match(result.execution.summary, /Processed 1 tenant_bootstrap\(ies\), 11 no-op tenant_bootstrap\(ies\)/i);
 });
 
 test('runApprovedExecution for create-tenant-model reports partial execution when durable registry persistence fails', async () => {
@@ -1263,7 +1272,7 @@ test('runApprovedExecution for create-tenant-model reports partial execution whe
 
   assert.equal(result.request.request_status, 'partially_executed');
   assert.equal(result.reconciliation.registry_persistence_result.status, 'blocked_missing_directory');
-  assert.equal(result.execution.mutation_count, 6);
+  assert.equal(result.execution.mutation_count, 8);
   assert.equal(result.execution.failure_count, 1);
   assert.equal(result.execution.rollback_status, 'compensating_action_required');
   assert.equal(fs.existsSync(missingRegistryDirectory), false);
@@ -1310,6 +1319,7 @@ test('runRequestValidation for create-tenant-model blocks re-parenting an existi
       listOrgTeams: async () => [
         { id: 5000, name: 'adventure-works-root', slug: 'adventure-works-root', parent: null },
         { id: 5003, name: 'adventure-works-admin', slug: 'adventure-works-admin', parent: { id: 5000, slug: 'adventure-works-root' } },
+        { id: 5004, name: 'adventure-works-cicd-admin', slug: 'adventure-works-cicd-admin', parent: { id: 5000, slug: 'adventure-works-root' } },
         { id: 5001, name: 'Shared Parent', slug: 'shared-parent', parent: null },
         {
           id: 5002,
@@ -1325,7 +1335,7 @@ test('runRequestValidation for create-tenant-model blocks re-parenting an existi
   assert.equal(result.validation.is_valid, false);
   assert.equal(result.validation.request_status, 'validation_failed');
   assert.equal(result.validation.requested_teams.every((team) => team.validation_status === 'existing'), true);
-  assert.equal(result.validation.requested_child_links.length, 2);
+  assert.equal(result.validation.requested_child_links.length, 3);
   const blockedLink = result.validation.requested_child_links.find((entry) => entry.child_team_slug === 'adventure-works-repo-admin');
   assert.equal(Boolean(blockedLink), true);
   assert.equal(blockedLink.validation_status, 'reparent_blocked');
@@ -1791,6 +1801,490 @@ test('runApprovedExecution for create-tenant-model migrates legacy registry reco
   assert.equal(secondRun.reconciliation.registry_persistence_result.status, 'unchanged');
   assert.equal(secondRun.execution.mutation_count, 0);
   assert.equal(secondRun.execution.noop_count >= 3, true);
-  assert.equal(state.teams.length, 3);
+  assert.equal(state.teams.length, 4);
   assert.equal(state.memberships.length, 1);
+});
+
+test('runApprovedExecution for create-tenant-model applies CICD capability via primary path when available', async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'create-tenant-model-cicd-primary-'));
+  const artifactPath = path.join(workspace, 'audit.json');
+  const registryDirectory = path.join(workspace, 'tenant-registry');
+  fs.mkdirSync(registryDirectory, { recursive: true });
+
+  const state = {
+    nextTeamId: 8100,
+    teams: [],
+    memberships: [],
+  };
+
+  const rolesState = {
+    nextRoleId: 1,
+    roles: [],
+  };
+
+  await runRequestValidation({
+    env: {
+      GITHUB_REPOSITORY: 'im-sandbox-himanshu/issueops-speckit',
+      ISSUE_NUMBER: '224',
+      REQUESTER_LOGIN: 'capability-requester',
+      PARSED_ORGANIZATION: 'im-sandbox-himanshu',
+      PARSED_TENANT_NAME: 'Capability Primary',
+      PARSED_TENANT_TYPE: 'application',
+      PARSED_PRIMARY_CONTACT: 'owner@example.com',
+      PARSED_SECONDARY_CONTACT: 'secondary@example.com',
+      PARSED_CMDB_ID: 'CMDB-224',
+      PARSED_COST_CENTER: 'CC-224',
+      PARSED_BUSINESS_UNIT: 'platform',
+      PARSED_ENVIRONMENT: 'nonprod',
+      PARSED_GOVERNANCE_CODE_SCANNING_ENABLED: 'true',
+      PARSED_GOVERNANCE_SECRET_SCANNING_ENABLED: 'true',
+      PARSED_GOVERNANCE_DEPENDABOT_ENABLED: 'true',
+      PARSED_DESIGNATED_APPROVER: 'capability-approver',
+      PARSED_JUSTIFICATION: 'US2 primary capability path',
+      PARSED_DRY_RUN: 'false',
+      PARSED_CICD_PRIMARY_PATH_AVAILABLE: 'true',
+      PARSED_CICD_PRIMARY_POLICY_APPROVED: 'true',
+      PARSED_CICD_FALLBACK_PATH_AVAILABLE: 'true',
+      PARSED_CICD_FALLBACK_POLICY_APPROVED: 'true',
+      PARSED_CICD_TENANT_SCOPE_RESOLVABLE: 'true',
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      AUDIT_ARTIFACT_PATH: artifactPath,
+      GITHUB_RUN_ID: '26559705824',
+      GITHUB_RUN_ATTEMPT: '1',
+    },
+    api: {
+      getOrganization: async () => ({ exists: true }),
+      getOrganizationMembership: async ({ username }) => ({
+        exists: true,
+        membership: {
+          role: username === 'capability-approver' ? 'admin' : 'member',
+          state: 'active',
+        },
+      }),
+      listOrgTeams: async () => [],
+    },
+    setProcessExitCode: false,
+  });
+
+  await runApprovalGate({
+    env: {
+      AUDIT_ARTIFACT_PATH: artifactPath,
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      GITHUB_TOKEN: 'repo-token',
+    },
+    api: {
+      getAssignableOwners: async () => ['aeruvakalpanaa'],
+      addIssueAssignees: async () => ({ status: 'assigned' }),
+      listIssueComments: async () => [
+        {
+          id: 901,
+          body: 'approved',
+          created_at: '2026-05-28T13:20:00Z',
+          user: { login: 'capability-approver' },
+        },
+      ],
+      getOrganizationMembership: async ({ username }) => ({
+        exists: true,
+        membership: {
+          role: username === 'capability-approver' ? 'admin' : 'member',
+          state: 'active',
+        },
+      }),
+    },
+    setProcessExitCode: false,
+  });
+
+  const result = await runApprovedExecution({
+    env: {
+      AUDIT_ARTIFACT_PATH: artifactPath,
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      GITHUB_RUN_ID: '26559705824',
+      GITHUB_RUN_ATTEMPT: '1',
+      TENANT_REGISTRY_DIR: registryDirectory,
+      TENANT_REGISTRY_PERSISTENCE_MODE: 'repo',
+      TENANT_REGISTRY_REQUIRE_DIRECTORY: 'true',
+    },
+    createApi: () => ({
+      ...buildExecutionApi(state),
+      listOrganizationRoles: async () => rolesState.roles,
+      createOrganizationRole: async ({ name }) => {
+        const role = { id: rolesState.nextRoleId++, name };
+        rolesState.roles.push(role);
+        return role;
+      },
+    }),
+    tokenInfo: {
+      token: 'pat-token',
+      source: 'ISSUEOPS_GITHUB_TOKEN',
+      token_kind: 'pat',
+      is_pat_backed: true,
+      supports_team_hierarchy_mutation: true,
+    },
+    setProcessExitCode: false,
+  });
+
+  assert.equal(result.execution.cicd_capability_selected_path, 'primary');
+  assert.equal(result.execution.cicd_capability_status, 'applied');
+  assert.equal(result.reconciliation.cicd_capability_action, 'apply_primary');
+  assert.equal(result.reconciliation.organization_roles_to_create.length, 4);
+  assert.equal(result.reconciliation.organization_roles_skipped.length, 0);
+});
+
+test('runApprovedExecution for create-tenant-model reports unavailable CICD capability and fails closed', async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'create-tenant-model-cicd-unavailable-'));
+  const artifactPath = path.join(workspace, 'audit.json');
+  const registryDirectory = path.join(workspace, 'tenant-registry');
+  fs.mkdirSync(registryDirectory, { recursive: true });
+
+  const state = {
+    nextTeamId: 8200,
+    teams: [],
+    memberships: [],
+  };
+
+  await runRequestValidation({
+    env: {
+      GITHUB_REPOSITORY: 'im-sandbox-himanshu/issueops-speckit',
+      ISSUE_NUMBER: '225',
+      REQUESTER_LOGIN: 'capability-requester',
+      PARSED_ORGANIZATION: 'im-sandbox-himanshu',
+      PARSED_TENANT_NAME: 'Capability Unavailable',
+      PARSED_TENANT_TYPE: 'application',
+      PARSED_PRIMARY_CONTACT: 'owner@example.com',
+      PARSED_SECONDARY_CONTACT: 'secondary@example.com',
+      PARSED_CMDB_ID: 'CMDB-225',
+      PARSED_COST_CENTER: 'CC-225',
+      PARSED_BUSINESS_UNIT: 'platform',
+      PARSED_ENVIRONMENT: 'nonprod',
+      PARSED_GOVERNANCE_CODE_SCANNING_ENABLED: 'true',
+      PARSED_GOVERNANCE_SECRET_SCANNING_ENABLED: 'true',
+      PARSED_GOVERNANCE_DEPENDABOT_ENABLED: 'true',
+      PARSED_DESIGNATED_APPROVER: 'capability-approver',
+      PARSED_JUSTIFICATION: 'US2 unavailable capability path',
+      PARSED_DRY_RUN: 'false',
+      PARSED_CICD_PRIMARY_PATH_AVAILABLE: 'false',
+      PARSED_CICD_PRIMARY_POLICY_APPROVED: 'false',
+      PARSED_CICD_FALLBACK_PATH_AVAILABLE: 'false',
+      PARSED_CICD_FALLBACK_POLICY_APPROVED: 'false',
+      PARSED_CICD_TENANT_SCOPE_RESOLVABLE: 'false',
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      AUDIT_ARTIFACT_PATH: artifactPath,
+      GITHUB_RUN_ID: '26559705825',
+      GITHUB_RUN_ATTEMPT: '1',
+    },
+    api: {
+      getOrganization: async () => ({ exists: true }),
+      getOrganizationMembership: async ({ username }) => ({
+        exists: true,
+        membership: {
+          role: username === 'capability-approver' ? 'admin' : 'member',
+          state: 'active',
+        },
+      }),
+      listOrgTeams: async () => [],
+    },
+    setProcessExitCode: false,
+  });
+
+  await runApprovalGate({
+    env: {
+      AUDIT_ARTIFACT_PATH: artifactPath,
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      GITHUB_TOKEN: 'repo-token',
+    },
+    api: {
+      getAssignableOwners: async () => ['aeruvakalpanaa'],
+      addIssueAssignees: async () => ({ status: 'assigned' }),
+      listIssueComments: async () => [
+        {
+          id: 902,
+          body: 'approved',
+          created_at: '2026-05-28T13:30:00Z',
+          user: { login: 'capability-approver' },
+        },
+      ],
+      getOrganizationMembership: async ({ username }) => ({
+        exists: true,
+        membership: {
+          role: username === 'capability-approver' ? 'admin' : 'member',
+          state: 'active',
+        },
+      }),
+    },
+    setProcessExitCode: false,
+  });
+
+  const result = await runApprovedExecution({
+    env: {
+      AUDIT_ARTIFACT_PATH: artifactPath,
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      GITHUB_RUN_ID: '26559705825',
+      GITHUB_RUN_ATTEMPT: '1',
+      TENANT_REGISTRY_DIR: registryDirectory,
+      TENANT_REGISTRY_PERSISTENCE_MODE: 'repo',
+      TENANT_REGISTRY_REQUIRE_DIRECTORY: 'true',
+    },
+    createApi: () => ({
+      ...buildExecutionApi(state),
+      listOrganizationRoles: async () => {
+        throw new Error('should not be called for unavailable capability');
+      },
+    }),
+    tokenInfo: {
+      token: 'pat-token',
+      source: 'ISSUEOPS_GITHUB_TOKEN',
+      token_kind: 'pat',
+      is_pat_backed: true,
+      supports_team_hierarchy_mutation: true,
+    },
+    setProcessExitCode: false,
+  });
+
+  assert.equal(result.execution.cicd_capability_selected_path, 'none');
+  assert.equal(result.execution.cicd_capability_status, 'unavailable');
+  assert.equal(result.reconciliation.cicd_capability_action, 'unavailable');
+  assert.equal(result.reconciliation.organization_roles_to_create.length, 0);
+  assert.equal(result.reconciliation.organization_roles_skipped.length, 4);
+  assert.equal(result.reconciliation.organization_roles_skipped.every((entry) => String(entry.skip_reason || '').includes('cicd_capability_unavailable')), true);
+});
+
+// Phase 5 (US3) Integration Tests
+
+test('T031: runApprovedExecution preserves dry-run semantics without CICD capability mutations', async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'create-tenant-model-us3-dry-run-'));
+  const artifactPath = path.join(workspace, 'audit.json');
+  const registryDirectory = path.join(workspace, 'tenant-registry');
+  fs.mkdirSync(registryDirectory, { recursive: true });
+
+  const state = {
+    nextTeamId: 9100,
+    teams: [],
+    memberships: [],
+  };
+
+  const executionCalls = {
+    listOrganizationRolesCalls: 0,
+    createOrganizationRoleCalls: 0,
+  };
+
+  await runRequestValidation({
+    env: {
+      GITHUB_REPOSITORY: 'im-sandbox-himanshu/issueops-speckit',
+      ISSUE_NUMBER: '226',
+      REQUESTER_LOGIN: 'dry-run-requester',
+      PARSED_ORGANIZATION: 'im-sandbox-himanshu',
+      PARSED_TENANT_NAME: 'Dry Run CICD',
+      PARSED_TENANT_TYPE: 'application',
+      PARSED_PRIMARY_CONTACT: 'owner@example.com',
+      PARSED_SECONDARY_CONTACT: 'secondary@example.com',
+      PARSED_CMDB_ID: 'CMDB-226',
+      PARSED_COST_CENTER: 'CC-226',
+      PARSED_BUSINESS_UNIT: 'platform',
+      PARSED_ENVIRONMENT: 'nonprod',
+      PARSED_GOVERNANCE_CODE_SCANNING_ENABLED: 'true',
+      PARSED_GOVERNANCE_SECRET_SCANNING_ENABLED: 'true',
+      PARSED_GOVERNANCE_DEPENDABOT_ENABLED: 'true',
+      PARSED_DESIGNATED_APPROVER: 'dry-run-approver',
+      PARSED_JUSTIFICATION: 'US3 dry-run CICD test',
+      PARSED_DRY_RUN: 'true',
+      PARSED_CICD_PRIMARY_PATH_AVAILABLE: 'true',
+      PARSED_CICD_PRIMARY_POLICY_APPROVED: 'true',
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      AUDIT_ARTIFACT_PATH: artifactPath,
+      GITHUB_RUN_ID: '26559705826',
+      GITHUB_RUN_ATTEMPT: '1',
+    },
+    api: {
+      getOrganization: async () => ({ exists: true }),
+      getOrganizationMembership: async ({ username }) => ({
+        exists: true,
+        membership: {
+          role: username === 'dry-run-approver' ? 'admin' : 'member',
+          state: 'active',
+        },
+      }),
+      listOrgTeams: async () => [],
+    },
+    setProcessExitCode: false,
+  });
+
+  await runApprovalGate({
+    env: {
+      AUDIT_ARTIFACT_PATH: artifactPath,
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      GITHUB_TOKEN: 'repo-token',
+    },
+    api: {
+      getAssignableOwners: async () => ['aeruvakalpanaa'],
+      addIssueAssignees: async () => ({ status: 'assigned' }),
+      listIssueComments: async () => [
+        {
+          id: 903,
+          body: 'approved',
+          created_at: '2026-05-28T14:00:00Z',
+          user: { login: 'dry-run-approver' },
+        },
+      ],
+      getOrganizationMembership: async ({ username }) => ({
+        exists: true,
+        membership: {
+          role: username === 'dry-run-approver' ? 'admin' : 'member',
+          state: 'active',
+        },
+      }),
+    },
+    setProcessExitCode: false,
+  });
+
+  const result = await runApprovedExecution({
+    env: {
+      AUDIT_ARTIFACT_PATH: artifactPath,
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      GITHUB_RUN_ID: '26559705826',
+      GITHUB_RUN_ATTEMPT: '1',
+      TENANT_REGISTRY_DIR: registryDirectory,
+      TENANT_REGISTRY_PERSISTENCE_MODE: 'repo',
+      TENANT_REGISTRY_REQUIRE_DIRECTORY: 'true',
+    },
+    createApi: () => ({
+      ...buildExecutionApi(state),
+      listOrganizationRoles: async () => {
+        executionCalls.listOrganizationRolesCalls++;
+        return [];
+      },
+      createOrganizationRole: async () => {
+        executionCalls.createOrganizationRoleCalls++;
+        throw new Error('should not create roles in dry-run mode');
+      },
+    }),
+    tokenInfo: {
+      token: 'pat-token',
+      source: 'ISSUEOPS_GITHUB_TOKEN',
+      token_kind: 'pat',
+      is_pat_backed: true,
+      supports_team_hierarchy_mutation: true,
+    },
+    setProcessExitCode: false,
+  });
+
+  assert.equal(result.request.dry_run, true);
+  assert.equal(result.execution.mutation_count, 0);
+  assert.equal(executionCalls.listOrganizationRolesCalls, 0);
+  assert.equal(executionCalls.createOrganizationRoleCalls, 0);
+  assert.match(result.execution.summary, /no mutations in dry-run mode|dry-run only/i);
+});
+
+test('T031: runApprovedExecution for create-tenant-model skips CICD capability on generic API failures gracefully', async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'create-tenant-model-us3-partial-failure-'));
+  const artifactPath = path.join(workspace, 'audit.json');
+  const registryDirectory = path.join(workspace, 'tenant-registry');
+  fs.mkdirSync(registryDirectory, { recursive: true });
+
+  const state = {
+    nextTeamId: 9200,
+    teams: [],
+    memberships: [],
+  };
+
+  await runRequestValidation({
+    env: {
+      GITHUB_REPOSITORY: 'im-sandbox-himanshu/issueops-speckit',
+      ISSUE_NUMBER: '227',
+      REQUESTER_LOGIN: 'partial-failure-requester',
+      PARSED_ORGANIZATION: 'im-sandbox-himanshu',
+      PARSED_TENANT_NAME: 'Partial Failure CICD',
+      PARSED_TENANT_TYPE: 'application',
+      PARSED_PRIMARY_CONTACT: 'owner@example.com',
+      PARSED_SECONDARY_CONTACT: 'secondary@example.com',
+      PARSED_CMDB_ID: 'CMDB-227',
+      PARSED_COST_CENTER: 'CC-227',
+      PARSED_BUSINESS_UNIT: 'platform',
+      PARSED_ENVIRONMENT: 'nonprod',
+      PARSED_GOVERNANCE_CODE_SCANNING_ENABLED: 'true',
+      PARSED_GOVERNANCE_SECRET_SCANNING_ENABLED: 'true',
+      PARSED_GOVERNANCE_DEPENDABOT_ENABLED: 'true',
+      PARSED_DESIGNATED_APPROVER: 'partial-failure-approver',
+      PARSED_JUSTIFICATION: 'US3 partial failure CICD test',
+      PARSED_DRY_RUN: 'false',
+      PARSED_CICD_PRIMARY_PATH_AVAILABLE: 'true',
+      PARSED_CICD_PRIMARY_POLICY_APPROVED: 'true',
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      AUDIT_ARTIFACT_PATH: artifactPath,
+      GITHUB_RUN_ID: '26559705827',
+      GITHUB_RUN_ATTEMPT: '1',
+    },
+    api: {
+      getOrganization: async () => ({ exists: true }),
+      getOrganizationMembership: async ({ username }) => ({
+        exists: true,
+        membership: {
+          role: username === 'partial-failure-approver' ? 'admin' : 'member',
+          state: 'active',
+        },
+      }),
+      listOrgTeams: async () => [],
+    },
+    setProcessExitCode: false,
+  });
+
+  await runApprovalGate({
+    env: {
+      AUDIT_ARTIFACT_PATH: artifactPath,
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      GITHUB_TOKEN: 'repo-token',
+    },
+    api: {
+      getAssignableOwners: async () => ['aeruvakalpanaa'],
+      addIssueAssignees: async () => ({ status: 'assigned' }),
+      listIssueComments: async () => [
+        {
+          id: 904,
+          body: 'approved',
+          created_at: '2026-05-28T14:30:00Z',
+          user: { login: 'partial-failure-approver' },
+        },
+      ],
+      getOrganizationMembership: async ({ username }) => ({
+        exists: true,
+        membership: {
+          role: username === 'partial-failure-approver' ? 'admin' : 'member',
+          state: 'active',
+        },
+      }),
+    },
+    setProcessExitCode: false,
+  });
+
+  const result = await runApprovedExecution({
+    env: {
+      AUDIT_ARTIFACT_PATH: artifactPath,
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      GITHUB_RUN_ID: '26559705827',
+      GITHUB_RUN_ATTEMPT: '1',
+      TENANT_REGISTRY_DIR: registryDirectory,
+      TENANT_REGISTRY_PERSISTENCE_MODE: 'repo',
+      TENANT_REGISTRY_REQUIRE_DIRECTORY: 'true',
+    },
+    createApi: () => ({
+      ...buildExecutionApi(state),
+      listOrganizationRoles: async () => {
+        const error = new Error('API rate limit exceeded');
+        error.status = 429;
+        throw error;
+      },
+    }),
+    tokenInfo: {
+      token: 'pat-token',
+      source: 'ISSUEOPS_GITHUB_TOKEN',
+      token_kind: 'pat',
+      is_pat_backed: true,
+      supports_team_hierarchy_mutation: true,
+    },
+    setProcessExitCode: false,
+  });
+
+  // Should continue with team creation even if CICD capability unavailable
+  assert.equal(result.execution.mutation_count, 8);
+  assert.equal(result.execution.noop_count, 4);
+  assert.equal(result.execution.cicd_capability_status, 'unavailable');
 });

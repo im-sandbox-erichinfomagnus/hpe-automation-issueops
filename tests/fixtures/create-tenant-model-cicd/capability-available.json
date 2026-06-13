@@ -1,0 +1,27 @@
+{
+  "name": "capability_available",
+  "request": {
+    "organization": "octo-org",
+    "tenant_name": "Acme",
+    "designated_approver": "org-owner-user",
+    "dry_run": false,
+    "justification": "Bootstrap tenant with CICD admin capability"
+  },
+  "derived": {
+    "tenant_team": "Acme_Tenant",
+    "repo_admin_team": "Acme_RepoAdmins",
+    "cicd_admin_team": "Acme_Tenant_CICDAdmin"
+  },
+  "capability_prerequisites": {
+    "primary_available": true,
+    "fallback_available": true,
+    "tenant_safe_scope": true,
+    "policy_approved_primary": true,
+    "policy_approved_fallback": true
+  },
+  "expected": {
+    "selected_path": "primary",
+    "capability_status": "applied",
+    "reason_code": null
+  }
+}

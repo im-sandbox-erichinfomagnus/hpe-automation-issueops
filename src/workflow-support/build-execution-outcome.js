@@ -121,6 +121,20 @@ function deriveContextBindingStatus(input = {}) {
   return 'mismatched';
 }
 
+function mapCicdCapabilityOutcome(input = {}) {
+  const candidate = input && typeof input === 'object' ? input : {};
+  const allowedStatuses = new Set(['requested', 'applied', 'skipped', 'blocked', 'unavailable', 'failed']);
+  const rawStatus = String(candidate.status || candidate.capability_status || '').toLowerCase();
+  const normalizedStatus = allowedStatuses.has(rawStatus) ? rawStatus : 'skipped';
+
+  return {
+    selected_path: String(candidate.selected_path || candidate.selectedPath || 'none').toLowerCase(),
+    status: normalizedStatus,
+    reason_code: candidate.reason_code || candidate.reasonCode || null,
+    reason_message: candidate.reason_message || candidate.reasonMessage || null,
+  };
+}
+
 function buildExecutionOutcome(input = {}) {
   const executionResults = input.executionResults || input.execution_results || [];
   const runContext = input.runContext || input.run_context || {};
@@ -150,6 +164,7 @@ function buildExecutionOutcome(input = {}) {
   const awaitingApprovalSummary = terminalState === 'awaiting_approval' && summary.mutated.length === 0
     ? 'Request is validated and ready for approval. No mutation was attempted in this phase.'
     : null;
+  const cicdCapability = mapCicdCapabilityOutcome(input.cicd_capability || input.cicdCapability || {});
 
   return {
     run_id: runContext.run_id || process.env.GITHUB_RUN_ID || null,
@@ -164,7 +179,7 @@ function buildExecutionOutcome(input = {}) {
     pending_count: summary.pending.length,
     failure_count: summary.failed.length,
     granted_count: summary.mutated.length,
-    removed_count: summary.mutated.filter((entry) => entry.result === 'removed').length,
+    removed_count: summary.removed.length,
     duplicate_row_count: input.duplicate_row_count ?? bulkCsvSubmission?.duplicate_row_count ?? 0,
     invalid_row_count: input.invalid_row_count ?? bulkCsvSubmission?.invalid_row_count ?? 0,
     attachment_rate_limit_snapshot: input.attachment_rate_limit_snapshot || null,
@@ -181,6 +196,11 @@ function buildExecutionOutcome(input = {}) {
     tenant_id: input.tenant_id || input.tenantId || null,
     tenant_team_slug: input.tenant_team_slug || input.tenantTeamSlug || null,
     repo_admin_team_slug: input.repo_admin_team_slug || input.repoAdminTeamSlug || null,
+    cicd_capability_selected_path: cicdCapability.selected_path,
+    cicd_capability_status: cicdCapability.status,
+    cicd_capability_reason_code: cicdCapability.reason_code,
+    cicd_capability_reason_message: cicdCapability.reason_message,
+    cicd_topology_update_outcome: input.cicd_topology_update_outcome || input.cicdTopologyUpdateOutcome || null,
     repository_creation_result: input.repository_creation_result || null,
     repo_admin_grant_result: input.repo_admin_grant_result || null,
     repository_custom_properties_result: input.repository_custom_properties_result || null,
@@ -192,10 +212,6 @@ function buildExecutionOutcome(input = {}) {
     mutation_token_source: input.mutation_token_source || null,
     mutation_token_kind: input.mutation_token_kind || null,
     mutation_token_is_pat_backed: input.mutation_token_is_pat_backed === true,
-  topology_persistence_result: input.topology_persistence_result || input.topologyPersistenceResult || null,
-  mutation_token_source: input.mutation_token_source || null,
-  mutation_token_kind: input.mutation_token_kind || null,
-  mutation_token_is_pat_backed: input.mutation_token_is_pat_backed === true,
     failed_subset: summary.failed,
     rejected_subset: summary.rejected,
     mutated_repositories: summary.mutated.map((entry) => entry.repository_full_name).filter(Boolean),
@@ -224,6 +240,7 @@ module.exports = {
   deriveContextBindingStatus,
   deriveOwnedTopologyAction,
   deriveRollbackStatus,
+  mapCicdCapabilityOutcome,
   normalizeExecutionResult,
   summarizeResults,
 };

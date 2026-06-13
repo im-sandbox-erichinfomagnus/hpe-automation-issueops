@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const { buildAuditArtifact } = require('../../src/workflow-support/build-audit-artifact');
+const { buildExecutionOutcome } = require('../../src/workflow-support/build-execution-outcome');
 
 test('buildAuditArtifact includes rate-limit retry evidence for tenant topology reconciliation', () => {
   const artifact = buildAuditArtifact({
@@ -170,4 +171,78 @@ test('buildAuditArtifact keeps deterministic no-mutation planning for pre-execut
     },
   });
   assert.equal(executedArtifact.validation.no_mutation_planned, false);
+});
+
+test('buildExecutionOutcome maps CICD capability taxonomy for all supported statuses', () => {
+  const statuses = ['requested', 'applied', 'skipped', 'blocked', 'unavailable', 'failed'];
+
+  for (const status of statuses) {
+    const execution = buildExecutionOutcome({
+      runContext: {
+        operation: 'tenant_creation',
+      },
+      cicd_capability: {
+        selected_path: status === 'applied' ? 'primary' : 'none',
+        status,
+        reason_code: status === 'applied' ? null : 'capability_status_test',
+      },
+    });
+
+    assert.equal(execution.cicd_capability_status, status);
+  }
+});
+
+test('buildAuditArtifact carries CICD capability decision fields into execution section', () => {
+  const executionOutcome = buildExecutionOutcome({
+    runContext: {
+      operation: 'tenant_creation',
+      run_id: '20',
+      run_attempt: '1',
+    },
+    cicd_capability: {
+      selected_path: 'none',
+      status: 'blocked',
+      reason_code: 'unsafe_scope',
+      reason_message: 'Scope was blocked by policy.',
+    },
+    cicd_topology_update_outcome: 'noop',
+  });
+
+  const artifact = buildAuditArtifact({
+    request: {
+      request_id: 'octo-org/issueops#5/20.1',
+      issue_number: 5,
+      repository: 'octo-org/issueops',
+      requester_login: 'requester-user',
+      organization: 'octo-org',
+      tenant_display_name: 'Capability Tenant',
+      tenant_key: 'capability-tenant',
+      tenant_type: 'application',
+      primary_contact: 'owner@example.com',
+      request_status: 'executed',
+      dry_run: false,
+    },
+    validation: {
+      is_valid: true,
+    },
+    reconciliationPlan: {
+      state: 'approved_for_execution',
+      cicd_capability_decision: {
+        selected_path: 'none',
+        status: 'blocked',
+        reason_code: 'unsafe_scope',
+      },
+    },
+    executionOutcome,
+    runContext: {
+      operation: 'tenant_creation',
+      run_id: '20',
+      run_attempt: '1',
+    },
+  });
+
+  assert.equal(artifact.execution.cicd_capability_selected_path, 'none');
+  assert.equal(artifact.execution.cicd_capability_status, 'blocked');
+  assert.equal(artifact.execution.cicd_capability_reason_code, 'unsafe_scope');
+  assert.equal(artifact.execution.cicd_topology_update_outcome, 'noop');
 });
