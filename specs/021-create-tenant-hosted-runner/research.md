@@ -3,16 +3,16 @@
 ## Decision 0: Read tenant context from the canonical tenant topology (supersedes the CICDAdmins derivation)
 
 - Decision: Resolve tenant context from the canonical tenant topology that `specs/022-enhance-tenant-topology` stores in `tenant-registry/` (record carries `tenantName`, `tenantId`, and `topology.teams.structure[]` with team types root/admin/repo-admin; legacy flat records are projected to the same `<tenant-slug>-root`/`-admin`/`-repo-admin` naming). Authorize the requester against the topology **admin** team (structure type "admin", the `tenant-admin` role), which is the tenant topology administration authority in the new model.
-- Rationale: The new topology has no dedicated `CICDAdmins` team or role; the `admin` team (tenant-admin: create repos, create teams, manage repository access) is the tenant governance authority that runner administration sits under. Reading the topology directly keeps these ops consistent with create-tenant-model and removes the invented `<tenant-slug>-admin` naming.
+- Rationale: The new topology has no dedicated `CICDAdmins` team or role; the `admin` team (tenant-admin: create repos, create teams, manage repository access) is the tenant governance authority that runner administration sits under. Reading the topology directly keeps these ops consistent with create-tenant-model and removes the invented `CICDAdmins` naming.
 - Alternatives considered: a dedicated cicd-admin team/role (does not exist in the topology, would require a 022 schema change); the repo-admin team (too narrow - repo-scoped, not org Actions administration).
 
 
 ## Decision 1: Tenant topology admin team naming derivation
 
-- Decision: Derive the tenant topology admin team as `<tenant-slug>-admin` (tenant display name with whitespace converted to underscores, suffixed with `_CICDAdmins`), with the slug computed by the same `normalizeSlug` rules used by 014 tenant bootstrap derivation.
+- Decision: Derive the tenant topology admin team as `<tenant-slug>-admin`, with the slug computed from the registry `tenantName` by the same `normalizeSlug` rules used by 014 tenant bootstrap derivation and the `-admin` suffix taken from the canonical topology projection.
 - Rationale: The 014 tenant model derives `TenantName_Tenant` and `TenantName_RepoAdmins` by suffixing the normalized tenant display name. Following the identical pattern keeps every tenant governance team discoverable from one derivation rule and keeps registry records free of redundant team fields.
 - Alternatives considered:
-  - `TenantName_Tenant_CICDAdmin` (literal scratch-pad naming `<tenant-slug>-admin`): rejected because it deviates from the implemented 014 suffix-on-display-name convention (`X_RepoAdmin` became `TenantName_RepoAdmins`) and produces longer, redundant team names.
+  - `TenantName_Tenant_CICDAdmin` (the literal scratch-pad naming): rejected because it deviates from the canonical topology `<tenant-slug>-admin` projection and produces longer, redundant team names.
   - Storing the topology admin team in the tenant registry record: rejected for this version because it requires amending the 014 registry schema and migration of existing records; deterministic derivation needs no schema change. Revisit if team naming ever becomes configurable per tenant.
 
 ## Decision 2: Requester authorization via live team membership, not registry data

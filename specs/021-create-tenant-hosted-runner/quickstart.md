@@ -14,7 +14,7 @@ Create one tenant-prefixed GitHub-hosted runner in a target organization through
 ## Setup Verification
 
 1. Confirm `tenant-registry/<tenant_key>.json` exists on `main` and its `organization` matches the target organization.
-2. Confirm the `<tenant-slug>-admin` team exists in the target organization (derived from the registry `tenant_display_name`, whitespace to underscores, `_CICDAdmins` suffix).
+2. Confirm the `<tenant-slug>-admin` team exists in the target organization (the canonical tenant topology admin team, structure type "admin").
 3. Confirm the requester appears as an active member of that team.
 4. Confirm `ISSUEOPS_GITHUB_TOKEN` is configured and PAT-backed.
 5. Optionally list available images and machine sizes for the organization (`GET /orgs/{org}/actions/hosted-runners/images/github-owned`, `GET /orgs/{org}/actions/hosted-runners/machine-sizes`) to choose valid `runner_image_id` and `runner_size` values.
