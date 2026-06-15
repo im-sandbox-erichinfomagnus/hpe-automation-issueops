@@ -87,6 +87,39 @@ test('buildAuditArtifact preserves tenant repo visibility intent and actual visi
   assert.equal(artifact.reconciliation.visibility_conflict, false);
 });
 
+test('determineOperation infers team_repo_access_removal from removal payload when metadata operation is absent', () => {
+  const operation = determineOperation({
+    organization: 'octo-org',
+    team_slug: 'platform-engineering',
+    designated_approver_login: 'octo-owner',
+    requested_repository_removals: [
+      {
+        repository_full_name: 'octo-org/service-catalog',
+        desired_action: 'remove',
+      },
+    ],
+  });
+
+  assert.equal(operation, 'team_repo_access_removal');
+});
+
+test('determineOperation infers team_repo_access from grant signals without relying on shared fields', () => {
+  const operation = determineOperation({
+    organization: 'octo-org',
+    team_slug: 'platform-engineering',
+    designated_approver_login: 'octo-owner',
+    requested_permission_api_value: 'push',
+    requested_repository_grants: [
+      {
+        repository_full_name: 'octo-org/service-catalog',
+        desired_permission: 'push',
+      },
+    ],
+  });
+
+  assert.equal(operation, 'team_repo_access');
+});
+
 test('inferRequestIntakeMode classifies team_repo_access bulk CSV when only normalized grants are present', () => {
   const intakeMode = inferRequestIntakeMode({
     organization: 'octo-org',

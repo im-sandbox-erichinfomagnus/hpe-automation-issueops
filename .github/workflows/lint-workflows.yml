@@ -8,6 +8,7 @@ on:
   push:
     branches:
       - main
+      - 013-setup-feature-branch
     paths:
       - .github/workflows/*.yml
       - .github/ISSUE_TEMPLATE/*.yml
@@ -22,7 +23,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Lint GitHub workflow files
         uses: rhysd/actionlint@v1.7.12

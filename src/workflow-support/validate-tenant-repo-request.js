@@ -6,10 +6,18 @@ const {
   describeAllowedRepositoryVisibilities,
   normalizeRepositoryVisibility,
 } = require('./repository-visibility');
+const { normalizeRepositoryName } = require('./parse-tenant-repo-request');
 const { resolveTenantContextFromRegistry } = require('./resolve-tenant-context-from-registry');
 
 function isSafeRepositoryName(value) {
   return /^[a-z0-9](?:[a-z0-9._-]{0,98}[a-z0-9])?$/.test(String(value || ''));
+}
+
+function normalizeOwnedRepositoryName(value) {
+  return normalizeRepositoryName(value)
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '');
 }
 
 async function validateTenantRepoRequest(input = {}, options = {}) {
@@ -33,14 +41,21 @@ async function validateTenantRepoRequest(input = {}, options = {}) {
     errors.push('Repository name normalization failed or produced an unsafe repository slug.');
   }
 
-  const { visibility: repositoryVisibility, source: repositoryVisibilitySource } = normalizeRepositoryVisibility(request.repository_visibility);
+  const { visibility: repositoryVisibility, source: repositoryVisibilitySource } = normalizeRepositoryVisibility(
+    request.repository_visibility,
+    { allowDefault: false }
+  );
   const allowedRepositoryVisibilities = ALLOWED_REPOSITORY_VISIBILITIES;
   request.repository_visibility = repositoryVisibility;
   request.repository_visibility_source = request.repository_visibility_source || repositoryVisibilitySource;
   let visibilityValidationStatus = 'valid';
   let visibilityValidationReason = '';
 
-  if (!allowedRepositoryVisibilities.includes(repositoryVisibility)) {
+  if (repositoryVisibilitySource === 'not_provided') {
+    visibilityValidationStatus = 'missing_visibility';
+    visibilityValidationReason = 'Repository visibility must be provided by the issue form and cannot be defaulted.';
+    errors.push(visibilityValidationReason);
+  } else if (!allowedRepositoryVisibilities.includes(repositoryVisibility)) {
     visibilityValidationStatus = 'invalid_visibility';
     visibilityValidationReason = `Repository visibility '${repositoryVisibility}' is invalid. Allowed values are: ${describeAllowedRepositoryVisibilities()}.`;
     errors.push(visibilityValidationReason);
@@ -77,6 +92,40 @@ async function validateTenantRepoRequest(input = {}, options = {}) {
 
   if (visibilityValidationStatus === 'valid' && allowedRepositoryVisibilities.includes(repositoryVisibility)) {
     visibilityValidationReason = `Requested repository visibility '${repositoryVisibility}' is allowed.`;
+  }
+
+  const primaryContactDetectedType = request.primary_contact_type || 'absent';
+  let primaryContactValidationStatus = 'valid';
+  let primaryContactValidationReason = '';
+
+  if (primaryContactDetectedType === 'absent') {
+    primaryContactValidationStatus = 'missing';
+    primaryContactValidationReason = 'Primary contact is required.';
+    errors.push(primaryContactValidationReason);
+  } else if (primaryContactDetectedType === 'invalid') {
+    primaryContactValidationStatus = 'invalid_format';
+    primaryContactValidationReason = `Primary contact '${request.primary_contact}' is not a valid GitHub handle or email address.`;
+    errors.push(primaryContactValidationReason);
+  } else if (primaryContactDetectedType === 'handle') {
+    primaryContactValidationReason = 'Primary contact is a valid GitHub handle.';
+  } else if (primaryContactDetectedType === 'email') {
+    primaryContactValidationReason = 'Primary contact is a valid email address.';
+  }
+
+  const secondaryContactDetectedType = request.secondary_contact_type || 'absent';
+  let secondaryContactValidationStatus = 'absent';
+  let secondaryContactValidationReason = '';
+
+  if (secondaryContactDetectedType === 'invalid') {
+    secondaryContactValidationStatus = 'invalid_format';
+    secondaryContactValidationReason = `Secondary contact '${request.secondary_contact}' is not a valid GitHub handle or email address.`;
+    errors.push(secondaryContactValidationReason);
+  } else if (secondaryContactDetectedType === 'handle') {
+    secondaryContactValidationStatus = 'valid';
+    secondaryContactValidationReason = 'Secondary contact is a valid GitHub handle.';
+  } else if (secondaryContactDetectedType === 'email') {
+    secondaryContactValidationStatus = 'valid';
+    secondaryContactValidationReason = 'Secondary contact is a valid email address.';
   }
 
   if (!request.designated_approver_login) {
@@ -131,6 +180,88 @@ async function validateTenantRepoRequest(input = {}, options = {}) {
     errors.push('Canonical tenant context did not resolve.');
   } else if (resolvedContext.governance_relation_status !== 'valid') {
     errors.push('Resolved tenant governance relationship is invalid for tenant and repo-admin teams.');
+  }
+
+  let canonicalTopologyValidationStatus = 'not_applicable';
+  if (resolvedContext && resolvedContext.topology_mode === 'canonical') {
+    canonicalTopologyValidationStatus = 'valid';
+    const requiredRoles = ['tenant-admin', 'repo-admin', 'developer', 'viewer'];
+    const accessRoles = Array.isArray(resolvedContext.access_model_roles)
+      ? resolvedContext.access_model_roles
+      : [];
+
+    if (!resolvedContext.tenant_id) {
+      canonicalTopologyValidationStatus = 'invalid';
+      errors.push('Canonical topology tenantId is required for tenant context resolution.');
+    }
+
+    if (!resolvedContext.tenant_team_slug || !resolvedContext.repo_admin_team_slug) {
+      canonicalTopologyValidationStatus = 'invalid';
+      errors.push('Canonical topology teams.structure must resolve both tenant root and repo-admin team slugs.');
+    }
+
+    if (resolvedContext.repo_admin_parent_matches_root !== true) {
+      canonicalTopologyValidationStatus = 'invalid';
+      errors.push('Canonical topology repo-admin team must be a child of the tenant root team.');
+    }
+
+    if (resolvedContext.access_model_enforcement !== 'tenant-boundary') {
+      canonicalTopologyValidationStatus = 'invalid';
+      errors.push('Canonical topology access model enforcement must be tenant-boundary.');
+    }
+
+    const hasAllRoles = requiredRoles.every((role) => accessRoles.includes(role));
+    if (!hasAllRoles) {
+      canonicalTopologyValidationStatus = 'invalid';
+      errors.push('Canonical topology access model roles are incomplete for tenant governance validation.');
+    }
+  }
+
+  let duplicateOwnedRepositoryConflict = null;
+  const duplicateOwnedRepositoryAllowNoop = Boolean(options.allowOwnedDuplicateWhenRepositoryExists);
+  let duplicateOwnedRepositoryStatus = 'not_checked';
+  if (resolvedContext) {
+    const topologyMode = resolvedContext.topology_mode || 'legacy_projection';
+    const ownedRepositoriesStatus = resolvedContext.owned_repositories_status || 'absent';
+    const ownedRepositories = Array.isArray(resolvedContext.owned_repositories)
+      ? resolvedContext.owned_repositories
+      : [];
+
+    if (topologyMode === 'canonical' && ownedRepositoriesStatus === 'invalid') {
+      duplicateOwnedRepositoryStatus = 'invalid_owned_collection';
+      errors.push('Canonical tenant topology contains an invalid repositories.owned collection and cannot be validated safely.');
+    } else {
+      const requestedNormalized = normalizeOwnedRepositoryName(request.repository_name_input || request.repository_name_normalized);
+      const conflictingEntry = ownedRepositories.find((entry) => {
+        const candidateName = entry && typeof entry === 'object' ? entry.repoName : '';
+        const candidateTenantId = entry && typeof entry === 'object' ? String(entry.tenantId || '').trim().toLowerCase() : '';
+        const contextTenantId = String(resolvedContext.tenant_id || resolvedContext.tenant_key || '').trim().toLowerCase();
+        const candidateNormalized = normalizeOwnedRepositoryName(candidateName);
+        if (!candidateNormalized || !requestedNormalized) {
+          return false;
+        }
+
+        if (candidateTenantId && contextTenantId && candidateTenantId !== contextTenantId) {
+          return false;
+        }
+
+        return candidateNormalized === requestedNormalized;
+      }) || null;
+
+      if (conflictingEntry) {
+        duplicateOwnedRepositoryStatus = 'duplicate_conflict';
+        duplicateOwnedRepositoryConflict = {
+          normalized_name: normalizeOwnedRepositoryName(conflictingEntry.repoName),
+          repo_name: String(conflictingEntry.repoName || ''),
+          tenant_id: String(conflictingEntry.tenantId || resolvedContext.tenant_id || resolvedContext.tenant_key || ''),
+        };
+        errors.push(
+          `Repository name '${request.repository_name_input}' is already present in tenant topology owned repositories (normalized conflict: '${duplicateOwnedRepositoryConflict.normalized_name}').`
+        );
+      } else {
+        duplicateOwnedRepositoryStatus = 'available';
+      }
+    }
   }
 
   let designatedApproverAuthorization = {
@@ -190,6 +321,12 @@ async function validateTenantRepoRequest(input = {}, options = {}) {
       : 'none';
   }
 
+  if (duplicateOwnedRepositoryConflict && duplicateOwnedRepositoryAllowNoop && repositoryState && repositoryState.exists) {
+    duplicateOwnedRepositoryStatus = 'already_owned_existing_repository';
+    duplicateOwnedRepositoryConflict = null;
+    errors.splice(0, errors.length, ...errors.filter((entry) => !/already present in tenant topology owned repositories/i.test(entry)));
+  }
+
   if (request.dry_run) {
     warnings.push('Dry-run is enabled; reconciliation intent is reported without mutation.');
   }
@@ -205,6 +342,19 @@ async function validateTenantRepoRequest(input = {}, options = {}) {
         tenant_team_slug: resolvedContext.tenant_team_slug,
         repo_admin_team_name: resolvedContext.repo_admin_team_name,
         repo_admin_team_slug: resolvedContext.repo_admin_team_slug,
+        topology_mode: resolvedContext.topology_mode || 'legacy_projection',
+        owned_repositories_status: resolvedContext.owned_repositories_status || 'absent',
+        access_model_enforcement: resolvedContext.access_model_enforcement || '',
+        access_model_roles: Array.isArray(resolvedContext.access_model_roles)
+          ? resolvedContext.access_model_roles
+          : [],
+        canonical_fields_consulted: Array.isArray(resolvedContext.canonical_fields_consulted)
+          ? resolvedContext.canonical_fields_consulted
+          : [],
+        source_file: resolvedContext.source_file || '',
+        owned_repositories: Array.isArray(resolvedContext.owned_repositories)
+          ? resolvedContext.owned_repositories
+          : [],
         governance_relation_status: resolvedContext.governance_relation_status,
         tenant_match_count: tenantResolution.tenant_match_count,
         tenant_resolution_status: tenantResolution.tenant_resolution_status,
@@ -222,8 +372,15 @@ async function validateTenantRepoRequest(input = {}, options = {}) {
     tenant_team_slug: canonicalTenantContext ? canonicalTenantContext.tenant_team_slug : '',
     repo_admin_team_name: canonicalTenantContext ? canonicalTenantContext.repo_admin_team_name : '',
     repo_admin_team_slug: canonicalTenantContext ? canonicalTenantContext.repo_admin_team_slug : '',
+    topology_mode: canonicalTenantContext ? canonicalTenantContext.topology_mode : '',
     context_marker: canonicalTenantContext ? canonicalTenantContext.context_marker : '',
     request_status: requestStatus,
+    no_mutation_evidence: request.dry_run
+      ? {
+          mode: 'dry_run_validation_only',
+          no_mutation_planned: true,
+        }
+      : null,
   };
 
   return {
@@ -254,6 +411,30 @@ async function validateTenantRepoRequest(input = {}, options = {}) {
       tenant_resolution_status: tenantResolution.tenant_resolution_status,
       governance_relation_status: canonicalTenantContext ? canonicalTenantContext.governance_relation_status : 'unknown',
       context_marker: canonicalTenantContext ? canonicalTenantContext.context_marker : '',
+      topology_mode: canonicalTenantContext ? canonicalTenantContext.topology_mode : 'unknown',
+      owned_repositories_status: canonicalTenantContext ? canonicalTenantContext.owned_repositories_status : 'unknown',
+      duplicate_owned_repository_status: duplicateOwnedRepositoryStatus,
+      duplicate_owned_repository_conflict: duplicateOwnedRepositoryConflict,
+      canonical_topology_validation_status: canonicalTopologyValidationStatus,
+      access_model_enforcement: canonicalTenantContext ? canonicalTenantContext.access_model_enforcement : '',
+      access_model_roles: canonicalTenantContext ? canonicalTenantContext.access_model_roles : [],
+      canonical_fields_consulted: canonicalTenantContext ? canonicalTenantContext.canonical_fields_consulted : [],
+      primary_contact_validation: {
+        field: 'primary_contact',
+        submitted_value: request.primary_contact,
+        detected_type: primaryContactDetectedType,
+        normalized_value: request.primary_contact,
+        validation_status: primaryContactValidationStatus,
+        validation_reason: primaryContactValidationReason,
+      },
+      secondary_contact_validation: {
+        field: 'secondary_contact',
+        submitted_value: request.secondary_contact,
+        detected_type: secondaryContactDetectedType,
+        normalized_value: request.secondary_contact,
+        validation_status: secondaryContactValidationStatus,
+        validation_reason: secondaryContactValidationReason,
+      },
       requested_visibility: repositoryVisibility,
       allowed_repository_visibilities: allowedRepositoryVisibilities,
       visibility_validation_status: visibilityValidationStatus,
@@ -261,6 +442,22 @@ async function validateTenantRepoRequest(input = {}, options = {}) {
       repository_exists: Boolean(repositoryState && repositoryState.exists),
       current_repo_admin_permission: currentRepoAdminPermission,
       dry_run_no_mutation: Boolean(request.dry_run),
+    },
+    primary_contact_validation: {
+      field: 'primary_contact',
+      submitted_value: request.primary_contact,
+      detected_type: primaryContactDetectedType,
+      normalized_value: request.primary_contact,
+      validation_status: primaryContactValidationStatus,
+      validation_reason: primaryContactValidationReason,
+    },
+    secondary_contact_validation: {
+      field: 'secondary_contact',
+      submitted_value: request.secondary_contact,
+      detected_type: secondaryContactDetectedType,
+      normalized_value: request.secondary_contact,
+      validation_status: secondaryContactValidationStatus,
+      validation_reason: secondaryContactValidationReason,
     },
     no_mutation_planned: true,
     request: enrichedRequest,

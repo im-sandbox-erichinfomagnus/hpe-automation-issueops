@@ -404,7 +404,7 @@ test('csv_attachment waiting request bypasses central assignment and does not ad
   assert.equal(result.approval.approval_status, 'pending');
   assert.equal(result.request.request_status, 'waiting_for_attachment');
   assert.match(fs.readFileSync(summaryPath, 'utf8'), /Request status: waiting_for_attachment/i);
-  assert.doesNotMatch(fs.readFileSync(summaryPath, 'utf8'), /Attachment status:/i);
+  assert.match(fs.readFileSync(summaryPath, 'utf8'), /Attachment status: waiting for requester CSV attachment comment/i);
 });
 
 test('approval integration enforces least-privilege boundary when ISSUEOPS_GITHUB_TOKEN is unavailable', async () => {

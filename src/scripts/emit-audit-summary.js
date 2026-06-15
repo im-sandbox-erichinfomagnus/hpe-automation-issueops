@@ -21,6 +21,7 @@ function formatAuditSummary(auditArtifact = {}) {
   const isBulkCsv = request.intake_mode === 'bulk_csv';
   const isCsvAttachment = request.intake_mode === 'csv_attachment';
   const isTeamRepoAccess = operation === 'team_repo_access';
+  const isTeamRepoAccessRemoval = operation === 'team_repo_access_removal';
   const isTeamHierarchy = operation === 'team_hierarchy';
   const isTeamCreation = operation === 'team_creation';
 
@@ -46,8 +47,14 @@ function formatAuditSummary(auditArtifact = {}) {
       `- Target organization: ${request.organization || 'n/a'}`,
       `- Tenant name: ${request.tenant_name_input || request.tenant_display_name || 'n/a'}`,
       `- Target repository name: ${request.repository_name_normalized || request.repository_name_input || 'n/a'}`,
-      `- Requested repository visibility: ${request.repository_visibility || 'private'}`,
-      `- Repository visibility source: ${request.repository_visibility_source || 'default'}`,
+      `- Requested repository visibility: ${request.repository_visibility || 'not_provided'}`,
+      `- Repository visibility source: ${request.repository_visibility_source || 'not_provided'}`,
+      request.primary_contact
+        ? `- Primary contact: ${request.primary_contact} (${request.primary_contact_type || 'unknown'})`
+        : '- Primary contact: (not provided)',
+      request.secondary_contact
+        ? `- Secondary contact: ${request.secondary_contact} (${request.secondary_contact_type || 'unknown'})`
+        : '- Secondary contact: (not provided)',
       `- Existing repository visibility: ${reconciliation.existing_visibility || 'n/a'}`,
       `- Actual repository visibility: ${reconciliation.actual_visibility || 'n/a'}`,
       `- Visibility conflict: ${reconciliation.visibility_conflict ? 'true' : 'false'}`,
@@ -66,6 +73,9 @@ function formatAuditSummary(auditArtifact = {}) {
       `- Allowed repository visibilities: ${validation.validation_findings && Array.isArray(validation.validation_findings.allowed_repository_visibilities) ? validation.validation_findings.allowed_repository_visibilities.join(', ') : 'private, internal, public'}`,
       `- Tenant resolution: ${validation.tenant_resolution && validation.tenant_resolution.tenant_resolution_status || 'unknown'}`,
       `- Tenant matches: ${validation.tenant_resolution && validation.tenant_resolution.tenant_match_count || 0}`,
+      `- Topology mode: ${validation.validation_findings && validation.validation_findings.topology_mode || 'unknown'}`,
+      `- Canonical fields consulted: ${validation.validation_findings && Array.isArray(validation.validation_findings.canonical_fields_consulted) && validation.validation_findings.canonical_fields_consulted.length > 0 ? validation.validation_findings.canonical_fields_consulted.join(', ') : 'n/a'}`,
+      `- Canonical topology validation: ${validation.validation_findings && validation.validation_findings.canonical_topology_validation_status || 'n/a'}`,
       `- Tenant parent team: ${request.tenant_team_slug || 'n/a'}`,
       `- Tenant repo-admin team: ${request.repo_admin_team_slug || 'n/a'}`,
       `- Context marker: ${request.context_marker || validation.validation_findings && validation.validation_findings.context_marker || 'n/a'}`,
@@ -73,11 +83,32 @@ function formatAuditSummary(auditArtifact = {}) {
       `- Current repo-admin permission: ${validation.current_repo_admin_permission || 'unknown'}`,
       `- Planned creation action: ${reconciliation.creation_action || 'n/a'}`,
       `- Planned permission action: ${reconciliation.permission_action || 'n/a'}`,
+      `- Planned custom properties action: ${reconciliation.custom_properties_action || 'n/a'}`,
       `- Blocked reason: ${reconciliation.blocked_reason || 'n/a'}`,
       `- Direct admin avoidance: ${reconciliation.direct_admin_avoidance || 'n/a'}`,
       `- Boundary revalidation: ${reconciliation.boundary_revalidation_status || 'n/a'}`,
+      `- Dry-run validation evidence: ${request.no_mutation_evidence && request.no_mutation_evidence.mode ? request.no_mutation_evidence.mode : (validation.no_mutation_planned ? 'validation_only' : 'n/a')}`,
       `- Repository creation result: ${execution.repository_creation_result || 'n/a'}`,
       `- Repo-admin grant result: ${execution.repo_admin_grant_result || 'n/a'}`,
+      `- Repository custom properties result: ${execution.repository_custom_properties_result || 'n/a'}`,
+      `- Execution context marker: ${execution.execution_context_marker || 'n/a'}`,
+      `- Context binding status: ${execution.context_binding_status || 'unknown'}`,
+      `- Execution topology mode: ${execution.topology_mode || validation.validation_findings && validation.validation_findings.topology_mode || 'unknown'}`,
+      `- Execution tenant identifier: ${execution.tenant_id || validation.canonical_tenant_context && (validation.canonical_tenant_context.tenant_id || validation.canonical_tenant_context.tenant_key) || 'n/a'}`,
+      `- Execution tenant team slug: ${execution.tenant_team_slug || validation.canonical_tenant_context && validation.canonical_tenant_context.tenant_team_slug || 'n/a'}`,
+      `- Execution repo-admin team slug: ${execution.repo_admin_team_slug || validation.canonical_tenant_context && validation.canonical_tenant_context.repo_admin_team_slug || 'n/a'}`,
+      execution.mutation_token_source
+        ? `- Mutation token source: ${execution.mutation_token_source} (${execution.mutation_token_kind || 'unknown'}, pat_backed=${execution.mutation_token_is_pat_backed ? 'true' : 'false'})`
+        : null,
+      execution.repository_custom_properties_failure_reason
+        ? `- Repository custom properties failure reason: ${execution.repository_custom_properties_failure_reason}`
+        : null,
+      execution.repository_custom_properties_failure_status_code
+        ? `- Repository custom properties failure status code: ${execution.repository_custom_properties_failure_status_code}`
+        : null,
+      execution.repository_custom_properties_failure_detail
+        ? `- Repository custom properties failure detail: ${execution.repository_custom_properties_failure_detail}`
+        : null,
       `- Audit persistence result: ${execution.audit_persistence_result || 'n/a'}`,
       `- Added: ${execution.mutation_count || 0}`,
       `- No-op: ${execution.noop_count || 0}`,
@@ -272,8 +303,17 @@ function formatAuditSummary(auditArtifact = {}) {
       `- Repository: ${request.repository || 'n/a'}`,
       `- Target organization: ${request.organization || 'n/a'}`,
       `- Tenant: ${request.tenant_display_name || 'n/a'} (${request.tenant_key || 'n/a'})`,
+      `- Tenant type: ${request.tenant_type || 'n/a'}`,
+      `- Topology root team: ${request.topology && request.topology.teams && request.topology.teams.tenantRootTeam || 'n/a'}`,
+      `- Topology nodes: ${request.topology && request.topology.teams && Array.isArray(request.topology.teams.structure) ? request.topology.teams.structure.length : 0}`,
+      `- External mappings: cmdb=${request.external_mappings && request.external_mappings.cmdb_id || 'n/a'}, cost_center=${request.external_mappings && request.external_mappings.cost_center || 'n/a'}, business_unit=${request.external_mappings && request.external_mappings.business_unit || 'n/a'}, environment=${request.external_mappings && request.external_mappings.environment || 'n/a'}`,
+      `- Contacts: primary=${request.primary_contact || 'n/a'}, secondary=${request.secondary_contact || 'n/a'}`,
+      `- Compatibility mode: ${request.compatibility && request.compatibility.mode || 'canonical'}`,
+      `- Lifecycle status equivalent: ${request.lifecycle_status_equivalent || request.compatibility && request.compatibility.lifecycle_status_equivalent || 'active'}`,
+      `- Compatibility provenance: source_issue=${request.compatibility && request.compatibility.provenance && request.compatibility.provenance.source_issue_number || 'n/a'}, source_run=${request.compatibility && request.compatibility.provenance && request.compatibility.provenance.source_run_id || 'n/a'}`,
       `- Tenant parent team: ${request.tenant_team_slug || 'n/a'}`,
       `- Tenant repo-admin team: ${request.repo_admin_team_slug || 'n/a'}`,
+      `- Tenant CICD-admin team: ${request.cicd_admin_team_slug || 'n/a'}`,
       `- Designated approver: ${request.designated_approver_login || 'n/a'}`,
       `- Requester: ${request.requester_login || 'n/a'}`,
       `- Intake mode: ${request.intake_mode || 'n/a'}`,
@@ -286,7 +326,16 @@ function formatAuditSummary(auditArtifact = {}) {
       `- Teams to create: ${(reconciliation.teams_to_create || []).length}`,
       `- Teams already present: ${(reconciliation.teams_already_present || []).length}`,
       `- Child links to apply: ${(reconciliation.child_links_to_apply || []).length}`,
+      `- CICD team requested: ${reconciliation.cicd_admin_team_requested ? 'true' : 'false'}`,
+      `- CICD team create planned: ${reconciliation.cicd_admin_team_create_planned ? 'true' : 'false'}`,
+      `- CICD team already present: ${reconciliation.cicd_admin_team_already_present ? 'true' : 'false'}`,
       `- Requester bootstrap action: ${reconciliation.requester_bootstrap_action || 'n/a'}`,
+      `- CICD capability action: ${reconciliation.cicd_capability_action || 'n/a'}`,
+      `- CICD capability selected path: ${reconciliation.cicd_capability_decision && reconciliation.cicd_capability_decision.selected_path || 'n/a'}`,
+      `- CICD capability status: ${reconciliation.cicd_capability_decision && reconciliation.cicd_capability_decision.status || 'n/a'}`,
+      `- CICD capability reason code: ${reconciliation.cicd_capability_decision && reconciliation.cicd_capability_decision.reason_code || 'n/a'}`,
+      `- CICD topology update action: ${reconciliation.cicd_topology_update_action || 'n/a'}`,
+      `- CICD topology update result: ${reconciliation.cicd_topology_update_result && reconciliation.cicd_topology_update_result.status || 'n/a'}`,
       `- Registry persistence action: ${reconciliation.registry_persistence_action || 'n/a'}`,
       `- No-mutation intent: ${validation.no_mutation_planned ? 'true' : 'false'}`,
       `- Added: ${execution.mutation_count || 0}`,
@@ -313,6 +362,55 @@ function formatAuditSummary(auditArtifact = {}) {
     ].filter(Boolean).join('\n');
   }
 
+  if (isTeamRepoAccessRemoval) {
+    return [
+      '# Remove Team Repository Access Workflow Summary',
+      '',
+      `- Request ID: ${request.request_id || 'n/a'}`,
+      `- Repository: ${request.repository || 'n/a'}`,
+      `- Target organization: ${request.organization || 'n/a'}`,
+      `- Target team: ${request.team_slug || request.team_name || 'n/a'}`,
+      `- Designated approver: ${request.designated_approver_login || 'n/a'}`,
+      `- Requester: ${request.requester_login || 'n/a'}`,
+      `- Intake mode: ${request.intake_mode || 'n/a'}`,
+      `- Request status: ${request.request_status || 'submitted'}`,
+      `- Central assignment: ${assignment.assignment_status || 'not_attempted'}${assignment.assigned_login ? ` (${assignment.assigned_login})` : ''}`,
+      `- Approval: ${approval.approval_status || 'pending'} (${repoAccessApprovalState})`,
+      approval.approver_login ? `- Approver: ${approval.approver_login}` : null,
+      `- Validation: ${validation.is_valid ? 'passed' : 'failed'}`,
+      isCsvAttachment && request.request_status === 'waiting_for_attachment'
+        ? '- Attachment status: waiting for requester CSV attachment comment'
+        : null,
+      `- Repositories requested: ${(request.requested_repository_removals || []).length}`,
+      `- Removed repositories: ${execution.removed_count || execution.mutation_count || 0}`,
+      `- No-op repositories: ${execution.noop_count || (reconciliation.already_absent_noops || []).length || 0}`,
+      `- Rejected repositories: ${execution.rejected_count || (reconciliation.rejected_items || []).length || 0}`,
+      `- Failed repositories: ${execution.failure_count || 0}`,
+      `- Rollback status: ${execution.rollback_status || 'not_needed'}`,
+      validation.warnings && validation.warnings.length > 0
+        ? `- Validation warnings: ${validation.warnings.join('; ')}`
+        : null,
+      validation.errors && validation.errors.length > 0
+        ? `- Validation errors: ${validation.errors.join('; ')}`
+        : null,
+      assignment.assignment_note ? `- Assignment note: ${assignment.assignment_note}` : null,
+      assignment.assignment_status === 'assigned'
+        ? '- Assignment semantics: routing only (never grants approval)'
+        : null,
+      approval.decision_note ? `- Approval note: ${approval.decision_note}` : null,
+      '',
+      execution.summary || (request.request_status === 'waiting_for_attachment'
+        ? 'Request metadata is valid, but execution remains blocked until the requester posts a qualifying CSV attachment comment.'
+        : validation.is_valid
+          ? approval.approval_status === 'approved'
+            ? 'Request is approved and eligible for repository-access removal execution. No repository-access mutation was attempted in this phase.'
+            : approval.approval_status === 'denied'
+              ? 'Approval was denied or invalid. No repository-access mutation was attempted.'
+              : 'Request is validated and ready for approval. No repository-access mutation was attempted.'
+          : 'Request validation failed. No repository-access mutation was attempted.'),
+    ].filter(Boolean).join('\n');
+  }
+
   if (isTeamRepoAccess) {
     return [
       '# Add Team Repository Access Workflow Summary',
@@ -330,6 +428,24 @@ function formatAuditSummary(auditArtifact = {}) {
       `- Approval: ${approval.approval_status || 'pending'} (${repoAccessApprovalState})`,
       approval.approver_login ? `- Approver: ${approval.approver_login}` : null,
       `- Validation: ${validation.is_valid ? 'passed' : 'failed'}`,
+      isCsvAttachment && request.request_status === 'waiting_for_attachment'
+        ? '- Attachment status: waiting for requester CSV attachment comment'
+        : null,
+      isCsvAttachment && request.accepted_attachment_submission && request.accepted_attachment_submission.attachment_url
+        ? `- Attachment URL: ${request.accepted_attachment_submission.attachment_url}`
+        : null,
+      isCsvAttachment && request.accepted_attachment_submission && request.accepted_attachment_submission.comment_id
+        ? `- Attachment comment ID: ${request.accepted_attachment_submission.comment_id}`
+        : null,
+      isCsvAttachment && request.accepted_attachment_submission && request.accepted_attachment_submission.uploader_login
+        ? `- Attachment uploader: ${request.accepted_attachment_submission.uploader_login}`
+        : null,
+      isCsvAttachment && request.accepted_attachment_submission && request.accepted_attachment_submission.filename
+        ? `- Attachment filename: ${request.accepted_attachment_submission.filename}`
+        : null,
+      isCsvAttachment && request.accepted_attachment_submission && request.accepted_attachment_submission.content_hash
+        ? `- Attachment content hash: ${request.accepted_attachment_submission.content_hash}`
+        : null,
       isBulkCsv
         ? `- CSV row findings: ${(validation.csv_row_findings || request.csv_row_findings || []).length}`
         : null,

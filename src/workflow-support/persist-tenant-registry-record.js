@@ -32,11 +32,128 @@ function stripVolatileRegistryFields(record) {
   return stable;
 }
 
-function buildTenantRegistryRecord(input = {}) {
+function isLegacyTenantRecord(record) {
+  return Boolean(record && typeof record === 'object' && record.tenant_key && !record.tenantId);
+}
+
+function normalizeLifecycleStatus(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized || normalized === 'active') {
+    return 'active';
+  }
+  if (['blocked', 'inactive', 'suspended'].includes(normalized)) {
+    return 'blocked';
+  }
+  if (['partial_failure', 'partial-failure', 'failed_after_approved_execution', 'partially_executed'].includes(normalized)) {
+    return 'partial_failure';
+  }
+  if (['decommissioned', 'retired'].includes(normalized)) {
+    return 'decommissioned';
+  }
+  return 'active';
+}
+
+function mapCicdRegistryExtension(input = {}) {
   const request = input.request || {};
-  const nowIso = new Date().toISOString();
+  const reconciliation = input.reconciliation || {};
+  const decision = reconciliation.cicd_capability_decision || request.cicd_capability_intent || {};
 
   return {
+    cicd_admin_team_name: request.cicd_admin_team_name || null,
+    cicd_admin_team_slug: request.cicd_admin_team_slug || null,
+    cicd_capability_status: decision.status || request.cicd_capability_status || 'requested',
+    cicd_capability_reason_code: decision.reason_code || request.cicd_capability_reason_code || null,
+    cicd_capability_evidence_ref: request.cicd_capability_evidence_ref || null,
+  };
+}
+
+function mapCicdTopologyRelation(input = {}) {
+  const request = input.request || {};
+  const reconciliation = input.reconciliation || {};
+  const relationOutcome = reconciliation.cicd_topology_update_result && reconciliation.cicd_topology_update_result.status
+    ? reconciliation.cicd_topology_update_result.status
+    : reconciliation.cicd_topology_update_action === 'not_applicable'
+      ? 'noop'
+      : 'applied';
+
+  if (!request.cicd_admin_team_slug) {
+    return null;
+  }
+
+  return {
+    parent_team_name: request.tenant_team_name || null,
+    parent_team_slug: request.tenant_team_slug || null,
+    child_team_name: request.cicd_admin_team_name || null,
+    child_team_slug: request.cicd_admin_team_slug,
+    relation_status: relationOutcome,
+    conflict_reason: reconciliation.cicd_topology_update_result && reconciliation.cicd_topology_update_result.conflict_reason || null,
+  };
+}
+
+function ensureTopologyStructureRelation(topology = {}, relation = null) {
+  if (!relation || !relation.child_team_slug || !relation.parent_team_slug) {
+    return topology;
+  }
+
+  // Only persist a structure edge when the reconciliation actually applied it.
+  if (String(relation.relation_status || '').toLowerCase() !== 'applied') {
+    return topology;
+  }
+
+  const nextTopology = topology && typeof topology === 'object' ? { ...topology } : {};
+  const teams = nextTopology.teams && typeof nextTopology.teams === 'object' ? { ...nextTopology.teams } : {};
+  const structure = Array.isArray(teams.structure) ? [...teams.structure] : [];
+  const alreadyPresent = structure.some((entry) =>
+    entry &&
+    String(entry.team || '').toLowerCase() === String(relation.child_team_slug).toLowerCase() &&
+    String(entry.parent || '').toLowerCase() === String(relation.parent_team_slug).toLowerCase()
+  );
+
+  const childAlreadyMapped = structure.some((entry) =>
+    entry && String(entry.team || '').toLowerCase() === String(relation.child_team_slug).toLowerCase()
+  );
+
+  if (!alreadyPresent && !childAlreadyMapped) {
+    structure.push({
+      team: relation.child_team_slug,
+      parent: relation.parent_team_slug,
+      type: 'cicd-admin',
+    });
+  }
+
+  teams.structure = structure;
+  nextTopology.teams = teams;
+  return nextTopology;
+}
+
+function buildTenantRegistryRecord(input = {}) {
+  const request = input.request || {};
+  const reconciliation = input.reconciliation || {};
+  const nowIso = new Date().toISOString();
+  const cicdExtension = mapCicdRegistryExtension({ request, reconciliation });
+  const cicdTopologyRelation = mapCicdTopologyRelation({ request, reconciliation });
+  const topologyWithCicdRelation = ensureTopologyStructureRelation(request.topology || null, cicdTopologyRelation);
+
+  return {
+    tenantId: request.tenant_key,
+    tenantName: request.tenant_display_name,
+    tenantType: request.tenant_type || 'application',
+    topology: topologyWithCicdRelation,
+    externalMappings: {
+      cmdbId: request.external_mappings && request.external_mappings.cmdb_id || null,
+      costCenter: request.external_mappings && request.external_mappings.cost_center || null,
+      businessUnit: request.external_mappings && request.external_mappings.business_unit || null,
+      environment: request.external_mappings && request.external_mappings.environment || 'nonprod',
+    },
+    metadata: {
+      primaryContact: request.primary_contact || '',
+      secondaryContact: request.secondary_contact || null,
+      createdBy: request.requester_login,
+      createdDate: request.submitted_at || nowIso,
+    },
+    lifecycleStatus: request.canonical_tenant_record && request.canonical_tenant_record.lifecycleStatus
+      ? request.canonical_tenant_record.lifecycleStatus
+      : normalizeLifecycleStatus(input.lifecycle_status || request.lifecycle_status),
     tenant_key: request.tenant_key,
     tenant_display_name: request.tenant_display_name,
     organization: request.organization,
@@ -44,6 +161,12 @@ function buildTenantRegistryRecord(input = {}) {
     tenant_team_slug: request.tenant_team_slug,
     repo_admin_team_name: request.repo_admin_team_name,
     repo_admin_team_slug: request.repo_admin_team_slug,
+    cicd_admin_team_name: cicdExtension.cicd_admin_team_name,
+    cicd_admin_team_slug: cicdExtension.cicd_admin_team_slug,
+    cicd_topology_relation: cicdTopologyRelation,
+    cicd_capability_status: cicdExtension.cicd_capability_status,
+    cicd_capability_reason_code: cicdExtension.cicd_capability_reason_code,
+    cicd_capability_evidence_ref: cicdExtension.cicd_capability_evidence_ref,
     bootstrap_tenant_admin_login: request.requester_login,
     requester_login: request.requester_login,
     approver_login: input.approver_login || '',
@@ -66,6 +189,7 @@ function persistTenantRegistryRecord(input = {}) {
 
   const record = buildTenantRegistryRecord({
     request,
+    reconciliation: input.reconciliation || null,
     approver_login: input.approver_login,
     lifecycle_status: input.lifecycle_status,
     run_id: input.run_id,
@@ -119,6 +243,7 @@ function persistTenantRegistryRecord(input = {}) {
         throw readError;
       }
     }
+    const legacyMigrationDetected = isLegacyTenantRecord(existingRecord);
     const createdAt = existingRecord && existingRecord.created_at
       ? existingRecord.created_at
       : record.created_at;
@@ -148,6 +273,17 @@ function persistTenantRegistryRecord(input = {}) {
       mode,
       registry_path: registryFilePath,
       record: persistedRecord,
+      migration: legacyMigrationDetected
+        ? {
+            status: 'legacy_to_canonical_migrated',
+            from_schema: 'legacy',
+            to_schema: 'canonical',
+          }
+        : {
+            status: 'none',
+            from_schema: existingRecord ? 'canonical' : 'new',
+            to_schema: 'canonical',
+          },
     };
   } catch (error) {
     fs.mkdirSync(artifactDirectory, { recursive: true });
@@ -174,5 +310,7 @@ function persistTenantRegistryRecord(input = {}) {
 
 module.exports = {
   buildTenantRegistryRecord,
+  mapCicdRegistryExtension,
+  mapCicdTopologyRelation,
   persistTenantRegistryRecord,
 };

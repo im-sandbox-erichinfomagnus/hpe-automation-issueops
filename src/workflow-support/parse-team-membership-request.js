@@ -149,7 +149,7 @@ function parseTeamMembershipRequest(input = {}) {
     ? 'csv_attachment'
     : requestedIntakeMode === 'manual'
       ? 'manual'
-      : manualPopulated && !legacyBulkCsvPopulated
+      : manualPopulated
           ? 'manual'
           : null;
   const manualNormalization = manualPopulated

@@ -192,6 +192,73 @@ function createGitHubTeamRepoApi(options = {}) {
       };
     },
 
+    async getOrganizationCustomPropertiesSchema({ organization }) {
+      const result = await request(`/orgs/${organization}/properties/schema`);
+
+      if (!result.ok) {
+        throw Object.assign(new Error('Failed to load organization custom properties schema'), result, {
+          retry_after: getHeader(result.headers, 'retry-after'),
+        });
+      }
+
+      return Array.isArray(result.payload) ? result.payload : [];
+    },
+
+    async createOrUpdateOrganizationCustomProperty({ organization, property_name, value_type = 'string', description = null, values_editable_by = 'org_actors' }) {
+      const result = await request(`/orgs/${organization}/properties/schema/${encodeURIComponent(String(property_name || ''))}`, {
+        method: 'PUT',
+        body: {
+          value_type: String(value_type || 'string'),
+          description: description == null ? null : String(description),
+          values_editable_by: values_editable_by == null ? null : String(values_editable_by),
+        },
+      });
+
+      if (!result.ok) {
+        throw Object.assign(new Error('Failed to create or update organization custom property'), result, {
+          retry_after: getHeader(result.headers, 'retry-after'),
+        });
+      }
+
+      return result.payload || null;
+    },
+
+    async setRepositoryCustomProperties({ owner, repo, properties }) {
+      const normalizedProperties = Array.isArray(properties)
+        ? properties
+            .filter((entry) => entry && entry.property_name && entry.value != null)
+            .map((entry) => ({
+              property_name: String(entry.property_name),
+              value: String(entry.value),
+            }))
+        : [];
+
+      if (normalizedProperties.length === 0) {
+        return {
+          repository_full_name: `${owner}/${repo}`.toLowerCase(),
+          updated_count: 0,
+        };
+      }
+
+      const result = await request(`/repos/${owner}/${repo}/properties/values`, {
+        method: 'PATCH',
+        body: {
+          properties: normalizedProperties,
+        },
+      });
+
+      if (!result.ok) {
+        throw Object.assign(new Error('Failed to set repository custom properties'), result, {
+          retry_after: getHeader(result.headers, 'retry-after'),
+        });
+      }
+
+      return {
+        repository_full_name: `${owner}/${repo}`.toLowerCase(),
+        updated_count: normalizedProperties.length,
+      };
+    },
+
     async getTeamRepositoryPermission({ organization, teamSlug, owner, repo }) {
       const result = await request(`/orgs/${organization}/teams/${teamSlug}/repos/${owner}/${repo}`, {
         headers: {
@@ -244,6 +311,22 @@ function createGitHubTeamRepoApi(options = {}) {
       };
     },
 
+    async removeTeamRepositoryPermission({ organization, teamSlug, owner, repo }) {
+      const result = await request(`/orgs/${organization}/teams/${teamSlug}/repos/${owner}/${repo}`, {
+        method: 'DELETE',
+      });
+
+      if (!result.ok && result.status !== 404) {
+        throw Object.assign(new Error('Failed to remove team repository permission'), result, {
+          retry_after: getHeader(result.headers, 'retry-after'),
+        });
+      }
+
+      return {
+        repository_full_name: `${owner}/${repo}`.toLowerCase(),
+      };
+    },
+
     async addIssueLabels({ repository, issueNumber, labels }) {
       const [owner, repo] = String(repository || '').split('/');
       const result = await request(`/repos/${owner}/${repo}/issues/${issueNumber}/labels`, {
@@ -254,6 +337,31 @@ function createGitHubTeamRepoApi(options = {}) {
         throw Object.assign(new Error('Failed to add issue labels'), result);
       }
       return (result.payload || []).map((label) => String(label.name || '').toLowerCase()).filter(Boolean);
+    },
+
+    async listIssueLabels({ repository, issueNumber }) {
+      const [owner, repo] = String(repository || '').split('/');
+      const result = await request(`/repos/${owner}/${repo}/issues/${issueNumber}/labels?per_page=100`);
+
+      if (!result.ok) {
+        throw Object.assign(new Error('Failed to list issue labels'), result);
+      }
+
+      return (result.payload || []).map((label) => String(label.name || '').toLowerCase()).filter(Boolean);
+    },
+
+    async removeIssueLabel({ repository, issueNumber, label }) {
+      const [owner, repo] = String(repository || '').split('/');
+      const encodedLabel = encodeURIComponent(String(label || ''));
+      const result = await request(`/repos/${owner}/${repo}/issues/${issueNumber}/labels/${encodedLabel}`, {
+        method: 'DELETE',
+      });
+
+      if (!result.ok && result.status !== 404) {
+        throw Object.assign(new Error('Failed to remove issue label'), result);
+      }
+
+      return { removed: result.status !== 404, label: String(label || '').toLowerCase() };
     },
   };
 }

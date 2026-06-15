@@ -24,6 +24,46 @@ function runGit(args, execOptions) {
   return String(result.stdout || '');
 }
 
+function resolveGitIdentity(env = {}) {
+  const actor = String(env.GITHUB_ACTOR || '').trim();
+  const defaultName = actor || 'github-actions[bot]';
+  const defaultEmail = actor
+    ? `${actor}@users.noreply.github.com`
+    : '41898282+github-actions[bot]@users.noreply.github.com';
+
+  return {
+    name: String(env.GIT_COMMITTER_NAME || env.GIT_AUTHOR_NAME || defaultName).trim() || defaultName,
+    email: String(env.GIT_COMMITTER_EMAIL || env.GIT_AUTHOR_EMAIL || defaultEmail).trim() || defaultEmail,
+  };
+}
+
+function ensureGitIdentity(execOptions, env = {}) {
+  const { name, email } = resolveGitIdentity(env);
+
+  let configuredName = '';
+  let configuredEmail = '';
+
+  try {
+    configuredName = runGit(['config', '--get', 'user.name'], execOptions).trim();
+  } catch (_error) {
+    configuredName = '';
+  }
+
+  try {
+    configuredEmail = runGit(['config', '--get', 'user.email'], execOptions).trim();
+  } catch (_error) {
+    configuredEmail = '';
+  }
+
+  if (!configuredName) {
+    runGit(['config', 'user.name', name], execOptions);
+  }
+
+  if (!configuredEmail) {
+    runGit(['config', 'user.email', email], execOptions);
+  }
+}
+
 /**
  * Commit and push a tenant registry record to the repository.
  * This implements the durable repository write path for registry persistence.
@@ -100,6 +140,15 @@ function commitRegistryRecord(input = {}, options = {}) {
         committed: false,
         pushed: false,
       };
+    }
+
+    if (!dryRun) {
+      try {
+        ensureGitIdentity(execOptions, env);
+      } catch (identityErr) {
+        console.error(`[registry-commit] git identity setup failed: ${identityErr.message}`);
+        throw identityErr;
+      }
     }
 
     // Commit the file

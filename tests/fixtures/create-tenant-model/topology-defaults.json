@@ -1,0 +1,30 @@
+{
+  "repositories": {
+    "owned": []
+  },
+  "runnerTopology": {
+    "runnerGroups": []
+  },
+  "accessModel": {
+    "enforcement": "tenant-boundary",
+    "roles": [
+      "tenant-admin",
+      "repo-admin",
+      "developer",
+      "viewer"
+    ]
+  },
+  "governance": {
+    "codeScanning": {
+      "enabled": true,
+      "mandatory": true
+    },
+    "secretScanning": {
+      "enabled": true,
+      "mandatory": true
+    },
+    "dependabot": {
+      "enabled": true
+    }
+  }
+}
