@@ -60,13 +60,20 @@ function parseJsonFromEnv(rawValue) {
   }
 }
 
-function readParsedRequestFromEnv(env = process.env) {
-  const parsedRequestJson = parseParsedRequestJson(env.PARSED_REQUEST_JSON);
-  if (parsedRequestJson) {
-    return parsedRequestJson;
+function hasParsedRequestValue(value) {
+  if (value == null) {
+    return false;
   }
 
-  return {
+  if (typeof value === 'string') {
+    return value.trim() !== '';
+  }
+
+  return true;
+}
+
+function readParsedRequestFromEnv(env = process.env) {
+  const fallbackParsedRequest = {
     organization: env.PARSED_ORGANIZATION || '',
     team: env.PARSED_TEAM || '',
     parsed_tenant_name: env.PARSED_TENANT_NAME || '',
@@ -138,6 +145,23 @@ function readParsedRequestFromEnv(env = process.env) {
     parsed_cicd_requires_org_owner_grant: env.PARSED_CICD_REQUIRES_ORG_OWNER_GRANT || '',
     dry_run: env.PARSED_DRY_RUN || 'true',
   };
+
+  const parsedRequestJson = parseParsedRequestJson(env.PARSED_REQUEST_JSON);
+  if (!parsedRequestJson) {
+    return fallbackParsedRequest;
+  }
+
+  const mergedParsedRequest = {
+    ...parsedRequestJson,
+  };
+
+  for (const [key, fallbackValue] of Object.entries(fallbackParsedRequest)) {
+    if (!hasParsedRequestValue(mergedParsedRequest[key])) {
+      mergedParsedRequest[key] = fallbackValue;
+    }
+  }
+
+  return mergedParsedRequest;
 }
 
 function isTeamRepoAccessParsedRequest(parsedRequest = {}) {
@@ -504,6 +528,44 @@ function buildTerminalStateValidation(priorArtifact, request) {
       request_status: priorRequest.request_status,
     },
   };
+}     
+
+
+
+
+
+function buildDetailedErrorMessage(error) {
+  if (!error) {
+    return 'Unknown validation error';
+  }
+
+  const parts = [error.message || 'Validation error'];
+  
+  if (error.status) {
+    parts.push(`(HTTP ${error.status})`);
+  }
+
+  if (error.payload && error.payload.message) {
+    const apiMessage = String(error.payload.message || '').trim();
+    if (apiMessage && !parts.includes(apiMessage)) {
+      parts.push(`- ${apiMessage}`);
+    }
+  }
+
+  const baseMessage = String(error.message || '').toLowerCase();
+  const payloadMessage = String(error.payload && error.payload.message ? error.payload.message : '').toLowerCase();
+  const isTeamListForbidden =
+    error.status === 403 &&
+    baseMessage.includes('failed to list organization teams');
+  const hasRepositoryAdminHint = payloadMessage.includes('must have admin rights to repository');
+
+  if (isTeamListForbidden && hasRepositoryAdminHint) {
+    parts.push('- Token lacks required target-org access. Ensure ISSUEOPS_GITHUB_TOKEN is authorized for the target organization and has org/team read permissions.');
+    parts.push('- If using fine-grained PAT, it cannot span multiple resource owners. Use a token owned by the target org context or use a classic PAT/GitHub App with required org permissions.');
+    parts.push('- If the target org enforces SSO, authorize the token for that org before re-running validation.');
+  }
+
+  return parts.join(' ');
 }
 
 async function executeGitHubReadWithRetry(operation, options = {}) {
@@ -545,6 +607,33 @@ function buildMissingTokenHierarchyValidation(request) {
   };
 }
 
+function buildInsufficientHierarchyTokenValidation(request, tokenInfo) {
+  const tokenSource = tokenInfo && tokenInfo.source ? tokenInfo.source : 'unknown';
+  return {
+    is_valid: false,
+    request_status: 'validation_failed',
+    errors: [
+      `Team hierarchy validation requires ISSUEOPS_GITHUB_TOKEN with org-level access. Current token source: ${tokenSource}.`,
+    ],
+    warnings: [],
+    organization_visible: false,
+    parent_team_exists: false,
+    designated_approver_authorization: null,
+    requested_child_links: (request.requested_child_links || []).map((childLink) => ({
+      ...childLink,
+      validation_status: 'rejected',
+      desired_action: 'reject',
+      execution_result: 'not_started',
+      failure_reason: 'insufficient_token_scope',
+    })),
+    existing_child_links: [],
+    request: {
+      ...request,
+      request_status: 'validation_failed',
+    },
+  };
+}
+
 function buildMissingTokenRepoAccessValidation(request) {
   return {
     is_valid: false,
@@ -557,7 +646,7 @@ function buildMissingTokenRepoAccessValidation(request) {
     csv_row_findings: request.csv_row_findings || [],
     csv_row_numbering_convention: request.csv_row_numbering_convention || null,
     designated_approver_authorization: null,
-    requested_repository_grants: request.requested_repository_grants.map((grant) => ({
+    requested_repository_grants: (request.requested_repository_grants || []).map((grant) => ({
       ...grant,
       validation_status: 'rejected',
       desired_action: 'reject',
@@ -731,7 +820,9 @@ async function runRequestValidation(options = {}) {
       executionOutcome = priorArtifact.execution || null;
     } else {
     const tokenInfo = loadWorkflowToken({ env, required: false });
-    if (!tokenInfo.token) {
+    if (operation === 'team_hierarchy' && tokenInfo.source !== 'ISSUEOPS_GITHUB_TOKEN') {
+      validation = buildInsufficientHierarchyTokenValidation(request, tokenInfo);
+    } else if (!tokenInfo.token) {
       if (isTeamRepoAccess) {
         validation = buildMissingTokenRepoAccessValidation(request);
       } else if (isTeamRepoAccessRemoval) {
@@ -1175,22 +1266,146 @@ async function runRequestValidation(options = {}) {
     }
     }
   } catch (error) {
-    validation = {
-      is_valid: false,
-      request_status: 'validation_failed',
-      errors: [error.message],
-      warnings: [],
-      team_exists: false,
-      team_sync_blocked: false,
-      bulk_csv_submission: request.bulk_csv_submission,
-      csv_row_findings: request.csv_row_findings || [],
-      csv_row_numbering_convention: request.csv_row_numbering_convention,
-      requested_people: [],
-      request: {
-        ...request,
+    // Build appropriate validation error response based on request type
+    const detailedErrorMessage = buildDetailedErrorMessage(error);
+    if (isTeamHierarchy) {
+      validation = {
+        is_valid: false,
         request_status: 'validation_failed',
-      },
-    };
+        errors: [detailedErrorMessage],
+        warnings: [],
+        organization_visible: false,
+        parent_team_exists: false,
+        designated_approver_authorization: null,
+        requested_child_links: (request.requested_child_links || []).map((childLink) => ({
+          ...childLink,
+          validation_status: 'rejected',
+          desired_action: 'reject',
+          execution_result: 'not_started',
+          failure_reason: 'validation_error',
+        })),
+        existing_child_links: [],
+        request: {
+          ...request,
+          request_status: 'validation_failed',
+        },
+      };
+    } else if (isTeamCreation) {
+      validation = {
+        is_valid: false,
+        request_status: 'validation_failed',
+        errors: [detailedErrorMessage],
+        warnings: [],
+        organization_visible: false,
+        intended_owner_membership: null,
+        bulk_csv_submission: request.bulk_csv_submission,
+        csv_row_findings: request.csv_row_findings || [],
+        csv_row_numbering_convention: request.csv_row_numbering_convention,
+        requested_teams: (request.requested_teams || []).map((team) => ({
+          ...team,
+          validation_status: 'rejected',
+          desired_action: 'reject',
+          execution_result: 'not_started',
+          failure_reason: 'validation_error',
+        })),
+        existing_teams: [],
+        request: {
+          ...request,
+          request_status: 'validation_failed',
+        },
+      };
+    } else if (isTenantCreation) {
+      validation = {
+        is_valid: false,
+        request_status: 'validation_failed',
+        errors: [detailedErrorMessage],
+        warnings: [],
+        organization_visible: false,
+        designated_approver_authorization: null,
+        requester_eligibility: null,
+        requested_teams: (request.requested_teams || []).map((team) => ({
+          ...team,
+          validation_status: 'rejected',
+          desired_action: 'reject',
+          execution_result: 'not_started',
+          failure_reason: 'validation_error',
+        })),
+        existing_teams: [],
+        request: {
+          ...request,
+          request_status: 'validation_failed',
+        },
+      };
+    } else if (isTenantRepoCreation) {
+      validation = {
+        is_valid: false,
+        request_status: 'validation_failed',
+        errors: [detailedErrorMessage],
+        warnings: [],
+        organization_visible: false,
+        designated_approver_authorization: null,
+        canonical_tenant_context: null,
+        tenant_resolution: {
+          tenant_match_count: 0,
+          tenant_resolution_status: 'validation_error',
+          candidates: [],
+          registry_ref: env.TENANT_REGISTRY_REF || 'main',
+          registry_directory: env.TENANT_REGISTRY_DIR || 'tenant-registry',
+          registry_malformed_files: [],
+          registry_missing_directory: true,
+        },
+        request: {
+          ...request,
+          request_status: 'validation_failed',
+        },
+      };
+    } else if (isTeamRepoAccess) {
+      validation = {
+        is_valid: false,
+        request_status: 'validation_failed',
+        errors: [detailedErrorMessage],
+        warnings: [],
+        organization_visible: false,
+        team_exists: false,
+        requested_repository_grants: [],
+        request: {
+          ...request,
+          request_status: 'validation_failed',
+        },
+      };
+    } else if (isTeamRepoAccessRemoval) {
+      validation = {
+        is_valid: false,
+        request_status: 'validation_failed',
+        errors: [detailedErrorMessage],
+        warnings: [],
+        organization_visible: false,
+        team_exists: false,
+        requested_repository_removals: [],
+        request: {
+          ...request,
+          request_status: 'validation_failed',
+        },
+      };
+    } else {
+      // Default case for team membership requests
+      validation = {
+        is_valid: false,
+        request_status: 'validation_failed',
+        errors: [detailedErrorMessage],
+        warnings: [],
+        team_exists: false,
+        team_sync_blocked: false,
+        bulk_csv_submission: request.bulk_csv_submission,
+        csv_row_findings: request.csv_row_findings || [],
+        csv_row_numbering_convention: request.csv_row_numbering_convention,
+        requested_people: [],
+        request: {
+          ...request,
+          request_status: 'validation_failed',
+        },
+      };
+    }
   }
 
   executionOutcome = executionOutcome || buildExecutionOutcome({
@@ -1302,6 +1517,45 @@ async function runRequestValidation(options = {}) {
 
 if (require.main === module) {
   runRequestValidation().catch((error) => {
+    // Fallback artifact writing when validation crashes before normal artifact generation
+    try {
+      const env = process.env;
+      const artifactPath = path.resolve(
+        env.AUDIT_ARTIFACT_PATH ||
+          path.join(
+            'artifacts',
+              `${isTeamRepoAccessParsedRequest(readParsedRequestFromEnv(env)) ? 'add-team-repo-access' : isTeamRepoAccessRemovalParsedRequest(readParsedRequestFromEnv(env)) ? 'remove-team-repo-access' : isTenantRepoCreationParsedRequest(readParsedRequestFromEnv(env)) ? 'create-tenant-repos' : isTenantCreationParsedRequest(readParsedRequestFromEnv(env)) ? 'create-tenant-model' : isTeamCreationParsedRequest(readParsedRequestFromEnv(env)) ? 'create-org-teams' : isTeamHierarchyParsedRequest(readParsedRequestFromEnv(env)) ? 'add-child-teams' : 'add-team-members'}-validation-${env.ISSUE_NUMBER || 'manual'}.json`
+          )
+      );
+      
+      const stubArtifact = {
+        request: { request_status: 'validation_failed' },
+        validation: {
+          is_valid: false,
+          request_status: 'validation_failed',
+          errors: [buildDetailedErrorMessage(error)],
+          warnings: [],
+        },
+        approval: { approval_status: 'not_requested', approver_role: 'other' },
+        reconciliationPlan: {},
+        executionOutcome: {
+          terminal_state: 'validation_failed',
+          mutation_count: 0,
+          summary: `Validation crashed: ${buildDetailedErrorMessage(error)}`,
+        },
+        metadata: {
+          operation: isTeamRepoAccessParsedRequest(readParsedRequestFromEnv(env)) ? 'team_repo_access' : isTeamRepoAccessRemovalParsedRequest(readParsedRequestFromEnv(env)) ? 'team_repo_access_removal' : isTenantRepoCreationParsedRequest(readParsedRequestFromEnv(env)) ? 'tenant_repo_creation' : isTenantCreationParsedRequest(readParsedRequestFromEnv(env)) ? 'tenant_creation' : isTeamCreationParsedRequest(readParsedRequestFromEnv(env)) ? 'team_creation' : isTeamHierarchyParsedRequest(readParsedRequestFromEnv(env)) ? 'team_hierarchy' : 'team_membership',
+        },
+      };
+
+      fs.mkdirSync(path.dirname(artifactPath), { recursive: true });
+      fs.writeFileSync(artifactPath, JSON.stringify(stubArtifact, null, 2), 'utf8');
+      writeGitHubOutput('audit-artifact-path', artifactPath, env.GITHUB_OUTPUT);
+      writeGitHubOutput('audit-artifact-name', path.basename(artifactPath), env.GITHUB_OUTPUT);
+    } catch (fallbackError) {
+      console.error('Failed to write fallback artifact:', fallbackError);
+    }
+
     console.error(error);
     process.exit(1);
   });

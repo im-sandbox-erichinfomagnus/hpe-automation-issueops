@@ -26,6 +26,25 @@ test('readParsedRequestFromEnv prefers the parser JSON payload for multi-user re
   assert.equal(parsedRequest.team_slug, 'platform-engineering');
 });
 
+test('readParsedRequestFromEnv fills missing parser JSON fields from workflow env outputs', () => {
+  const parsedRequest = readParsedRequestFromEnv({
+    PARSED_REQUEST_JSON: JSON.stringify({
+      organization: 'octo-org',
+      requested_people: 'octocat\nhubot',
+      business_justification: 'Need access',
+    }),
+    PARSED_TEAM_SLUG: 'platform-engineering',
+    PARSED_INTAKE_MODE: 'manual',
+    PARSED_DRY_RUN: 'true',
+  });
+
+  assert.equal(parsedRequest.organization, 'octo-org');
+  assert.equal(parsedRequest.team_slug, 'platform-engineering');
+  assert.equal(parsedRequest.intake_mode, 'manual');
+  assert.equal(parsedRequest.requested_people, 'octocat\nhubot');
+  assert.equal(parsedRequest.dry_run, 'true');
+});
+
 test('parseParsedRequestJson returns null for invalid parser JSON values', () => {
   assert.equal(parseParsedRequestJson('{not valid json'), null);
 });

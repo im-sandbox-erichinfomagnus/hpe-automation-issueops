@@ -96,8 +96,44 @@ jobs:
           body: ${{ steps.issue_context.outputs.issue_body }}
           issue-form-template: create-tenant-repos.yml
 
+      - name: Check request applicability
+        id: request_scope
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_ACTION: ${{ github.event.action || '' }}
+          EVENT_LABEL_NAME: ${{ github.event.label.name || '' }}
+          PARSED_ORGANIZATION: ${{ steps.parse_request.outputs.parsed_organization }}
+          PARSED_TENANT_NAME: ${{ steps.parse_request.outputs.parsed_tenant_name }}
+          PARSED_REPOSITORY_NAME: ${{ steps.parse_request.outputs.parsed_repository_name }}
+        run: |
+          set -euo pipefail
+
+          matches_request=false
+          terminal_label_event=false
+
+          case "${EVENT_LABEL_NAME:-}" in
+            issueops:create-tenant-repos:executed|issueops:create-tenant-repos:failed|issueops:create-tenant-repos:partially_executed)
+              terminal_label_event=true
+              ;;
+          esac
+
+          if [ "${EVENT_NAME:-}" = "issues" ] && [ "${EVENT_ACTION:-}" = "labeled" ] && [ "$terminal_label_event" = "true" ]; then
+            matches_request=false
+          elif [ -n "${PARSED_ORGANIZATION:-}" ] && [ -n "${PARSED_TENANT_NAME:-}" ] && [ -n "${PARSED_REPOSITORY_NAME:-}" ]; then
+            matches_request=true
+          fi
+
+          echo "matches-request=$matches_request" >> "$GITHUB_OUTPUT"
+          echo "terminal-label-event=$terminal_label_event" >> "$GITHUB_OUTPUT"
+
+      - name: Skip terminal label replay
+        if: ${{ steps.request_scope.outputs['terminal-label-event'] == 'true' }}
+        run: |
+          echo 'Terminal create-tenant-repos label event detected. Skipping replay to avoid a self-triggered validation failure after successful execution.' >> "$GITHUB_STEP_SUMMARY"
+
       - name: Run request validation (US1)
         id: request_validation
+        if: ${{ steps.request_scope.outputs.matches-request == 'true' }}
         continue-on-error: true
         env:
           ISSUE_NUMBER: ${{ steps.issue_context.outputs.issue_number }}
@@ -128,6 +164,7 @@ jobs:
 
       - name: Run approval gate (US2)
         id: approval_gate
+        if: ${{ always() && steps.request_scope.outputs.matches-request == 'true' && steps.request_validation.outcome != 'skipped' }}
         continue-on-error: true
         env:
           AUDIT_ARTIFACT_PATH: ${{ steps.request_validation.outputs['audit-artifact-path'] || steps.request_validation.outputs.artifact_path }}
@@ -139,7 +176,7 @@ jobs:
           node src/scripts/run-approval-gate.js
 
       - name: Ensure terminal state labels exist
-        if: ${{ steps.approval_gate.outputs['approval-status'] == 'approved' }}
+        if: ${{ steps.request_scope.outputs.matches-request == 'true' && steps.approval_gate.outputs['approval-status'] == 'approved' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -155,7 +192,7 @@ jobs:
 
       - name: Run approved execution (US3)
         id: approved_execution
-        if: ${{ steps.approval_gate.outputs['approval-status'] == 'approved' }}
+        if: ${{ steps.request_scope.outputs.matches-request == 'true' && steps.approval_gate.outputs['approval-status'] == 'approved' }}
         continue-on-error: true
         env:
           AUDIT_ARTIFACT_PATH: ${{ steps.approval_gate.outputs['audit-artifact-path'] || steps.request_validation.outputs['audit-artifact-path'] || steps.request_validation.outputs.artifact_path }}
@@ -196,6 +233,6 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Approved execution note
-        if: ${{ steps.approval_gate.outputs['approval-status'] == 'approved' }}
+        if: ${{ steps.request_scope.outputs.matches-request == 'true' && steps.approval_gate.outputs['approval-status'] == 'approved' }}
         run: |
           echo "Approval is context-valid and approved execution has been attempted in this phase." >> "$GITHUB_STEP_SUMMARY"

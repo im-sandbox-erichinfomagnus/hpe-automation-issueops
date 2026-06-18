@@ -20,7 +20,11 @@ test('create-tenant-repos workflow includes validation and approval gates', () =
   assert.match(workflow, /run-approval-gate\.js/i);
   assert.match(workflow, /run-approved-execution\.js/i);
   assert.match(workflow, /PARSED_REPOSITORY_VISIBILITY/i);
+  assert.match(workflow, /Check request applicability/i);
+  assert.match(workflow, /terminal-label-event/i);
+  assert.match(workflow, /issueops:create-tenant-repos:executed/i);
   assert.match(workflow, /steps\.approval_gate\.outputs\['approval-status'\]\s*==\s*'approved'/i);
+  assert.match(workflow, /steps\.request_scope\.outputs\.matches-request\s*==\s*'true'/i);
 });
 
 function buildCanonicalTenantRepoRegistry(workspace) {

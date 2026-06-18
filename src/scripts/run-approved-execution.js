@@ -2098,6 +2098,7 @@ async function runApprovedExecution(options = {}) {
       : null,
     cicd_topology_update_outcome: isTenantCreation
       ? reconciliationPlan.cicd_topology_update_result && reconciliationPlan.cicd_topology_update_result.status || null
+      : null,
     repository_custom_properties_result: isTenantRepoCreation
       ? tenantRepoCustomPropertiesExecutionResult && tenantRepoCustomPropertiesExecutionResult.execution_result === 'mutated'
         ? 'mutated'
