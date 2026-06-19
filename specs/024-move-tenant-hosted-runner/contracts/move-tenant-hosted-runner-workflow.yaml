@@ -1,0 +1,96 @@
+name: move-tenant-hosted-runner-workflow-contract
+version: 1
+implementation_status: complete
+last_validated: 2026-06-12
+
+surfaces:
+  issue_form: .github/ISSUE_TEMPLATE/move-tenant-hosted-runner.yml
+  workflow: .github/workflows/move-tenant-hosted-runner.yml
+  parser: src/workflow-support/parse-hosted-runner-move-request.js
+  validator: src/workflow-support/validate-hosted-runner-move-request.js
+  reconciler: src/workflow-support/reconcile-hosted-runner-move.js
+  api: src/workflow-support/github-runner-api.js
+
+issue_form:
+  required_fields:
+    - organization
+    - tenant_name
+    - runner_name
+    - target_runner_group_name
+    - designated_approver
+    - dry_run
+    - justification
+  optional_fields:
+    - hosted_runner_id
+
+operation:
+  metadata_value: hosted_runner_move
+  detection:
+    required:
+      - runner_name
+      - target_runner_group_name
+    excludes:
+      - runner_image_id
+      - runner_size
+  terminal_label_prefix: "issueops:move-tenant-hosted-runner:"
+
+authorization:
+  requester:
+    source: issue author
+    requirement: active membership in the resolved tenant topology admin team
+  approver:
+    source: exact approved issue comment
+    requirement: designated active target organization owner
+  execution:
+    credential: ISSUEOPS_GITHUB_TOKEN
+    requirement: PAT-backed organization hosted-runner administration permission
+
+validation:
+  runner:
+    name_match: exact case-insensitive derived tenant-prefixed name
+    optional_id: positive integer
+    ambiguity_rule: multiple name matches require optional_id
+    id_rule: supplied id must match the named runner
+    missing_rule: reject
+  target_runner_group:
+    name_match: exact case-insensitive name
+    tenant_namespace: required
+    missing_rule: reject
+    creation_rule: never create
+  no_op:
+    condition: current_runner_group_id equals target runner group id
+
+reconciliation:
+  actions:
+    - move_hosted_runner
+    - noop
+    - reject
+  boundary_revalidation: required
+  dry_run_mutation: forbidden
+
+execution:
+  endpoint: "PATCH /orgs/{org}/actions/hosted-runners/{hosted_runner_id}"
+  request_body:
+    runner_group_id: resolved target runner group id
+  retry: bounded
+  success_result: moved
+  already_satisfied_result: noop
+  failure_result: failed
+
+observability:
+  outputs:
+    - github step summary
+    - json audit artifact
+    - terminal state label
+    - issue comment
+  required_fields:
+    - existing_runner_id
+    - current_runner_group_id
+    - target_runner_group_resolution
+    - move_action
+    - runner_move_result
+    - boundary_revalidation_status
+
+tests:
+  contract: tests/contract/move-tenant-hosted-runner-validation.test.js
+  integration: tests/integration/move-tenant-hosted-runner-workflow.test.js

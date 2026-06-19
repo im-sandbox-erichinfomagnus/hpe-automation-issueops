@@ -1,10 +1,14 @@
 'use strict';
 
 function normalizeExecutionResult(result) {
-  const entityId = result.repository_full_name || result.username || result.normalized_slug || result.team_slug || result.requested_name;
+  const entityId = result.repository_full_name || result.runner_name || result.runner_group_name || result.username || result.normalized_slug || result.team_slug || result.requested_name;
   return {
     entity_id: entityId,
     result_kind: result.result_kind || null,
+    runner_name: result.runner_name || null,
+    runner_group_name: result.runner_group_name || null,
+    hosted_runner_id: result.hosted_runner_id ?? null,
+    runner_group_id: result.runner_group_id ?? null,
     requested_name: result.requested_name || null,
     normalized_slug: result.normalized_slug || null,
     team_slug: result.team_slug || null,
@@ -34,7 +38,7 @@ function summarizeResults(results, options = {}) {
   };
 
   for (const result of results.map(normalizeExecutionResult)) {
-    if (['added', 'created', 'mutated', 'linked', 'removed'].includes(result.result)) {
+    if (['added', 'created', 'mutated', 'linked', 'removed', 'deleted', 'moved'].includes(result.result)) {
       summary.mutated.push(result);
       if (result.result === 'removed') {
         summary.removed.push(result);
@@ -207,6 +211,15 @@ function buildExecutionOutcome(input = {}) {
     repository_custom_properties_failure_reason: input.repository_custom_properties_failure_reason || null,
     repository_custom_properties_failure_status_code: input.repository_custom_properties_failure_status_code || null,
     repository_custom_properties_failure_detail: input.repository_custom_properties_failure_detail || null,
+    runner_creation_result: input.runner_creation_result || null,
+    runner_deletion_result: input.runner_deletion_result || null,
+    runner_move_result: input.runner_move_result || null,
+    runner_group_creation_result: input.runner_group_creation_result || null,
+    created_runner_id: input.created_runner_id ?? null,
+    created_runner_status: input.created_runner_status || null,
+    moved_runner_id: input.moved_runner_id ?? null,
+    target_runner_group_id: input.target_runner_group_id ?? null,
+    created_runner_group_id: input.created_runner_group_id ?? null,
     audit_persistence_result: input.audit_persistence_result || null,
     topology_persistence_result: input.topology_persistence_result || input.topologyPersistenceResult || null,
     mutation_token_source: input.mutation_token_source || null,

@@ -7,6 +7,7 @@ const { buildExecutionOutcome } = require('../workflow-support/build-execution-o
 const { buildAuditArtifact, toAuditArtifactJson } = require('../workflow-support/build-audit-artifact');
 const { createGitHubTeamApi } = require('../workflow-support/github-team-api');
 const { createGitHubTeamRepoApi } = require('../workflow-support/github-team-repo-api');
+const { createGitHubRunnerApi } = require('../workflow-support/github-runner-api');
 const { loadWorkflowToken } = require('../workflow-support/load-workflow-token');
 const { parseTeamCreationRequest } = require('../workflow-support/parse-team-creation-request');
 const { parseTenantRepoRequest } = require('../workflow-support/parse-tenant-repo-request');
@@ -15,12 +16,20 @@ const { parseTeamHierarchyRequest } = require('../workflow-support/parse-team-hi
 const { parseTeamMembershipRequest } = require('../workflow-support/parse-team-membership-request');
 const { parseTeamRepoAccessRequest } = require('../workflow-support/parse-team-repo-access-request');
 const { parseTeamRepoAccessRemovalRequest } = require('../workflow-support/parse-team-repo-access-removal-request');
+const { parseHostedRunnerRequest } = require('../workflow-support/parse-hosted-runner-request');
+const { parseHostedRunnerDeletionRequest } = require('../workflow-support/parse-hosted-runner-deletion-request');
+const { parseHostedRunnerMoveRequest } = require('../workflow-support/parse-hosted-runner-move-request');
+const { parseRunnerGroupRequest } = require('../workflow-support/parse-runner-group-request');
 const { reconcileTeamCreation } = require('../workflow-support/reconcile-team-creation');
 const { reconcileTenantRepoCreation } = require('../workflow-support/reconcile-tenant-repo-creation');
 const { evaluateCicdCapabilityPath, reconcileTenantCreation } = require('../workflow-support/reconcile-tenant-creation');
 const { reconcileTeamHierarchy } = require('../workflow-support/reconcile-team-hierarchy');
 const { reconcileTeamRepoAccess } = require('../workflow-support/reconcile-team-repo-access');
 const { reconcileTeamRepoAccessRemoval } = require('../workflow-support/reconcile-team-repo-access-removal');
+const { reconcileHostedRunnerCreation } = require('../workflow-support/reconcile-hosted-runner-creation');
+const { reconcileHostedRunnerDeletion } = require('../workflow-support/reconcile-hosted-runner-deletion');
+const { reconcileHostedRunnerMove } = require('../workflow-support/reconcile-hosted-runner-move');
+const { reconcileRunnerGroupCreation } = require('../workflow-support/reconcile-runner-group-creation');
 const { validateTenantCreationRequest } = require('../workflow-support/validate-tenant-creation-request');
 const { validateTenantRepoRequest } = require('../workflow-support/validate-tenant-repo-request');
 const { validateTeamCreationRequest } = require('../workflow-support/validate-team-creation-request');
@@ -28,6 +37,10 @@ const { validateTeamHierarchyRequest } = require('../workflow-support/validate-t
 const { validateTeamMembershipRequest } = require('../workflow-support/validate-team-membership-request');
 const { validateTeamRepoAccessRequest } = require('../workflow-support/validate-team-repo-access-request');
 const { validateTeamRepoAccessRemovalRequest } = require('../workflow-support/validate-team-repo-access-removal-request');
+const { validateHostedRunnerRequest } = require('../workflow-support/validate-hosted-runner-request');
+const { validateHostedRunnerDeletionRequest } = require('../workflow-support/validate-hosted-runner-deletion-request');
+const { validateHostedRunnerMoveRequest } = require('../workflow-support/validate-hosted-runner-move-request');
+const { validateRunnerGroupRequest } = require('../workflow-support/validate-runner-group-request');
 const { emitAuditSummary } = require('./emit-audit-summary');
 const { createGitHubTeamApi: createMembershipGitHubApi } = require('../workflow-support/github-team-api');
 const { executeWithBoundedRetry } = require('../workflow-support/handle-rate-limit');
@@ -108,6 +121,16 @@ function readParsedRequestFromEnv(env = process.env) {
     requested_repositories: env.PARSED_REQUESTED_REPOSITORIES || '',
     bulk_csv_requested_repositories: env.PARSED_BULK_CSV_REQUESTED_REPOSITORIES || '',
     permission_level: env.PARSED_PERMISSION_LEVEL || '',
+    runner_name: env.PARSED_RUNNER_NAME || '',
+    runner_image_id: env.PARSED_RUNNER_IMAGE_ID || '',
+    runner_image_source: env.PARSED_RUNNER_IMAGE_SOURCE || '',
+    runner_size: env.PARSED_RUNNER_SIZE || '',
+    runner_group_name: env.PARSED_RUNNER_GROUP_NAME || '',
+    hosted_runner_id: env.PARSED_HOSTED_RUNNER_ID || '',
+    target_runner_group_name: env.PARSED_TARGET_RUNNER_GROUP_NAME || '',
+    maximum_runners: env.PARSED_MAXIMUM_RUNNERS || '',
+    runner_group_visibility: env.PARSED_RUNNER_GROUP_VISIBILITY || '',
+    allows_public_repositories: env.PARSED_ALLOWS_PUBLIC_REPOSITORIES || '',
     repository_visibility: env.PARSED_REPOSITORY_VISIBILITY || '',
     parsed_repository_visibility: env.PARSED_REPOSITORY_VISIBILITY || '',
     primary_contact: env.PARSED_PRIMARY_CONTACT || '',
@@ -247,6 +270,41 @@ function isTenantRepoCreationParsedRequest(parsedRequest = {}) {
   const looksLikeRepositoryName = /^[a-zA-Z0-9._-]{1,100}$/.test(firstLineRepositoryName);
 
   return looksLikeRepositoryName && !hasTenantModelSpecificSignals;
+}
+
+function isHostedRunnerCreationParsedRequest(parsedRequest = {}) {
+  return Boolean(
+    (parsedRequest.runner_name || parsedRequest.parsed_runner_name) &&
+    (parsedRequest.runner_image_id ||
+      parsedRequest.parsed_runner_image_id ||
+      parsedRequest.runner_size ||
+      parsedRequest.parsed_runner_size)
+  );
+}
+
+function isHostedRunnerDeletionParsedRequest(parsedRequest = {}) {
+  return Boolean(
+    (parsedRequest.runner_name || parsedRequest.parsed_runner_name) &&
+    !(parsedRequest.target_runner_group_name || parsedRequest.parsed_target_runner_group_name) &&
+    !(parsedRequest.runner_image_id ||
+      parsedRequest.parsed_runner_image_id ||
+      parsedRequest.runner_size ||
+      parsedRequest.parsed_runner_size)
+  );
+}
+
+function isHostedRunnerMoveParsedRequest(parsedRequest = {}) {
+  return Boolean(
+    (parsedRequest.runner_name || parsedRequest.parsed_runner_name) &&
+    (parsedRequest.target_runner_group_name || parsedRequest.parsed_target_runner_group_name)
+  );
+}
+
+function isRunnerGroupCreationParsedRequest(parsedRequest = {}) {
+  return Boolean(
+    (parsedRequest.runner_group_name || parsedRequest.parsed_runner_group_name) &&
+    !(parsedRequest.runner_name || parsedRequest.parsed_runner_name)
+  );
 }
 
 function isTeamCreationParsedRequest(parsedRequest = {}) {
@@ -404,6 +462,10 @@ function terminalStateLabelPrefix(operation) {
     team_repo_access_removal: 'issueops:remove-team-repo-access:',
     tenant_repo_creation: 'issueops:create-tenant-repos:',
     tenant_creation: 'issueops:create-tenant:',
+    hosted_runner_creation: 'issueops:create-tenant-hosted-runner:',
+    hosted_runner_deletion: 'issueops:delete-tenant-hosted-runner:',
+    hosted_runner_move: 'issueops:move-tenant-hosted-runner:',
+    runner_group_creation: 'issueops:create-tenant-runner-groups:',
   };
   return operationPrefixes[operation] || 'issueops:add-team-members:';
 }
@@ -692,14 +754,19 @@ async function runRequestValidation(options = {}) {
     env.AUDIT_ARTIFACT_PATH ||
       path.join(
         'artifacts',
-          `${isTeamRepoAccessParsedRequest(readParsedRequestFromEnv(env)) ? 'add-team-repo-access' : isTeamRepoAccessRemovalParsedRequest(readParsedRequestFromEnv(env)) ? 'remove-team-repo-access' : isTenantRepoCreationParsedRequest(readParsedRequestFromEnv(env)) ? 'create-tenant-repos' : isTenantCreationParsedRequest(readParsedRequestFromEnv(env)) ? 'create-tenant-model' : isTeamCreationParsedRequest(readParsedRequestFromEnv(env)) ? 'create-org-teams' : isTeamHierarchyParsedRequest(readParsedRequestFromEnv(env)) ? 'add-child-teams' : 'add-team-members'}-validation-${env.ISSUE_NUMBER || 'manual'}.json`
+          `${isTeamRepoAccessParsedRequest(readParsedRequestFromEnv(env)) ? 'add-team-repo-access' : isTeamRepoAccessRemovalParsedRequest(readParsedRequestFromEnv(env)) ? 'remove-team-repo-access' : isTenantRepoCreationParsedRequest(readParsedRequestFromEnv(env)) ? 'create-tenant-repos' : isHostedRunnerCreationParsedRequest(readParsedRequestFromEnv(env)) ? 'create-tenant-hosted-runner' : isHostedRunnerMoveParsedRequest(readParsedRequestFromEnv(env)) ? 'move-tenant-hosted-runner' : isHostedRunnerDeletionParsedRequest(readParsedRequestFromEnv(env)) ? 'delete-tenant-hosted-runner' : isRunnerGroupCreationParsedRequest(readParsedRequestFromEnv(env)) ? 'create-tenant-runner-groups' : isTenantCreationParsedRequest(readParsedRequestFromEnv(env)) ? 'create-tenant-model' : isTeamCreationParsedRequest(readParsedRequestFromEnv(env)) ? 'create-org-teams' : isTeamHierarchyParsedRequest(readParsedRequestFromEnv(env)) ? 'add-child-teams' : 'add-team-members'}-validation-${env.ISSUE_NUMBER || 'manual'}.json`
       )
   );
   const parsedRequest = readParsedRequestFromEnv(env);
   const isTeamRepoAccess = isTeamRepoAccessParsedRequest(parsedRequest);
         const isTeamRepoAccessRemoval = isTeamRepoAccessRemovalParsedRequest(parsedRequest);
   const isTenantRepoCreation = isTenantRepoCreationParsedRequest(parsedRequest);
-  const isTenantCreation = isTenantCreationParsedRequest(parsedRequest);
+  const isHostedRunnerCreation = !isTenantRepoCreation && isHostedRunnerCreationParsedRequest(parsedRequest);
+  const isHostedRunnerMove = !isTenantRepoCreation && !isHostedRunnerCreation && isHostedRunnerMoveParsedRequest(parsedRequest);
+  const isHostedRunnerDeletion = !isTenantRepoCreation && !isHostedRunnerCreation && !isHostedRunnerMove && isHostedRunnerDeletionParsedRequest(parsedRequest);
+  const isRunnerGroupCreation = !isTenantRepoCreation && !isHostedRunnerCreation && !isHostedRunnerMove && !isHostedRunnerDeletion && isRunnerGroupCreationParsedRequest(parsedRequest);
+  const isTenantRunnerOperation = isHostedRunnerCreation || isHostedRunnerDeletion || isHostedRunnerMove || isRunnerGroupCreation;
+  const isTenantCreation = !isTenantRunnerOperation && isTenantCreationParsedRequest(parsedRequest);
   const isTeamCreation = isTeamCreationParsedRequest(parsedRequest);
   const isTeamHierarchy = isTeamHierarchyParsedRequest(parsedRequest);
   const priorAttachmentRetryState = readPriorAttachmentRetryState(artifactPath);
@@ -713,6 +780,14 @@ async function runRequestValidation(options = {}) {
       ? 'team_repo_access_removal'
     : isTenantRepoCreation
       ? 'tenant_repo_creation'
+      : isHostedRunnerCreation
+        ? 'hosted_runner_creation'
+        : isHostedRunnerMove
+          ? 'hosted_runner_move'
+          : isHostedRunnerDeletion
+            ? 'hosted_runner_deletion'
+          : isRunnerGroupCreation
+            ? 'runner_group_creation'
       : isTenantCreation
         ? 'tenant_creation'
         : isTeamCreation
@@ -727,6 +802,14 @@ async function runRequestValidation(options = {}) {
       ? parseTeamRepoAccessRemovalRequest
     : isTenantRepoCreation
       ? parseTenantRepoRequest
+    : isHostedRunnerCreation
+      ? parseHostedRunnerRequest
+    : isHostedRunnerMove
+      ? parseHostedRunnerMoveRequest
+      : isHostedRunnerDeletion
+        ? parseHostedRunnerDeletionRequest
+    : isRunnerGroupCreation
+      ? parseRunnerGroupRequest
     : isTenantCreation
       ? parseTenantCreationRequest
     : isTeamCreation
@@ -850,6 +933,29 @@ async function runRequestValidation(options = {}) {
             request_status: 'validation_failed',
           },
         };
+      } else if (isHostedRunnerCreation || isHostedRunnerDeletion || isHostedRunnerMove || isRunnerGroupCreation) {
+        validation = {
+          is_valid: false,
+          request_status: 'validation_failed',
+          errors: ['Workflow token secret is missing. Configure ISSUEOPS_GITHUB_TOKEN or GITHUB_TOKEN for validation.'],
+          warnings: [],
+          organization_visible: false,
+          designated_approver_authorization: null,
+          canonical_tenant_context: null,
+          tenant_resolution: {
+            tenant_match_count: 0,
+            tenant_resolution_status: 'registry_conflict',
+            candidates: [],
+            registry_ref: env.TENANT_REGISTRY_REF || 'main',
+            registry_directory: env.TENANT_REGISTRY_DIR || 'tenant-registry',
+            registry_malformed_files: [],
+            registry_missing_directory: true,
+          },
+          request: {
+            ...request,
+            request_status: 'validation_failed',
+          },
+        };
       } else if (isTeamHierarchy) {
         validation = buildMissingTokenHierarchyValidation(request);
       } else if (isTenantCreation) {
@@ -929,6 +1035,9 @@ async function runRequestValidation(options = {}) {
         : createGitHubTeamApi({ token: tokenInfo.token }));
       const tenantRepoApi = isTenantRepoCreation
         ? (options.tenantRepoApi || createGitHubTeamRepoApi({ token: tokenInfo.token }))
+        : null;
+      const runnerApi = (isHostedRunnerCreation || isHostedRunnerDeletion || isHostedRunnerMove || isRunnerGroupCreation)
+        ? (options.runnerApi || createGitHubRunnerApi({ token: tokenInfo.token }))
         : null;
       if (isTeamRepoAccess) {
         const repoAccessAttachmentMaxBytes = resolveTeamRepoAccessAttachmentMaxBytes({
@@ -1091,6 +1200,154 @@ async function runRequestValidation(options = {}) {
           repository_state: validation.repository_state,
           current_repo_admin_permission: validation.current_repo_admin_permission,
           duplicate_owned_repository_conflict: validation.validation_findings && validation.validation_findings.duplicate_owned_repository_conflict,
+          dry_run: validation.request.dry_run,
+          boundary_revalidation_status: 'matched',
+        });
+      } else if (isHostedRunnerCreation) {
+        validation = await validateHostedRunnerRequest(request, {
+          getOrganization: ({ organization }) => executeGitHubReadWithRetry(
+            () => api.getOrganization({ organization }),
+            { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+          ),
+          listTeams: ({ organization }) => executeGitHubReadWithRetry(
+            () => api.listOrgTeams({ organization }),
+            { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+          ),
+          getMembershipForUser: ({ organization, teamSlug, username }) => executeGitHubReadWithRetry(
+            () => api.getMembershipForUser({ organization, teamSlug, username }),
+            { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+          ),
+          getOrganizationMembership: ({ organization, username }) => executeGitHubReadWithRetry(
+            () => api.getOrganizationMembership({ organization, username }),
+            { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+          ),
+          listHostedRunners: ({ organization }) => executeGitHubReadWithRetry(
+            () => runnerApi.listHostedRunners({ organization }),
+            { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+          ),
+          listRunnerGroups: ({ organization }) => executeGitHubReadWithRetry(
+            () => runnerApi.listRunnerGroups({ organization }),
+            { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+          ),
+          registryRef: env.TENANT_REGISTRY_REF || 'main',
+          registryDirectory: env.TENANT_REGISTRY_DIR || 'tenant-registry',
+        });
+        reconciliationPlan = reconcileHostedRunnerCreation({
+          request: validation.request,
+          canonical_tenant_context: validation.canonical_tenant_context,
+          organization_visible: validation.organization_visible,
+          runner_exists: validation.runner_exists,
+          existing_runner_id: validation.existing_runner_id,
+          runner_group_resolution: validation.runner_group_resolution,
+          dry_run: validation.request.dry_run,
+          boundary_revalidation_status: 'matched',
+        });
+      } else if (isHostedRunnerMove) {
+        validation = await validateHostedRunnerMoveRequest(request, {
+          getOrganization: ({ organization }) => executeGitHubReadWithRetry(
+            () => api.getOrganization({ organization }),
+            { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+          ),
+          listTeams: ({ organization }) => executeGitHubReadWithRetry(
+            () => api.listOrgTeams({ organization }),
+            { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+          ),
+          getMembershipForUser: ({ organization, teamSlug, username }) => executeGitHubReadWithRetry(
+            () => api.getMembershipForUser({ organization, teamSlug, username }),
+            { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+          ),
+          getOrganizationMembership: ({ organization, username }) => executeGitHubReadWithRetry(
+            () => api.getOrganizationMembership({ organization, username }),
+            { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+          ),
+          listHostedRunners: ({ organization }) => executeGitHubReadWithRetry(
+            () => runnerApi.listHostedRunners({ organization }),
+            { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+          ),
+          listRunnerGroups: ({ organization }) => executeGitHubReadWithRetry(
+            () => runnerApi.listRunnerGroups({ organization }),
+            { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+          ),
+          registryRef: env.TENANT_REGISTRY_REF || 'main',
+          registryDirectory: env.TENANT_REGISTRY_DIR || 'tenant-registry',
+        });
+        reconciliationPlan = reconcileHostedRunnerMove({
+          request: validation.request,
+          canonical_tenant_context: validation.canonical_tenant_context,
+          organization_visible: validation.organization_visible,
+          runner_exists: validation.runner_exists,
+          existing_runner_id: validation.existing_runner_id,
+          current_runner_group_id: validation.current_runner_group_id,
+          target_runner_group_resolution: validation.target_runner_group_resolution,
+          runner_already_in_target_group: validation.runner_already_in_target_group,
+          dry_run: validation.request.dry_run,
+          boundary_revalidation_status: 'matched',
+        });
+      } else if (isHostedRunnerDeletion) {
+        validation = await validateHostedRunnerDeletionRequest(request, {
+          getOrganization: ({ organization }) => executeGitHubReadWithRetry(
+            () => api.getOrganization({ organization }),
+            { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+          ),
+          listTeams: ({ organization }) => executeGitHubReadWithRetry(
+            () => api.listOrgTeams({ organization }),
+            { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+          ),
+          getMembershipForUser: ({ organization, teamSlug, username }) => executeGitHubReadWithRetry(
+            () => api.getMembershipForUser({ organization, teamSlug, username }),
+            { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+          ),
+          getOrganizationMembership: ({ organization, username }) => executeGitHubReadWithRetry(
+            () => api.getOrganizationMembership({ organization, username }),
+            { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+          ),
+          listHostedRunners: ({ organization }) => executeGitHubReadWithRetry(
+            () => runnerApi.listHostedRunners({ organization }),
+            { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+          ),
+          registryRef: env.TENANT_REGISTRY_REF || 'main',
+          registryDirectory: env.TENANT_REGISTRY_DIR || 'tenant-registry',
+        });
+        reconciliationPlan = reconcileHostedRunnerDeletion({
+          request: validation.request,
+          canonical_tenant_context: validation.canonical_tenant_context,
+          organization_visible: validation.organization_visible,
+          runner_exists: validation.runner_exists,
+          existing_runner_id: validation.existing_runner_id,
+          dry_run: validation.request.dry_run,
+          boundary_revalidation_status: 'matched',
+        });
+      } else if (isRunnerGroupCreation) {
+        validation = await validateRunnerGroupRequest(request, {
+          getOrganization: ({ organization }) => executeGitHubReadWithRetry(
+            () => api.getOrganization({ organization }),
+            { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+          ),
+          listTeams: ({ organization }) => executeGitHubReadWithRetry(
+            () => api.listOrgTeams({ organization }),
+            { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+          ),
+          getMembershipForUser: ({ organization, teamSlug, username }) => executeGitHubReadWithRetry(
+            () => api.getMembershipForUser({ organization, teamSlug, username }),
+            { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+          ),
+          getOrganizationMembership: ({ organization, username }) => executeGitHubReadWithRetry(
+            () => api.getOrganizationMembership({ organization, username }),
+            { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+          ),
+          listRunnerGroups: ({ organization }) => executeGitHubReadWithRetry(
+            () => runnerApi.listRunnerGroups({ organization }),
+            { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+          ),
+          registryRef: env.TENANT_REGISTRY_REF || 'main',
+          registryDirectory: env.TENANT_REGISTRY_DIR || 'tenant-registry',
+        });
+        reconciliationPlan = reconcileRunnerGroupCreation({
+          request: validation.request,
+          canonical_tenant_context: validation.canonical_tenant_context,
+          organization_visible: validation.organization_visible,
+          runner_group_exists: validation.runner_group_exists,
+          existing_runner_group_id: validation.existing_runner_group_id,
           dry_run: validation.request.dry_run,
           boundary_revalidation_status: 'matched',
         });
@@ -1414,6 +1671,10 @@ async function runRequestValidation(options = {}) {
       ? 'repository'
       : isTenantRepoCreation
         ? 'tenant_repository'
+        : isHostedRunnerCreation || isHostedRunnerDeletion || isHostedRunnerMove
+          ? 'hosted_runner'
+          : isRunnerGroupCreation
+            ? 'runner_group'
         : isTenantCreation
           ? 'tenant_bootstrap'
           : isTeamCreation
@@ -1446,6 +1707,14 @@ async function runRequestValidation(options = {}) {
         ? 'Request is validated and ready for approval. No repository-access mutation was attempted.'
         : isTenantRepoCreation
         ? 'Request is validated and ready for approval. No tenant repository mutation was attempted.'
+        : isHostedRunnerCreation
+        ? 'Request is validated and ready for approval. No hosted-runner mutation was attempted.'
+        : isHostedRunnerMove
+        ? 'Request is validated and ready for approval. No hosted-runner move was attempted.'
+        : isHostedRunnerDeletion
+        ? 'Request is validated and ready for approval. No hosted-runner deletion was attempted.'
+        : isRunnerGroupCreation
+        ? 'Request is validated and ready for approval. No runner-group mutation was attempted.'
         : isTenantCreation
         ? 'Request is validated and ready for approval. No tenant bootstrap mutation was attempted.'
         : isTeamCreation
@@ -1457,6 +1726,14 @@ async function runRequestValidation(options = {}) {
         ? 'Request validation failed. No repository-access mutation was attempted.'
         : isTenantRepoCreation
         ? 'Request validation failed. No tenant repository mutation was attempted.'
+        : isHostedRunnerCreation
+        ? 'Request validation failed. No hosted-runner mutation was attempted.'
+        : isHostedRunnerMove
+        ? 'Request validation failed. No hosted-runner move was attempted.'
+        : isHostedRunnerDeletion
+        ? 'Request validation failed. No hosted-runner deletion was attempted.'
+        : isRunnerGroupCreation
+        ? 'Request validation failed. No runner-group mutation was attempted.'
         : isTenantCreation
         ? 'Request validation failed. No tenant bootstrap mutation was attempted.'
         : isTeamCreation
@@ -1571,6 +1848,10 @@ module.exports = {
   isTeamRepoAccessRemovalParsedRequest,
   isTeamHierarchyParsedRequest,
   isTeamCreationParsedRequest,
+  isHostedRunnerCreationParsedRequest,
+  isHostedRunnerDeletionParsedRequest,
+  isHostedRunnerMoveParsedRequest,
+  isRunnerGroupCreationParsedRequest,
   parseParsedRequestJson,
   parseJsonFromEnv,
   readIssueLabelsFromEnv,

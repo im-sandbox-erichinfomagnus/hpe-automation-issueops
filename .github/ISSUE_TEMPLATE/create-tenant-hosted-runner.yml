@@ -1,0 +1,112 @@
+name: Create tenant GitHub-hosted runner
+description: Request creation of a tenant-scoped GitHub-hosted runner at organization level, authorized by tenant CI/CD admin membership.
+title: "[create-tenant-hosted-runner] <org>/<runner>: <summary>"
+labels:
+  - issueops
+  - create-tenant-hosted-runner
+body:
+  - type: input
+    id: organization
+    attributes:
+      label: Target organization
+      description: GitHub organization where the hosted runner should be created.
+      placeholder: octo-org
+    validations:
+      required: true
+
+  - type: input
+    id: tenant_name
+    attributes:
+      label: Tenant name
+      description: Human-readable tenant name exactly as defined in tenant-registry for the target organization.
+      placeholder: ContosoUK
+    validations:
+      required: true
+
+  - type: input
+    id: runner_name
+    attributes:
+      label: Runner name
+      description: Base name for the runner. The full runner name is derived as TenantName_RunnerName (letters, digits, ., -, _ only; 64 characters max after derivation).
+      placeholder: ubuntu-build
+    validations:
+      required: true
+
+  - type: input
+    id: runner_image_id
+    attributes:
+      label: Runner image id
+      description: Image identifier for the hosted runner (for example ubuntu-24.04 from the organization's GitHub-owned image list).
+      placeholder: ubuntu-24.04
+    validations:
+      required: true
+
+  - type: dropdown
+    id: runner_image_source
+    attributes:
+      label: Runner image source
+      description: Source catalog of the requested image. Defaults to GitHub-owned images.
+      options:
+        - github
+        - partner
+        - custom
+      default: 0
+    validations:
+      required: true
+
+  - type: input
+    id: runner_size
+    attributes:
+      label: Runner machine size
+      description: Machine size identifier (for example 4-core from the organization's machine-size list).
+      placeholder: 4-core
+    validations:
+      required: true
+
+  - type: input
+    id: runner_group_name
+    attributes:
+      label: Runner group name (optional)
+      description: Tenant runner group to place the runner in (must carry the TenantName_ prefix and already exist). Leave empty to target the organization default runner group.
+      placeholder: ContosoUK_Builders
+    validations:
+      required: false
+
+  - type: input
+    id: maximum_runners
+    attributes:
+      label: Maximum runners (optional)
+      description: Maximum number of concurrent runner instances. Leave empty for the platform default.
+      placeholder: "10"
+    validations:
+      required: false
+
+  - type: input
+    id: designated_approver
+    attributes:
+      label: Designated approver
+      description: GitHub login for the authorized approver who will post the approval comment (must be an active organization owner).
+      placeholder: org-owner-user
+    validations:
+      required: true
+
+  - type: dropdown
+    id: dry_run
+    attributes:
+      label: Dry-run mode
+      description: Dry-run validates tenant context and planned mutation without creating the runner.
+      options:
+        - "true"
+        - "false"
+      default: 0
+    validations:
+      required: true
+
+  - type: textarea
+    id: justification
+    attributes:
+      label: Business justification
+      description: Explain why this hosted runner is needed for the tenant.
+      placeholder: CI capacity for the tenant's build pipelines.
+    validations:
+      required: true

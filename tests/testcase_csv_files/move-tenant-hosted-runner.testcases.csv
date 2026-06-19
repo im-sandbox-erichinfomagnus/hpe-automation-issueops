@@ -1,0 +1,5 @@
+test_id,user_story,scenario,preconditions,form_inputs,expected_result,case_type
+MV-01,specs/024-move-tenant-hosted-runner/spec.md,Validate moving a runner into an existing tenant group,"Authorized; runner and target group both exist","org, tenant, runner_name, target_runner_group_name, approver, dry_run=true","Status awaiting_approval; plan to move the runner; no mutation",happy
+MV-02,specs/024-move-tenant-hosted-runner/spec.md,Moving a runner already in the target group is a no-op,"Authorized; runner already in the group","valid fields, dry_run=true","No-op; already in target group",idempotent
+MV-03,specs/024-move-tenant-hosted-runner/spec.md,Reject when the target runner group does not exist,"Authorized; target group missing","valid fields","Rejected: target runner group not found",guardrail
+MV-04,specs/024-move-tenant-hosted-runner/spec.md,Reject when the named runner does not exist,"Authorized; runner missing","valid fields","Rejected: runner not found",guardrail

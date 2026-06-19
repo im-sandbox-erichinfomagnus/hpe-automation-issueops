@@ -1,0 +1,274 @@
+name: create-tenant-runner-groups-workflow-contract
+version: 1
+purpose: >-
+  Contract for the tenant-scoped Actions runner-group creation IssueOps
+  workflow that resolves canonical tenant context from tenant-registry plus
+  live governance state, authorizes the requester through active membership in
+  the tenant topology admin team (type "admin", read from the canonical tenant topology), derives the
+  tenant-prefixed group name, creates one runner group with
+  isolation-preserving defaults after designated active-org-owner approval,
+  and emits durable audit evidence.
+
+implementation_status: complete
+last_validated: 2026-06-05
+validated_against:
+  - issue_form: .github/ISSUE_TEMPLATE/create-tenant-runner-groups.yml
+  - workflow: .github/workflows/create-tenant-runner-groups.yml
+  - scripts:
+      - src/scripts/run-request-validation.js
+      - src/scripts/run-approval-gate.js
+      - src/scripts/run-approved-execution.js
+  - modules:
+      - src/workflow-support/parse-runner-group-request.js
+      - src/workflow-support/resolve-tenant-cicd-context-from-registry.js
+      - src/workflow-support/validate-runner-group-request.js
+      - src/workflow-support/reconcile-runner-group-creation.js
+      - src/workflow-support/resolve-runner-group-approver.js
+      - src/workflow-support/approval-gate.js
+      - src/workflow-support/build-audit-artifact.js
+      - src/workflow-support/build-execution-outcome.js
+      - src/workflow-support/github-runner-api.js
+      - src/actions/runner-group-policy/index.js
+
+issue_form:
+  path: .github/ISSUE_TEMPLATE/create-tenant-runner-groups.yml
+  required_fields:
+    - id: organization
+      type: input
+      parsed_env_key: PARSED_ORGANIZATION
+    - id: tenant_name
+      type: input
+      parsed_env_key: PARSED_TENANT_NAME
+    - id: runner_group_name
+      type: input
+      parsed_env_key: PARSED_RUNNER_GROUP_NAME
+      note: >-
+        Group base name. The workflow derives the full group name as
+        TenantName_GroupBaseName; a base name already carrying the exact
+        tenant prefix is used as-is.
+    - id: runner_group_visibility
+      type: dropdown
+      default: selected
+      required: false
+      parsed_env_key: PARSED_RUNNER_GROUP_VISIBILITY
+    - id: allows_public_repositories
+      type: dropdown
+      default: "false"
+      required: false
+      parsed_env_key: PARSED_ALLOWS_PUBLIC_REPOSITORIES
+    - id: designated_approver
+      type: input
+      parsed_env_key: PARSED_DESIGNATED_APPROVER
+    - id: dry_run
+      type: dropdown
+      default: "true"
+      parsed_env_key: PARSED_DRY_RUN
+    - id: justification
+      type: textarea
+      parsed_env_key: PARSED_JUSTIFICATION
+
+parser:
+  action: issue-ops/parser@v5
+  outputs:
+    - json
+    - parsed_organization
+    - parsed_tenant_name
+    - parsed_runner_group_name
+    - parsed_runner_group_visibility
+    - parsed_allows_public_repositories
+    - parsed_designated_approver
+    - parsed_dry_run
+    - parsed_justification
+
+request_normalization:
+  runner_group_name_derived: >-
+    tenant display name with whitespace converted to underscores, plus '_',
+    plus the normalized base name; capped at 100 characters
+  runner_group_visibility: >-
+    dropdown value normalized to lowercase; defaults to 'selected' when not
+    provided; allowed values selected | all | private
+  allows_public_repositories: boolean; defaults to false
+
+workflow_entry_assumptions:
+  create_tenant_runner_groups_workflow:
+    events:
+      issues:
+        - opened
+        - edited
+        - reopened
+        - labeled
+      issue_comment:
+        - created
+        - edited
+        - deleted
+    concurrency:
+      group: create-tenant-runner-groups-{issue_number}
+      cancel_in_progress: false
+    execution_gate:
+      approval_output_key: approval-status
+      required_expression: steps.approval_gate.outputs['approval-status'] == 'approved'
+    workflow_permissions:
+      actions: read
+      contents: read
+      issues: write
+    terminal_state_labels:
+      prefix: "issueops:create-tenant-runner-groups:"
+      values:
+        - issueops:create-tenant-runner-groups:executed
+        - issueops:create-tenant-runner-groups:failed
+        - issueops:create-tenant-runner-groups:partially_executed
+
+authorization:
+  requester_identity: github.event.issue.user.login
+  approver_model: designated currently authorized target-organization approver
+  requester_tenant_requirements:
+    - requester tenant name must resolve to exactly one registry record for the target organization
+    - the tenant topology admin team (type "admin", <tenant-slug>-admin) must exist in the target organization
+    - requester must be an active member (member or maintainer) of the tenant topology admin team
+  execution_identity:
+    credential: ISSUEOPS_GITHUB_TOKEN
+    token_kind: pat
+    least_privilege: true
+    required_scope: admin:org (classic) or equivalent fine-grained organization self-hosted-runners administration permission
+    fail_closed: >-
+      execution is blocked if ISSUEOPS_GITHUB_TOKEN is missing or if the token
+      fails the PAT-backed check in assertRunnerGroupCreationAllowed
+
+tenant_resolution:
+  authoritative_registry_source: tenant-registry/ on repository main branch
+  shared_resolver: resolve-tenant-cicd-context-from-registry.js (operation runner_group_creation)
+  fail_closed_conditions:
+    - no tenant match
+    - ambiguous tenant match
+    - missing or malformed registry record
+    - missing tenant team in live state
+    - missing tenant topology admin team
+    - requester not an active member of the tenant topology admin team
+
+context_marker:
+  format: "tenant-runner-context:{16-char-sha256-hex}"
+  inputs:
+    - operation (literal 'runner_group_creation')
+    - organization (normalized)
+    - runner_group_name_derived (normalized)
+    - designated_approver_login (normalized)
+    - tenant_key (normalized)
+    - cicd_admin_team_slug (normalized)
+    - registry_ref
+
+approval:
+  mode: context_bound
+  authorized_approver_role: target_org_owner (active admin of the target organization)
+  designated_approver_check: commenter login must match designated_approver_login from request
+  denial_note_pattern: "does not authorize tenant runner group creation mutation"
+
+validation_rules:
+  - tenant_name_input is required; validation fails immediately if absent or empty.
+  - Group base name must derive deterministically into a valid tenant-prefixed group name.
+  - Canonical tenant CI/CD context must resolve to exactly one authorized match.
+  - Requester must be an active member of the tenant topology admin team (type "admin").
+  - Visibility must be one of selected | all | private (default selected).
+  - Designated approver must be currently authorized (active admin) for the target organization.
+  - An existing same-name group keeps the request valid and marks no-op convergence.
+  - Dry-run requests pass validation and produce mutation intent but must not execute any mutation.
+
+reconciliation:
+  current_state_reads:
+    - organization visibility
+    - authoritative tenant-registry record from main branch
+    - live tenant root team and tenant topology admin team existence
+    - requester membership on the tenant topology admin team
+    - organization runner-group listing (derived-name existence check)
+  mutation_rule:
+    - create runner group only when no group with the derived name exists (creation_action = create_runner_group)
+  no_op_rule:
+    - existing group with derived name: creation_action = noop; configuration drift reported as warning, not mutated
+  blocked_rule:
+    - boundary_mismatch: requester authorization or governance state changed between validation and execution
+    - missing_tenant_context: resolved context is absent at execution time
+  rerun_rule: idempotent; no duplicate group creation
+
+execution:
+  policy_guards:
+    - assertRunnerGroupCreationAllowed: checks approval_status=approved, approver_role=target_org_owner, authorization_state=authorized, PAT-backed token
+  mutation_order:
+    - 1. createRunnerGroup via POST /orgs/{org}/actions/runner-groups with name, visibility, allows_public_repositories
+  api_endpoints:
+    - GET /orgs/{org}/actions/runner-groups
+    - POST /orgs/{org}/actions/runner-groups
+  omitted_parameters_this_version:
+    - selected_repository_ids (repository attachment is a separate operation)
+    - runners (runner placement is a separate operation)
+    - restricted_to_workflows / selected_workflows
+    - network_configuration_id
+
+observability:
+  persistence_model: retained workflow artifact plus github step summary
+  artifact_name_pattern: "create-tenant-runner-groups-execution-{issue_number}-{run_attempt}"
+  audit_artifact_fields:
+    request:
+      - request_id
+      - issue_number
+      - requester_login
+      - organization
+      - tenant_name_input
+      - runner_group_base_name_input
+      - runner_group_name_derived
+      - runner_group_visibility
+      - allows_public_repositories
+      - designated_approver_login
+      - dry_run
+      - request_status
+      - context_marker
+      - tenant_key
+      - cicd_admin_team_slug
+    validation:
+      - is_valid
+      - errors
+      - warnings
+      - tenant_resolution
+      - runner_group_exists
+      - existing_runner_group_id
+    approval:
+      - approval_status
+      - approver_login
+      - approver_role
+      - approved_context_marker
+      - latest_context_marker
+    reconciliation:
+      - creation_action
+      - boundary_revalidation_status
+      - blocked_reason
+      - runner_group_visibility
+      - allows_public_repositories
+    execution:
+      - runner_group_creation_result
+      - created_runner_group_id
+      - audit_persistence_result
+      - mutation_count
+      - noop_count
+      - failure_count
+      - rollback_status
+      - summary
+  lifecycle_states:
+    - submitted
+    - awaiting_approval
+    - approved
+    - validation_failed
+    - executed
+    - failed
+    - partially_executed
+    - blocked
+
+rate_limit_handling:
+  strategy: bounded_exponential_backoff
+  retryable_conditions:
+    - transient 5xx responses
+    - secondary rate limit responses (429 with retry-after)
+  non_retryable_conditions:
+    - ambiguous tenant resolution
+    - unauthorized approver
+    - invalid group-name derivation
+    - missing tenant topology admin team
+    - requester not an active tenant topology admin team member
+    - boundary mismatch at execution time

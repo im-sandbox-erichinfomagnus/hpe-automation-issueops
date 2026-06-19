@@ -136,6 +136,163 @@ function formatAuditSummary(auditArtifact = {}) {
     ].filter(Boolean).join('\n');
   }
 
+  const isHostedRunnerCreation = operation === 'hosted_runner_creation' || (!['hosted_runner_deletion', 'hosted_runner_move'].includes(operation) && Boolean(request.runner_image_id || request.runner_size));
+  const isHostedRunnerMove = operation === 'hosted_runner_move' || Boolean(request.runner_move_scope || request.target_runner_group_name_input);
+  const isHostedRunnerDeletion = operation === 'hosted_runner_deletion' || (!isHostedRunnerCreation && !isHostedRunnerMove && Boolean(request.runner_deletion_scope));
+  const isRunnerGroupCreation = operation === 'runner_group_creation' || Boolean(request.runner_group_name_derived || request.runner_group_base_name_input);
+
+  if (isHostedRunnerCreation || isHostedRunnerDeletion || isHostedRunnerMove) {
+    return [
+      isHostedRunnerMove
+        ? '# Move Tenant GitHub-Hosted Runner Workflow Summary'
+        : isHostedRunnerDeletion
+        ? '# Delete Tenant GitHub-Hosted Runner Workflow Summary'
+        : '# Create Tenant GitHub-Hosted Runner Workflow Summary',
+      '',
+      `- Request ID: ${request.request_id || 'n/a'}`,
+      `- Repository: ${request.repository || 'n/a'}`,
+      `- Target organization: ${request.organization || 'n/a'}`,
+      `- Tenant name: ${request.tenant_name_input || request.tenant_display_name || 'n/a'}`,
+      `- Runner base name: ${request.runner_base_name_input || 'n/a'}`,
+      `- Derived runner name: ${request.runner_name_derived || 'n/a'}`,
+      isHostedRunnerMove ? `- Requested hosted runner id: ${request.hosted_runner_id_input ?? 'not provided'}` : null,
+      isHostedRunnerMove ? `- Target runner group: ${request.target_runner_group_name_input || 'n/a'}` : null,
+      isHostedRunnerCreation ? `- Runner image: ${request.runner_image_id || 'n/a'} (${request.runner_image_source || 'github'})` : null,
+      isHostedRunnerCreation ? `- Runner machine size: ${request.runner_size || 'n/a'}` : null,
+      isHostedRunnerCreation ? `- Requested runner group: ${request.runner_group_name_input || 'organization default'}` : null,
+      isHostedRunnerCreation && validation.runner_group_resolution
+        ? `- Runner group resolution: ${validation.runner_group_resolution.resolution_status || 'unknown'}${validation.runner_group_resolution.resolved_group_name ? ` (${validation.runner_group_resolution.resolved_group_name} #${validation.runner_group_resolution.resolved_group_id})` : ''}`
+        : null,
+      isHostedRunnerCreation && request.maximum_runners != null ? `- Maximum runners: ${request.maximum_runners}` : null,
+      `- Designated approver: ${request.designated_approver_login || 'n/a'}`,
+      `- Intake mode: ${request.intake_mode || 'n/a'}`,
+      `- Dry-run mode: ${request.dry_run ? 'true' : 'false'}`,
+      `- Request status: ${request.request_status || 'submitted'}`,
+      `- Central assignment: ${assignment.assignment_status || 'not_attempted'}${assignment.assigned_login ? ` (${assignment.assigned_login})` : ''}`,
+      `- Approval: ${approval.approval_status || 'pending'} (${approval.approver_authorization_state || 'unknown'})`,
+      approval.approver_login ? `- Approver: ${approval.approver_login}` : null,
+      approval.approved_context_marker ? `- Approved context marker: ${approval.approved_context_marker}` : null,
+      approval.latest_context_marker ? `- Latest context marker: ${approval.latest_context_marker}` : null,
+      `- Validation: ${validation.is_valid ? 'passed' : 'failed'}`,
+      `- Tenant resolution: ${validation.tenant_resolution && validation.tenant_resolution.tenant_resolution_status || 'unknown'}`,
+      `- Tenant matches: ${validation.tenant_resolution && validation.tenant_resolution.tenant_match_count || 0}`,
+      `- Tenant parent team: ${request.tenant_team_slug || 'n/a'}`,
+      `- Tenant CI/CD admin team: ${request.cicd_admin_team_slug || 'n/a'}`,
+      `- Requester CI/CD membership: ${validation.validation_findings && validation.validation_findings.requester_cicd_membership_state || 'unknown'}`,
+      `- Context marker: ${request.context_marker || validation.validation_findings && validation.validation_findings.context_marker || 'n/a'}`,
+      `- Runner exists: ${validation.runner_exists ? 'true' : 'false'}`,
+      validation.existing_runner_id != null ? `- Existing runner id: ${validation.existing_runner_id}` : null,
+      isHostedRunnerMove ? `- Runner resolution: ${validation.runner_resolution_status || 'unknown'}` : null,
+      isHostedRunnerMove ? `- Current runner group id: ${validation.current_runner_group_id ?? 'n/a'}` : null,
+      isHostedRunnerMove && validation.target_runner_group_resolution
+        ? `- Target runner group resolution: ${validation.target_runner_group_resolution.resolution_status || 'unknown'}${validation.target_runner_group_resolution.resolved_group_name ? ` (${validation.target_runner_group_resolution.resolved_group_name} #${validation.target_runner_group_resolution.resolved_group_id})` : ''}`
+        : null,
+      isHostedRunnerDeletion && validation.existing_runner_status ? `- Existing runner status: ${validation.existing_runner_status}` : null,
+      isHostedRunnerCreation
+        ? `- Planned creation action: ${reconciliation.creation_action || 'n/a'}`
+        : isHostedRunnerMove
+          ? `- Planned move action: ${reconciliation.move_action || 'n/a'}`
+          : `- Planned deletion action: ${reconciliation.deletion_action || 'n/a'}`,
+      `- Blocked reason: ${reconciliation.blocked_reason || 'n/a'}`,
+      `- Boundary revalidation: ${reconciliation.boundary_revalidation_status || 'n/a'}`,
+      isHostedRunnerCreation
+        ? `- Runner creation result: ${execution.runner_creation_result || 'n/a'}`
+        : isHostedRunnerMove
+          ? `- Runner move result: ${execution.runner_move_result || 'n/a'}`
+          : `- Runner deletion result: ${execution.runner_deletion_result || 'n/a'}`,
+      execution.created_runner_id != null ? `- Created runner id: ${execution.created_runner_id}` : null,
+      execution.created_runner_status ? `- Created runner status: ${execution.created_runner_status}` : null,
+      isHostedRunnerMove && execution.moved_runner_id != null ? `- Moved runner id: ${execution.moved_runner_id}` : null,
+      isHostedRunnerMove && execution.target_runner_group_id != null ? `- Target runner group id: ${execution.target_runner_group_id}` : null,
+      `- Audit persistence result: ${execution.audit_persistence_result || 'n/a'}`,
+      `- Added: ${execution.mutation_count || 0}`,
+      `- No-op: ${execution.noop_count || 0}`,
+      `- Pending: ${execution.pending_count || 0}`,
+      `- Failed: ${execution.failure_count || 0}`,
+      `- Rollback status: ${execution.rollback_status || 'not_needed'}`,
+      metadata.artifact_name ? `- Audit artifact name: ${metadata.artifact_name}` : null,
+      metadata.artifact_retention_days != null ? `- Audit artifact retention (days): ${metadata.artifact_retention_days}` : null,
+      validation.warnings && validation.warnings.length > 0
+        ? `- Validation warnings: ${validation.warnings.join('; ')}`
+        : null,
+      validation.errors && validation.errors.length > 0
+        ? `- Validation errors: ${validation.errors.join('; ')}`
+        : null,
+      assignment.assignment_note ? `- Assignment note: ${assignment.assignment_note}` : null,
+      approval.decision_note ? `- Approval note: ${approval.decision_note}` : null,
+      '',
+      execution.summary || (validation.is_valid
+        ? approval.approval_status === 'approved'
+          ? 'Request is approved and eligible for tenant hosted-runner execution. No runner mutation was attempted in this phase.'
+          : approval.approval_status === 'denied'
+            ? 'Approval was denied or invalid. No tenant hosted-runner mutation was attempted.'
+            : 'Request is validated and ready for approval. No tenant hosted-runner mutation was attempted.'
+        : 'Request validation failed. No tenant hosted-runner mutation was attempted.'),
+    ].filter(Boolean).join('\n');
+  }
+
+  if (isRunnerGroupCreation) {
+    return [
+      '# Create Tenant Runner Group Workflow Summary',
+      '',
+      `- Request ID: ${request.request_id || 'n/a'}`,
+      `- Repository: ${request.repository || 'n/a'}`,
+      `- Target organization: ${request.organization || 'n/a'}`,
+      `- Tenant name: ${request.tenant_name_input || request.tenant_display_name || 'n/a'}`,
+      `- Runner group base name: ${request.runner_group_base_name_input || 'n/a'}`,
+      `- Derived runner group name: ${request.runner_group_name_derived || 'n/a'}`,
+      `- Requested visibility: ${request.runner_group_visibility || 'selected'}`,
+      `- Allows public repositories: ${request.allows_public_repositories ? 'true' : 'false'}`,
+      `- Designated approver: ${request.designated_approver_login || 'n/a'}`,
+      `- Intake mode: ${request.intake_mode || 'n/a'}`,
+      `- Dry-run mode: ${request.dry_run ? 'true' : 'false'}`,
+      `- Request status: ${request.request_status || 'submitted'}`,
+      `- Central assignment: ${assignment.assignment_status || 'not_attempted'}${assignment.assigned_login ? ` (${assignment.assigned_login})` : ''}`,
+      `- Approval: ${approval.approval_status || 'pending'} (${approval.approver_authorization_state || 'unknown'})`,
+      approval.approver_login ? `- Approver: ${approval.approver_login}` : null,
+      approval.approved_context_marker ? `- Approved context marker: ${approval.approved_context_marker}` : null,
+      approval.latest_context_marker ? `- Latest context marker: ${approval.latest_context_marker}` : null,
+      `- Validation: ${validation.is_valid ? 'passed' : 'failed'}`,
+      `- Tenant resolution: ${validation.tenant_resolution && validation.tenant_resolution.tenant_resolution_status || 'unknown'}`,
+      `- Tenant matches: ${validation.tenant_resolution && validation.tenant_resolution.tenant_match_count || 0}`,
+      `- Tenant parent team: ${request.tenant_team_slug || 'n/a'}`,
+      `- Tenant CI/CD admin team: ${request.cicd_admin_team_slug || 'n/a'}`,
+      `- Requester CI/CD membership: ${validation.validation_findings && validation.validation_findings.requester_cicd_membership_state || 'unknown'}`,
+      `- Context marker: ${request.context_marker || validation.validation_findings && validation.validation_findings.context_marker || 'n/a'}`,
+      `- Runner group exists: ${validation.runner_group_exists ? 'true' : 'false'}`,
+      validation.existing_runner_group_id != null ? `- Existing runner group id: ${validation.existing_runner_group_id}` : null,
+      `- Planned creation action: ${reconciliation.creation_action || 'n/a'}`,
+      `- Blocked reason: ${reconciliation.blocked_reason || 'n/a'}`,
+      `- Boundary revalidation: ${reconciliation.boundary_revalidation_status || 'n/a'}`,
+      `- Runner group creation result: ${execution.runner_group_creation_result || 'n/a'}`,
+      execution.created_runner_group_id != null ? `- Created runner group id: ${execution.created_runner_group_id}` : null,
+      `- Audit persistence result: ${execution.audit_persistence_result || 'n/a'}`,
+      `- Added: ${execution.mutation_count || 0}`,
+      `- No-op: ${execution.noop_count || 0}`,
+      `- Pending: ${execution.pending_count || 0}`,
+      `- Failed: ${execution.failure_count || 0}`,
+      `- Rollback status: ${execution.rollback_status || 'not_needed'}`,
+      metadata.artifact_name ? `- Audit artifact name: ${metadata.artifact_name}` : null,
+      metadata.artifact_retention_days != null ? `- Audit artifact retention (days): ${metadata.artifact_retention_days}` : null,
+      validation.warnings && validation.warnings.length > 0
+        ? `- Validation warnings: ${validation.warnings.join('; ')}`
+        : null,
+      validation.errors && validation.errors.length > 0
+        ? `- Validation errors: ${validation.errors.join('; ')}`
+        : null,
+      assignment.assignment_note ? `- Assignment note: ${assignment.assignment_note}` : null,
+      approval.decision_note ? `- Approval note: ${approval.decision_note}` : null,
+      '',
+      execution.summary || (validation.is_valid
+        ? approval.approval_status === 'approved'
+          ? 'Request is approved and eligible for tenant runner-group execution. No runner-group mutation was attempted in this phase.'
+          : approval.approval_status === 'denied'
+            ? 'Approval was denied or invalid. No tenant runner-group mutation was attempted.'
+            : 'Request is validated and ready for approval. No tenant runner-group mutation was attempted.'
+        : 'Request validation failed. No tenant runner-group mutation was attempted.'),
+    ].filter(Boolean).join('\n');
+  }
+
   const isTenantCreation = operation === 'tenant_creation' || Boolean(request.tenant_key || request.tenant_display_name);
 
   if (isTenantCreation) {

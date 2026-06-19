@@ -6,8 +6,33 @@ const { resolveTeamHierarchyApprover } = require('./resolve-team-hierarchy-appro
 const { resolveTeamRepoAccessApprover } = require('./resolve-team-repo-access-approver');
 const { resolveTenantRepoApprover } = require('./resolve-tenant-repo-approver');
 const { resolveTenantCreationApprover } = require('./resolve-tenant-creation-approver');
+const { resolveHostedRunnerApprover } = require('./resolve-hosted-runner-approver');
+const { resolveRunnerGroupApprover } = require('./resolve-runner-group-approver');
 
 const APPROVAL_COMMAND = 'approved';
+
+const TENANT_RUNNER_APPROVAL_MODES = [
+  'hosted_runner_creation',
+  'hosted_runner_deletion',
+  'hosted_runner_move',
+  'runner_group_creation',
+];
+
+function describeTenantRunnerMutation(approvalMode) {
+  if (approvalMode === 'hosted_runner_deletion') {
+    return 'tenant hosted-runner deletion';
+  }
+
+  if (approvalMode === 'hosted_runner_move') {
+    return 'tenant hosted-runner move';
+  }
+
+  if (approvalMode === 'runner_group_creation') {
+    return 'tenant runner group creation';
+  }
+
+  return 'tenant hosted-runner creation';
+}
 
 function sortEventsDescending(events = []) {
   return [...events].sort((left, right) => {
@@ -56,6 +81,10 @@ function buildPendingApprovalNote(approvalMode, approvalCommand) {
     return `Add an issue comment containing exactly '${approvalCommand}' from the designated active target organization owner to authorize repository creation execution.`;
   }
 
+  if (TENANT_RUNNER_APPROVAL_MODES.includes(approvalMode)) {
+    return `Add an issue comment containing exactly '${approvalCommand}' from the designated active target organization owner to authorize ${describeTenantRunnerMutation(approvalMode)} execution.`;
+  }
+
   return `Add an issue comment containing exactly '${approvalCommand}' as an organization owner to authorize execution.`;
 }
 
@@ -88,7 +117,7 @@ function buildPendingAttachmentApprovalNote(approvalMode, approvalCommand) {
 }
 
 function hasContextMismatch(approvalMode, latestContextMarker, priorApprovedContextMarker) {
-  if (approvalMode !== 'tenant_repo_creation') {
+  if (approvalMode !== 'tenant_repo_creation' && !TENANT_RUNNER_APPROVAL_MODES.includes(approvalMode)) {
     return false;
   }
 
@@ -131,6 +160,14 @@ async function evaluateApprovalGate(input = {}, options = {}) {
 
     if (approvalMode === 'tenant_repo_creation') {
       return resolveTenantRepoApprover(args, options);
+    }
+
+    if (approvalMode === 'hosted_runner_creation' || approvalMode === 'hosted_runner_deletion' || approvalMode === 'hosted_runner_move') {
+      return resolveHostedRunnerApprover(args, options);
+    }
+
+    if (approvalMode === 'runner_group_creation') {
+      return resolveRunnerGroupApprover(args, options);
     }
 
     return resolveApproverRole(args, options);
@@ -320,6 +357,36 @@ async function evaluateApprovalGate(input = {}, options = {}) {
       approved_at: approvalComment.created_at || null,
       decision_source: 'comment',
       decision_note: `The approval comment '${approvalCommand}' was added by the authorized designated target organization owner for this tenant repository creation request.`,
+    };
+  }
+
+  if (TENANT_RUNNER_APPROVAL_MODES.includes(approvalMode)) {
+    if (approver.approver_role !== 'target_org_owner') {
+      return {
+        approval_status: 'denied',
+        approver_login: approverLogin,
+        approver_role: approver.approver_role,
+        approver_authorization_state: approver.approver_authorization_state || 'unknown',
+        approver_membership_state: approver.approver_membership_state || 'unknown',
+        latest_context_marker: latestContextMarker || null,
+        approved_context_marker: priorApprovedContextMarker || null,
+        approved_at: approvalComment.created_at || null,
+        decision_source: 'comment',
+        decision_note: `The approval comment '${approvalCommand}' was not added by the authorized designated target organization owner and does not authorize ${describeTenantRunnerMutation(approvalMode)} mutation.`,
+      };
+    }
+
+    return {
+      approval_status: 'approved',
+      approver_login: approverLogin,
+      approver_role: approver.approver_role,
+      approver_authorization_state: approver.approver_authorization_state || 'authorized',
+      approver_membership_state: approver.approver_membership_state || 'active',
+      latest_context_marker: latestContextMarker || null,
+      approved_context_marker: latestContextMarker || null,
+      approved_at: approvalComment.created_at || null,
+      decision_source: 'comment',
+      decision_note: `The approval comment '${approvalCommand}' was added by the authorized designated target organization owner for this ${describeTenantRunnerMutation(approvalMode)} request.`,
     };
   }
 
