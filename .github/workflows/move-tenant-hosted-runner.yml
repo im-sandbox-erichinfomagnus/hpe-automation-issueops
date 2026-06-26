@@ -30,7 +30,7 @@ concurrency:
 
 jobs:
   intake:
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'issues' || github.event_name == 'issue_comment'
+    if: github.event_name == 'workflow_dispatch' || ((github.event_name == 'issues' || github.event_name == 'issue_comment') && contains(github.event.issue.labels.*.name, 'move-tenant-hosted-runner'))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
@@ -164,7 +164,7 @@ jobs:
           node src/scripts/run-approved-execution.js
 
       - name: Post result comment on the issue
-        if: ${{ always() && steps.issue_context.outputs.issue_number != '' && steps.request_validation.outcome != 'skipped' }}
+        if: ${{ always() && github.event.action != 'labeled' && steps.issue_context.outputs.issue_number != '' && steps.request_validation.outcome != 'skipped' }}
         uses: actions/github-script@v7
         env:
           AUDIT_ARTIFACT_PATH: ${{ steps.approved_execution.outputs['audit-artifact-path'] || steps.approval_gate.outputs['audit-artifact-path'] || steps.request_validation.outputs['audit-artifact-path'] || steps.request_validation.outputs.artifact_path }}

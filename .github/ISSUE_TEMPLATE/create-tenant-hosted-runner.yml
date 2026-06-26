@@ -32,12 +32,16 @@ body:
     validations:
       required: true
 
-  - type: input
+  - type: dropdown
     id: runner_image_id
     attributes:
       label: Runner image id
-      description: Image identifier for the hosted runner (for example ubuntu-24.04 from the organization's GitHub-owned image list).
-      placeholder: ubuntu-24.04
+      description: Image for the hosted runner, from the organization's GitHub-owned image list.
+      options:
+        - "ubuntu-24.04"
+        - "ubuntu-22.04"
+        - "windows-2022"
+      default: 0
     validations:
       required: true
 
@@ -54,12 +58,20 @@ body:
     validations:
       required: true
 
-  - type: input
+  - type: dropdown
     id: runner_size
     attributes:
       label: Runner machine size
-      description: Machine size identifier (for example 4-core from the organization's machine-size list).
-      placeholder: 4-core
+      description: Machine size from the organization's machine-size list.
+      options:
+        - 4-core
+        - 2-core
+        - 8-core
+        - 16-core
+        - 32-core
+        - arm-4-core
+        - arm-8-core
+      default: 0
     validations:
       required: true
 

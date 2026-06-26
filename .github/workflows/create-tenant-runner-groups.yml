@@ -30,7 +30,7 @@ concurrency:
 
 jobs:
   intake:
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'issues' || github.event_name == 'issue_comment'
+    if: github.event_name == 'workflow_dispatch' || ((github.event_name == 'issues' || github.event_name == 'issue_comment') && contains(github.event.issue.labels.*.name, 'create-tenant-runner-groups'))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
@@ -171,6 +171,28 @@ jobs:
           path: ${{ steps.approved_execution.outputs['audit-artifact-path'] || steps.approval_gate.outputs['audit-artifact-path'] || steps.request_validation.outputs['audit-artifact-path'] || steps.request_validation.outputs.artifact_path }}
           if-no-files-found: warn
           retention-days: 30
+
+      - name: Post result comment on the issue
+        if: ${{ always() && github.event.action != 'labeled' && (github.event_name == 'issues' || github.event_name == 'issue_comment') && steps.issue_context.outputs.issue_number != '' }}
+        uses: actions/github-script@v7
+        env:
+          AUDIT_ARTIFACT_PATH: ${{ steps.approved_execution.outputs['audit-artifact-path'] || steps.approval_gate.outputs['audit-artifact-path'] || steps.request_validation.outputs['audit-artifact-path'] || steps.request_validation.outputs.artifact_path }}
+          ISSUE_NUMBER: ${{ steps.issue_context.outputs.issue_number }}
+        with:
+          script: |
+            const fs = require('fs');
+            const artifactPath = process.env.AUDIT_ARTIFACT_PATH;
+            if (!artifactPath || !fs.existsSync(artifactPath)) {
+              return;
+            }
+            const { formatAuditSummary } = require('./src/scripts/emit-audit-summary');
+            const artifact = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: Number(process.env.ISSUE_NUMBER),
+              body: formatAuditSummary(artifact),
+            });
 
       - name: Validation and approval snapshot
         if: always()
