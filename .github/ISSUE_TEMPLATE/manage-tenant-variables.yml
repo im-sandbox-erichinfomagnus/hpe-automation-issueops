@@ -1,0 +1,96 @@
+name: Manage tenant variables
+description: Request create, update, or delete of tenant-scoped organization Actions variables, authorized by active tenant top-team maintainership.
+title: "[manage-tenant-variables] <org>/<tenant>: <summary>"
+labels:
+  - issueops
+  - manage-tenant-variables
+body:
+  - type: input
+    id: organization
+    attributes:
+      label: Target organization
+      description: GitHub organization where the tenant-scoped Actions variables should be managed.
+      placeholder: octo-org
+    validations:
+      required: true
+
+  - type: input
+    id: tenant_name
+    attributes:
+      label: Tenant name
+      description: Human-readable tenant name exactly as defined in tenant-registry for the target organization.
+      placeholder: ContosoUK
+    validations:
+      required: true
+
+  - type: dropdown
+    id: variable_operation
+    attributes:
+      label: Variable operation
+      description: Whether to create, update, or delete the tenant-scoped Actions variable(s).
+      options:
+        - create
+        - update
+        - delete
+      default: 0
+    validations:
+      required: true
+
+  - type: input
+    id: variable_name
+    attributes:
+      label: Variable name (optional)
+      description: Base variable name for a single variable. It is namespaced as TENANTKEY_NAME. Provide either this or the batch CSV below.
+      placeholder: API_BASE_URL
+    validations:
+      required: false
+
+  - type: input
+    id: variable_value
+    attributes:
+      label: Variable value (optional)
+      description: Value for the single variable. Required for create and update. Ignored for delete.
+      placeholder: https://api.example.com
+    validations:
+      required: false
+
+  - type: textarea
+    id: variables_csv
+    attributes:
+      label: Variables CSV (optional)
+      description: Batch input, one "name,value" per line. Omit the value for delete. Provide either this or the single variable name above.
+      placeholder: |
+        API_BASE_URL,https://api.example.com
+        FEATURE_FLAG,enabled
+    validations:
+      required: false
+
+  - type: input
+    id: designated_approver
+    attributes:
+      label: Designated approver
+      description: GitHub login for the authorized approver who will post the approval comment (must be an active organization owner).
+      placeholder: org-owner-user
+    validations:
+      required: true
+
+  - type: dropdown
+    id: dry_run
+    attributes:
+      label: Dry-run mode
+      description: Dry-run validates tenant context and planned mutation without changing any Actions variable.
+      options:
+        - "true"
+        - "false"
+      default: 0
+    validations:
+      required: true
+
+  - type: textarea
+    id: justification
+    attributes:
+      label: Business justification
+      description: Explain why these tenant-scoped variables are needed.
+      placeholder: Configure tenant CI pipelines with shared endpoint metadata.
+    validations:
+      required: true

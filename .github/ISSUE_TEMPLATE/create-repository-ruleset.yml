@@ -1,0 +1,154 @@
+name: Create repository ruleset
+description: Request creation of a repository-level ruleset on a tenant repository, authorized by active tenant repo-admin team membership.
+title: "[create-repository-ruleset] <org>/<repository>: <ruleset-name>"
+labels:
+  - issueops
+  - create-repository-ruleset
+body:
+  - type: input
+    id: organization
+    attributes:
+      label: Target organization
+      description: GitHub organization that owns the tenant repository.
+      placeholder: octo-org
+    validations:
+      required: true
+
+  - type: input
+    id: tenant_name
+    attributes:
+      label: Tenant name (optional)
+      description: Human-readable tenant name as defined in tenant-registry, if the repository belongs to a tenant. Leave blank for imported repositories that are not in the tenant model.
+      placeholder: Acme Platform
+    validations:
+      required: false
+
+  - type: input
+    id: repository
+    attributes:
+      label: Target repository
+      description: Repository name in the target organization. Authorization is by admin permission on this repository.
+      placeholder: acme-service-api
+    validations:
+      required: true
+
+  - type: input
+    id: ruleset_name
+    attributes:
+      label: Ruleset name
+      description: Name for the repository ruleset. Creation is idempotent by this name.
+      placeholder: acme-default-branch-protection
+    validations:
+      required: true
+
+  - type: dropdown
+    id: target
+    attributes:
+      label: Ruleset target
+      description: Whether the ruleset applies to branches or tags.
+      options:
+        - branch
+        - tag
+      default: 0
+    validations:
+      required: true
+
+  - type: input
+    id: ref_name_pattern
+    attributes:
+      label: Ref name pattern (optional)
+      description: Ref name include pattern for the ruleset conditions. Defaults to ~DEFAULT_BRANCH.
+      placeholder: "~DEFAULT_BRANCH"
+    validations:
+      required: false
+
+  - type: dropdown
+    id: enforcement
+    attributes:
+      label: Enforcement
+      description: Ruleset enforcement level.
+      options:
+        - active
+        - evaluate
+        - disabled
+      default: 0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: require_pull_request
+    attributes:
+      label: Require pull request
+      description: Require a pull request before merging.
+      options:
+        - "false"
+        - "true"
+      default: 0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: block_force_pushes
+    attributes:
+      label: Block force pushes
+      description: Block non-fast-forward (force) pushes.
+      options:
+        - "false"
+        - "true"
+      default: 0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: require_linear_history
+    attributes:
+      label: Require linear history
+      description: Require a linear commit history.
+      options:
+        - "false"
+        - "true"
+      default: 0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: restrict_deletions
+    attributes:
+      label: Restrict deletions
+      description: Restrict deletion of matching refs.
+      options:
+        - "false"
+        - "true"
+      default: 0
+    validations:
+      required: true
+
+  - type: input
+    id: designated_approver
+    attributes:
+      label: Designated approver
+      description: GitHub login for the authorized approver who will post the approval comment (must be an active organization owner).
+      placeholder: org-owner-user
+    validations:
+      required: true
+
+  - type: dropdown
+    id: dry_run
+    attributes:
+      label: Dry-run mode
+      description: Dry-run validates tenant context and planned mutation without changing any repository ruleset.
+      options:
+        - "true"
+        - "false"
+      default: 0
+    validations:
+      required: true
+
+  - type: textarea
+    id: justification
+    attributes:
+      label: Business justification
+      description: Explain why this repository ruleset is needed.
+      placeholder: Enforce branch protection on the tenant service repository.
+    validations:
+      required: true

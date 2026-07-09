@@ -138,6 +138,19 @@ This list should be updated as new IssueOps workflows are added.
 - `move-tenant-hosted-runner`: Request, validate, approve, and reconcile moving
 	one existing tenant-prefixed GitHub-hosted runner into one existing
 	tenant-prefixed runner group, with optional runner-id disambiguation.
+- `manage-tenant-variables`: Request, validate, approve, and reconcile create,
+	update, or delete of tenant-prefixed organization Actions variables,
+	authorized by active maintainership of the tenant top team.
+- `create-repository-ruleset`: Request, validate, approve, and reconcile
+	creation of a repository-level ruleset on a target repository, idempotent by
+	ruleset name, authorized by admin permission on the target repository (or an
+	active maintainer of the tenant top team when the repository resolves to a
+	tenant). Works on imported repositories that are not in the tenant model.
+- `delete-repository-ruleset`: Request, validate, approve, and reconcile
+	deletion of a repository-level ruleset on a target repository, a no-op when
+	the named ruleset is absent, authorized by admin permission on the target
+	repository (or an active maintainer of the tenant top team when the
+	repository resolves to a tenant).
 
 Detailed design and operator guidance for the current operation live in:
 
