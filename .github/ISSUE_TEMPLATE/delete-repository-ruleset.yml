@@ -23,23 +23,38 @@ body:
     validations:
       required: false
 
+  - type: textarea
+    id: rulesets_csv
+    attributes:
+      label: Rulesets CSV (spreadsheet batch)
+      description: >-
+        Primary input. Paste one row per ruleset in the column order repository,ruleset_name.
+        One issue can carry many rows across many repositories. An optional header row is allowed.
+        The single-item fields below are used only when this is empty.
+      placeholder: |
+        repository,ruleset_name
+        acme-service-api,acme-main-protection
+        acme-web,acme-main-protection
+    validations:
+      required: false
+
   - type: input
     id: repository
     attributes:
-      label: Target repository
-      description: Repository name in the target organization. Authorization is by admin permission on this repository.
+      label: Target repository (optional, single-item path)
+      description: Repository name in the target organization. Used only when the CSV batch is empty. Authorization is by admin permission on this repository.
       placeholder: acme-service-api
     validations:
-      required: true
+      required: false
 
   - type: input
     id: ruleset_name
     attributes:
-      label: Ruleset name
-      description: Name of the repository ruleset to delete. Deletion is a no-op when the named ruleset is absent.
+      label: Ruleset name (optional, single-item path)
+      description: Name of the repository ruleset to delete. Deletion is a no-op when the named ruleset is absent. Used only when the CSV batch is empty.
       placeholder: acme-default-branch-protection
     validations:
-      required: true
+      required: false
 
   - type: input
     id: designated_approver

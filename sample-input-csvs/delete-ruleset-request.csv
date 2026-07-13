@@ -1,0 +1,3 @@
+repository,ruleset_name
+acme-service-api,acme-main-protection
+acme-web,acme-tag-protection

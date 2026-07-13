@@ -97,6 +97,25 @@ test('valid create request by a tenant top-team maintainer becomes approval-read
   assert.match(result.request.context_marker, /^tenant-variable-context:/);
 });
 
+test('a CI/CD admin team member becomes approval-ready', async () => {
+  const registryDir = buildRegistry();
+  const result = await validateTenantVariablesRequest(
+    buildRequestInput({ requesterLogin: 'tenant-cicd-member' }),
+    buildOptions(registryDir, {
+      getMembershipForUser: async ({ teamSlug, username }) => {
+        if (teamSlug === 'contosouk-admin' && username === 'tenant-cicd-member') {
+          return { state: 'active', membership: { role: 'member' } };
+        }
+        return { state: 'absent', membership: null };
+      },
+    })
+  );
+
+  assert.equal(result.is_valid, true, JSON.stringify(result.errors));
+  assert.equal(result.request_status, 'awaiting_approval');
+  assert.equal(result.validation_findings.requester_cicd_membership_state, 'active_member');
+});
+
 test('re-run against an already-satisfied variable converges as a no-op plan', async () => {
   const registryDir = buildRegistry();
   const result = await validateTenantVariablesRequest(

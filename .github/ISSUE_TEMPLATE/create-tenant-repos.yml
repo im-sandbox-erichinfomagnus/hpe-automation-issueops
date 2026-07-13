@@ -23,20 +23,38 @@ body:
     validations:
       required: true
 
+  - type: textarea
+    id: repositories_csv
+    attributes:
+      label: Repositories CSV (spreadsheet batch)
+      description: >-
+        Primary input. Paste one row per repository in the column order
+        repository_name,repository_visibility,primary_contact,secondary_contact.
+        One issue can create many repositories in the resolved tenant boundary.
+        An optional header row is allowed. The single-item fields below are used
+        only when this is empty.
+      placeholder: |
+        repository_name,repository_visibility,primary_contact,secondary_contact
+        acme-platform-service,private,octocat,hubot
+        acme-web,internal,octocat,
+        acme-docs,public,alice@example.com,
+    validations:
+      required: false
+
   - type: input
     id: repository_name
     attributes:
-      label: Repository name
-      description: Name for exactly one repository to create within the resolved tenant boundary (do not include owner or organization prefix).
+      label: Repository name (optional, single-item path)
+      description: Name for exactly one repository to create within the resolved tenant boundary (do not include owner or organization prefix). Used only when the CSV batch is empty.
       placeholder: acme-platform-service
     validations:
-      required: true
+      required: false
 
   - type: dropdown
     id: repository_visibility
     attributes:
-      label: Repository visibility
-      description: Select the requested visibility for the new repository. Defaults to private when not specified.
+      label: Repository visibility (single-item path)
+      description: Requested visibility for the single-item repository. Used only when the CSV batch is empty.
       options:
         - private
         - internal
@@ -48,24 +66,25 @@ body:
   - type: input
     id: primary_contact
     attributes:
-      label: Primary contact
+      label: Primary contact (single-item path)
       description: >
-        GitHub username (handle) of the primary business owner for this repository.
+        GitHub username (handle) of the primary business owner for the single-item repository.
         A GitHub handle is preferred (for example, octocat or @octocat).
         If the person does not have a GitHub account, a work email address is accepted
-        as a fallback (for example, alice@example.com).
+        as a fallback (for example, alice@example.com). Used only when the CSV batch is empty.
         Future enhancement: automatic GitHub handle validation may be integrated via
         the GitHub Users API.
       placeholder: octocat
     validations:
-      required: true
+      required: false
 
   - type: input
     id: secondary_contact
     attributes:
-      label: Secondary contact (optional)
+      label: Secondary contact (optional, single-item path)
       description: >
-        GitHub username (handle) or work email of a secondary or backup business owner.
+        GitHub username (handle) or work email of a secondary or backup business owner
+        for the single-item repository.
         A GitHub handle is preferred (for example, octocat or @octocat).
         Future enhancement: automatic GitHub handle validation may be integrated via
         the GitHub Users API.

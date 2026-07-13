@@ -8,7 +8,7 @@ const test = require('node:test');
 
 const { validateRepositoryRulesetRequest } = require('../../src/workflow-support/validate-repository-ruleset-request');
 
-function canonicalTopologyRecord({ tenantId, tenantName, organization }) {
+function canonicalTopologyRecord({ tenantId, tenantName, organization, ownedRepositories = [] }) {
   const slug = tenantId;
   return {
     tenantId,
@@ -25,6 +25,7 @@ function canonicalTopologyRecord({ tenantId, tenantName, organization }) {
           { team: `${slug}-repo-admin`, parent: `${slug}-root`, type: 'repo-admin' },
         ],
       },
+      repositories: { owned: ownedRepositories },
     },
   };
 }
@@ -32,7 +33,12 @@ function canonicalTopologyRecord({ tenantId, tenantName, organization }) {
 function buildRegistry(records) {
   const registryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'repository-ruleset-delete-registry-'));
   const registryRecords = records || [
-    canonicalTopologyRecord({ tenantId: 'acme', tenantName: 'Acme Platform', organization: 'octo-org' }),
+    canonicalTopologyRecord({
+      tenantId: 'acme',
+      tenantName: 'Acme Platform',
+      organization: 'octo-org',
+      ownedRepositories: ['acme-service-api'],
+    }),
   ];
   for (const record of registryRecords) {
     fs.writeFileSync(path.join(registryDir, `${record.tenantId}.json`), JSON.stringify(record, null, 2), 'utf8');
@@ -40,17 +46,16 @@ function buildRegistry(records) {
   return registryDir;
 }
 
-function buildRequestInput(overrides = {}) {
+function buildRequestInput(csvRows, overrides = {}) {
   return {
     rulesetOperation: 'delete',
     parsedRequest: {
       organization: 'octo-org',
       tenant_name: 'Acme Platform',
-      repository: 'acme-service-api',
-      ruleset_name: 'acme-default-branch-protection',
+      rulesets_csv: ['repository,ruleset_name', ...csvRows].join('\n'),
       designated_approver: 'org-owner-user',
       dry_run: 'false',
-      justification: 'Retire the deprecated branch protection ruleset.',
+      justification: 'Retire stale rulesets.',
       ...overrides.parsedRequest,
     },
     issue: {
@@ -60,90 +65,89 @@ function buildRequestInput(overrides = {}) {
   };
 }
 
-function buildOptions(registryDir, overrides = {}) {
+function buildOptions(registryDir, { adminRepos = ['acme-service-api', 'acme-web'], teamMemberships = {}, existingRulesets = {}, overrides = {} } = {}) {
   return {
     registryDirectory: registryDir,
     registryRef: 'main',
     getOrganization: async () => ({ exists: true }),
-    getRepositoryCollaboratorPermission: async ({ username }) => ({
+    getRepositoryCollaboratorPermission: async ({ repo }) => ({
       exists: true,
-      permission: username === 'repo-admin-user' ? 'admin' : 'write',
-      role_name: username === 'repo-admin-user' ? 'admin' : 'write',
+      permission: adminRepos.includes(repo) ? 'admin' : 'write',
+      role_name: adminRepos.includes(repo) ? 'admin' : 'write',
     }),
-    getMembershipForUser: async () => ({ state: 'absent', membership: null }),
+    getMembershipForUser: async ({ teamSlug }) => teamMemberships[teamSlug] || { state: 'absent', membership: null },
     getOrganizationMembership: async ({ username }) => ({
       exists: true,
-      membership: {
-        role: username === 'org-owner-user' ? 'admin' : 'member',
-        state: 'active',
-      },
+      membership: { role: username === 'org-owner-user' ? 'admin' : 'member', state: 'active' },
     }),
     getRepository: async () => ({ exists: true, repository: {} }),
-    listRepositoryRulesets: async () => ([
-      { id: 77, name: 'acme-default-branch-protection', target: 'branch', enforcement: 'active' },
-    ]),
+    listRepositoryRulesets: async ({ repo }) => existingRulesets[repo] || [],
     ...overrides,
   };
 }
 
-test('valid delete request by a repository admin becomes approval-ready', async () => {
+const DEFAULT_EXISTING = {
+  'acme-service-api': [{ id: 77, name: 'acme-main-protection', target: 'branch', enforcement: 'active' }],
+  'acme-web': [{ id: 88, name: 'acme-web-protection', target: 'branch', enforcement: 'active' }],
+};
+
+test('a batch of delete rows across repos all become approval-ready for a repo admin', async () => {
   const registryDir = buildRegistry();
-  const result = await validateRepositoryRulesetRequest(buildRequestInput(), buildOptions(registryDir));
+  const result = await validateRepositoryRulesetRequest(
+    buildRequestInput(['acme-service-api,acme-main-protection', 'acme-web,acme-web-protection']),
+    buildOptions(registryDir, { existingRulesets: DEFAULT_EXISTING })
+  );
 
   assert.equal(result.is_valid, true, JSON.stringify(result.errors));
   assert.equal(result.request_status, 'awaiting_approval');
-  assert.equal(result.authorization_path, 'repository_admin');
-  assert.equal(result.plan.ruleset_operation, 'delete');
-  assert.equal(result.plan.planned_action, 'delete');
-  assert.equal(result.ruleset_exists, true);
-  assert.equal(result.existing_ruleset_id, 77);
-  assert.equal(result.plan.ruleset_payload, null);
-  assert.match(result.request.context_marker, /^repository-ruleset-context:/);
+  assert.equal(result.plan.entries.length, 2);
+  assert.equal(result.plan.valid_entry_count, 2);
+  const byRepo = Object.fromEntries(result.plan.entries.map((entry) => [entry.repository, entry]));
+  assert.equal(byRepo['acme-service-api'].action, 'delete');
+  assert.equal(byRepo['acme-service-api'].existing_ruleset_id, 77);
+  assert.equal(byRepo['acme-web'].action, 'delete');
 });
 
-test('delete converges to a no-op when the named ruleset is absent', async () => {
+test('delete per-row idempotent convergence: an absent ruleset name is a no-op', async () => {
   const registryDir = buildRegistry();
   const result = await validateRepositoryRulesetRequest(
-    buildRequestInput(),
+    buildRequestInput(['acme-service-api,acme-main-protection', 'acme-web,does-not-exist']),
+    buildOptions(registryDir, { existingRulesets: DEFAULT_EXISTING })
+  );
+
+  assert.equal(result.is_valid, true, JSON.stringify(result.errors));
+  const byRepo = Object.fromEntries(result.plan.entries.map((entry) => [entry.repository, entry]));
+  assert.equal(byRepo['acme-service-api'].action, 'delete');
+  assert.equal(byRepo['acme-web'].action, 'noop');
+  assert.equal(byRepo['acme-web'].ruleset_exists, false);
+});
+
+test('a delete row for a repo the requester does not admin fails while other rows pass', async () => {
+  const registryDir = buildRegistry();
+  const result = await validateRepositoryRulesetRequest(
+    buildRequestInput(['acme-service-api,acme-main-protection', 'acme-web,acme-web-protection']),
+    buildOptions(registryDir, { adminRepos: ['acme-service-api'], existingRulesets: DEFAULT_EXISTING })
+  );
+
+  assert.equal(result.is_valid, true, JSON.stringify(result.errors));
+  const byRepo = Object.fromEntries(result.plan.entries.map((entry) => [entry.repository, entry]));
+  assert.equal(byRepo['acme-service-api'].row_status, 'valid');
+  assert.equal(byRepo['acme-web'].row_status, 'rejected');
+  assert.equal(byRepo['acme-web'].failure_reason, 'unauthorized');
+});
+
+test('a tenant repo-admin team member is authorized to delete on a tenant-owned repo', async () => {
+  const registryDir = buildRegistry();
+  const result = await validateRepositoryRulesetRequest(
+    buildRequestInput(['acme-service-api,acme-main-protection'], { requesterLogin: 'tenant-repo-admin-member' }),
     buildOptions(registryDir, {
-      listRepositoryRulesets: async () => ([]),
+      adminRepos: [],
+      teamMemberships: { 'acme-repo-admin': { state: 'active', membership: { role: 'maintainer' } } },
+      existingRulesets: DEFAULT_EXISTING,
     })
   );
 
   assert.equal(result.is_valid, true, JSON.stringify(result.errors));
-  assert.equal(result.ruleset_exists, false);
-  assert.equal(result.plan.planned_action, 'noop');
-});
-
-test('a delete requester without admin permission on the target repository is rejected', async () => {
-  const registryDir = buildRegistry();
-  const result = await validateRepositoryRulesetRequest(
-    buildRequestInput({ requesterLogin: 'writer-user' }),
-    buildOptions(registryDir)
-  );
-
-  assert.equal(result.is_valid, false);
-  assert.equal(result.authorization_path, 'none');
-  assert.equal(
-    result.errors.some((error) => /does not have admin permission on repository/i.test(error)),
-    true,
-    JSON.stringify(result.errors)
-  );
-});
-
-test('a delete on a repository not in the registry still works for a repository admin', async () => {
-  const registryDir = buildRegistry();
-  const result = await validateRepositoryRulesetRequest(
-    buildRequestInput({
-      parsedRequest: {
-        tenant_name: '',
-        repository: 'imported-legacy-service',
-      },
-    }),
-    buildOptions(registryDir)
-  );
-
-  assert.equal(result.is_valid, true, JSON.stringify(result.errors));
-  assert.equal(result.authorization_path, 'repository_admin');
-  assert.equal(result.canonical_tenant_context, null);
+  assert.equal(result.plan.entries[0].authorization_path, 'tenant_repo_admin_team');
+  assert.equal(result.plan.entries[0].action, 'delete');
 });

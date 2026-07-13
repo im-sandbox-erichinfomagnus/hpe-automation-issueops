@@ -1,0 +1,4 @@
+repository_name,repository_visibility,primary_contact,secondary_contact
+acme-platform-service,private,octocat,hubot
+acme-web,internal,octocat,
+acme-docs,public,alice@example.com,

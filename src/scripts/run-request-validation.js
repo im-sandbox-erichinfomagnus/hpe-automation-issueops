@@ -141,10 +141,14 @@ function readParsedRequestFromEnv(env = process.env) {
     variable_name: env.PARSED_VARIABLE_NAME || '',
     variable_value: env.PARSED_VARIABLE_VALUE || '',
     variables_csv: env.PARSED_VARIABLES_CSV || '',
+    repositories_csv: env.PARSED_REPOSITORIES_CSV || '',
+    parsed_repositories_csv: env.PARSED_REPOSITORIES_CSV || '',
     repository: env.PARSED_REPOSITORY || '',
     parsed_repository: env.PARSED_REPOSITORY || '',
     ruleset_name: env.PARSED_RULESET_NAME || '',
     parsed_ruleset_name: env.PARSED_RULESET_NAME || '',
+    rulesets_csv: env.PARSED_RULESETS_CSV || '',
+    parsed_rulesets_csv: env.PARSED_RULESETS_CSV || '',
     target: env.PARSED_TARGET || '',
     parsed_target: env.PARSED_TARGET || '',
     ref_name_pattern: env.PARSED_REF_NAME_PATTERN || '',
@@ -296,8 +300,12 @@ function isTenantRepoCreationParsedRequest(parsedRequest = {}) {
   );
 
   const looksLikeRepositoryName = /^[a-zA-Z0-9._-]{1,100}$/.test(firstLineRepositoryName);
+  const hasRepositoriesCsv = Boolean(
+    parsedRequest.repositories_csv ||
+    parsedRequest.parsed_repositories_csv
+  );
 
-  return looksLikeRepositoryName && !hasTenantModelSpecificSignals;
+  return (looksLikeRepositoryName || hasRepositoriesCsv) && !hasTenantModelSpecificSignals;
 }
 
 function isHostedRunnerCreationParsedRequest(parsedRequest = {}) {
@@ -365,15 +373,26 @@ function hasRepositoryRulesetCreateSignals(parsedRequest = {}) {
   );
 }
 
+function hasRulesetBatchSignal(parsedRequest = {}) {
+  return Boolean(parsedRequest.rulesets_csv || parsedRequest.parsed_rulesets_csv);
+}
+
 function isRepositoryRulesetCreationParsedRequest(parsedRequest = {}) {
-  const hasRulesetName = Boolean(parsedRequest.ruleset_name || parsedRequest.parsed_ruleset_name);
-  return hasRulesetName && hasRepositoryRulesetCreateSignals(parsedRequest);
+  const hasRulesetSignal = Boolean(
+    parsedRequest.ruleset_name ||
+    parsedRequest.parsed_ruleset_name ||
+    parsedRequest.repository ||
+    parsedRequest.parsed_repository ||
+    hasRulesetBatchSignal(parsedRequest)
+  );
+  return hasRulesetSignal && hasRepositoryRulesetCreateSignals(parsedRequest);
 }
 
 function isRepositoryRulesetDeletionParsedRequest(parsedRequest = {}) {
   const hasRulesetName = Boolean(parsedRequest.ruleset_name || parsedRequest.parsed_ruleset_name);
   const hasRepository = Boolean(parsedRequest.repository || parsedRequest.parsed_repository);
-  return hasRulesetName && hasRepository && !hasRepositoryRulesetCreateSignals(parsedRequest);
+  const hasSingleItem = hasRulesetName && hasRepository;
+  return (hasSingleItem || hasRulesetBatchSignal(parsedRequest)) && !hasRepositoryRulesetCreateSignals(parsedRequest);
 }
 
 function isTeamCreationParsedRequest(parsedRequest = {}) {
@@ -1506,7 +1525,10 @@ async function runRequestValidation(options = {}) {
         reconciliationPlan = {
           dry_run: Boolean(validation.request && validation.request.dry_run),
           boundary_revalidation_status: validation.is_valid ? 'matched' : 'mismatched',
-          planned_action: validation.plan && validation.plan.planned_action,
+          ruleset_operation: validation.plan && validation.plan.ruleset_operation,
+          entries: validation.plan && validation.plan.entries,
+          valid_entry_count: validation.plan && validation.plan.valid_entry_count,
+          rejected_entry_count: validation.plan && validation.plan.rejected_entry_count,
           state: validation.request && validation.request.dry_run ? 'validated' : 'approved_for_execution',
         };
       } else if (isTenantCreation) {

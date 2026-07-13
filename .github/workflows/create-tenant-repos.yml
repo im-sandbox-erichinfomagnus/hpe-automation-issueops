@@ -105,6 +105,7 @@ jobs:
           PARSED_ORGANIZATION: ${{ steps.parse_request.outputs.parsed_organization }}
           PARSED_TENANT_NAME: ${{ steps.parse_request.outputs.parsed_tenant_name }}
           PARSED_REPOSITORY_NAME: ${{ steps.parse_request.outputs.parsed_repository_name }}
+          PARSED_REPOSITORIES_CSV: ${{ steps.parse_request.outputs.parsed_repositories_csv }}
         run: |
           set -euo pipefail
 
@@ -119,7 +120,7 @@ jobs:
 
           if [ "${EVENT_NAME:-}" = "issues" ] && [ "${EVENT_ACTION:-}" = "labeled" ] && [ "$terminal_label_event" = "true" ]; then
             matches_request=false
-          elif [ -n "${PARSED_ORGANIZATION:-}" ] && [ -n "${PARSED_TENANT_NAME:-}" ] && [ -n "${PARSED_REPOSITORY_NAME:-}" ]; then
+          elif [ -n "${PARSED_ORGANIZATION:-}" ] && [ -n "${PARSED_TENANT_NAME:-}" ] && { [ -n "${PARSED_REPOSITORY_NAME:-}" ] || [ -n "${PARSED_REPOSITORIES_CSV:-}" ]; }; then
             matches_request=true
           fi
 
@@ -143,6 +144,7 @@ jobs:
           PARSED_ORGANIZATION: ${{ steps.parse_request.outputs.parsed_organization }}
           PARSED_TENANT_NAME: ${{ steps.parse_request.outputs.parsed_tenant_name }}
           PARSED_REPOSITORY_NAME: ${{ steps.parse_request.outputs.parsed_repository_name }}
+          PARSED_REPOSITORIES_CSV: ${{ steps.parse_request.outputs.parsed_repositories_csv }}
           PARSED_REPOSITORY_VISIBILITY: ${{ steps.parse_request.outputs.parsed_repository_visibility }}
           PARSED_PRIMARY_CONTACT: ${{ steps.parse_request.outputs.parsed_primary_contact }}
           PARSED_SECONDARY_CONTACT: ${{ steps.parse_request.outputs.parsed_secondary_contact }}

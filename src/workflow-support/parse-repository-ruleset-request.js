@@ -5,9 +5,24 @@ const ALLOWED_RULESET_TARGETS = ['branch', 'tag'];
 const ALLOWED_RULESET_ENFORCEMENTS = ['active', 'evaluate', 'disabled'];
 const DEFAULT_REF_NAME_PATTERN = '~DEFAULT_BRANCH';
 
+// Column order for the spreadsheet/CSV batch textarea. A create row carries the
+// full ruleset shape; a delete row only needs the repository and ruleset name.
+const CREATE_CSV_COLUMNS = [
+  'repository',
+  'ruleset_name',
+  'target',
+  'ref_name_pattern',
+  'enforcement',
+  'require_pull_request',
+  'block_force_pushes',
+  'require_linear_history',
+  'restrict_deletions',
+];
+const DELETE_CSV_COLUMNS = ['repository', 'ruleset_name'];
+
 // Fields that only appear on a create request. Their presence in the raw parsed
-// payload is how the create operation is distinguished from a delete, which
-// carries only the repository and ruleset name.
+// payload distinguishes a create issue (create-only dropdowns always emit
+// defaults) from a delete issue, which carries none of them.
 const CREATE_ONLY_FIELDS = [
   ['target', 'parsed_target'],
   ['ref_name_pattern', 'parsed_ref_name_pattern'],
@@ -68,6 +83,12 @@ function normalizeRulesetName(value) {
   return normalizeText(value).replace(/\s+/g, ' ');
 }
 
+function unwrapCodeFence(rawInput) {
+  const text = String(rawInput == null ? '' : rawInput);
+  const fenceMatch = text.match(/^\s*```[a-zA-Z0-9_-]*\n([\s\S]*?)\n?```\s*$/);
+  return fenceMatch ? fenceMatch[1] : text;
+}
+
 function readField(source, keys) {
   for (const key of keys) {
     if (source && source[key] != null && source[key] !== '') {
@@ -85,6 +106,116 @@ function hasAnyField(source, fieldPairs) {
     }
   }
   return false;
+}
+
+// Minimal quoted-CSV row splitter (supports "" escapes inside quotes).
+function splitCsvLine(line) {
+  const cells = [];
+  let cell = '';
+  let inQuotes = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const character = line[index];
+    if (inQuotes) {
+      if (character === '"') {
+        if (line[index + 1] === '"') {
+          cell += '"';
+          index += 1;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        cell += character;
+      }
+      continue;
+    }
+    if (character === '"' && cell === '') {
+      inQuotes = true;
+      continue;
+    }
+    if (character === ',') {
+      cells.push(cell);
+      cell = '';
+      continue;
+    }
+    cell += character;
+  }
+  cells.push(cell);
+  return cells;
+}
+
+function buildCreateEntry(fields, source) {
+  return {
+    repository_input: normalizeText(fields.repository),
+    repository: normalizeRepositoryName(fields.repository),
+    ruleset_name: normalizeRulesetName(fields.ruleset_name),
+    target: normalizeDropdownValue(fields.target) || 'branch',
+    ref_name_pattern: normalizeText(fields.ref_name_pattern) || DEFAULT_REF_NAME_PATTERN,
+    enforcement: normalizeDropdownValue(fields.enforcement) || 'active',
+    require_pull_request: normalizeBoolean(fields.require_pull_request, false),
+    block_force_pushes: normalizeBoolean(fields.block_force_pushes, false),
+    require_linear_history: normalizeBoolean(fields.require_linear_history, false),
+    restrict_deletions: normalizeBoolean(fields.restrict_deletions, false),
+    source,
+  };
+}
+
+function buildDeleteEntry(fields, source) {
+  return {
+    repository_input: normalizeText(fields.repository),
+    repository: normalizeRepositoryName(fields.repository),
+    ruleset_name: normalizeRulesetName(fields.ruleset_name),
+    source,
+  };
+}
+
+function parseRulesetsCsv(rawValue, operation) {
+  const columns = operation === 'delete' ? DELETE_CSV_COLUMNS : CREATE_CSV_COLUMNS;
+  const text = unwrapCodeFence(rawValue).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const entries = [];
+  const rawLines = text.split('\n');
+  let seenDataRow = false;
+  for (const rawLine of rawLines) {
+    const line = rawLine.trim();
+    if (!line) {
+      continue;
+    }
+    const cells = splitCsvLine(line).map((cell) => cell.trim());
+    // Skip an optional header row.
+    if (!seenDataRow && cells[0] && cells[0].toLowerCase() === 'repository') {
+      seenDataRow = true;
+      continue;
+    }
+    seenDataRow = true;
+    const fields = {};
+    columns.forEach((column, index) => {
+      fields[column] = cells[index] != null ? cells[index] : '';
+    });
+    entries.push(operation === 'delete' ? buildDeleteEntry(fields, 'csv') : buildCreateEntry(fields, 'csv'));
+  }
+  return entries;
+}
+
+function mergeRulesetEntries(singleEntry, csvEntries) {
+  const merged = [];
+  const seen = new Set();
+  const candidates = [];
+  if (singleEntry && singleEntry.repository && singleEntry.ruleset_name) {
+    candidates.push(singleEntry);
+  }
+  for (const entry of csvEntries) {
+    if (entry && entry.repository && entry.ruleset_name) {
+      candidates.push(entry);
+    }
+  }
+  for (const entry of candidates) {
+    const key = `${entry.repository} ${entry.ruleset_name.toLowerCase()}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    merged.push(entry);
+  }
+  return merged;
 }
 
 function buildRequestId(repository, issueNumber, runId, runAttempt) {
@@ -114,45 +245,25 @@ function parseRepositoryRulesetRequest(input = {}) {
     readField(parsed, ['tenant_name', 'parsed_tenant_name', 'tenant_display_name']) || input.tenantName
   );
   const tenantNameNormalized = normalizeTenantName(tenantNameInput);
-  const repositoryTargetInput = normalizeText(
-    readField(parsed, ['repository', 'parsed_repository']) || input.repositoryTarget
-  );
-  const repositoryTargetNormalized = normalizeRepositoryName(repositoryTargetInput);
-  const rulesetNameInput = normalizeRulesetName(
-    readField(parsed, ['ruleset_name', 'parsed_ruleset_name']) || input.rulesetName
-  );
 
-  const targetInput = normalizeDropdownValue(
-    readField(parsed, ['target', 'parsed_target']) || input.target
-  );
-  const rulesetTarget = rulesetOperation === 'create'
-    ? (targetInput || 'branch')
-    : '';
-  const enforcementInput = normalizeDropdownValue(
-    readField(parsed, ['enforcement', 'parsed_enforcement']) || input.enforcement
-  );
-  const enforcement = rulesetOperation === 'create'
-    ? (enforcementInput || 'active')
-    : '';
-  const refNamePatternInput = normalizeText(
-    readField(parsed, ['ref_name_pattern', 'parsed_ref_name_pattern']) || input.refNamePattern
-  );
-  const refNamePattern = rulesetOperation === 'create'
-    ? (refNamePatternInput || DEFAULT_REF_NAME_PATTERN)
-    : '';
+  const singleFields = {
+    repository: readField(parsed, ['repository', 'parsed_repository']) || input.repositoryTarget,
+    ruleset_name: readField(parsed, ['ruleset_name', 'parsed_ruleset_name']) || input.rulesetName,
+    target: readField(parsed, ['target', 'parsed_target']) || input.target,
+    ref_name_pattern: readField(parsed, ['ref_name_pattern', 'parsed_ref_name_pattern']) || input.refNamePattern,
+    enforcement: readField(parsed, ['enforcement', 'parsed_enforcement']) || input.enforcement,
+    require_pull_request: readField(parsed, ['require_pull_request', 'parsed_require_pull_request']) || input.requirePullRequest,
+    block_force_pushes: readField(parsed, ['block_force_pushes', 'parsed_block_force_pushes']) || input.blockForcePushes,
+    require_linear_history: readField(parsed, ['require_linear_history', 'parsed_require_linear_history']) || input.requireLinearHistory,
+    restrict_deletions: readField(parsed, ['restrict_deletions', 'parsed_restrict_deletions']) || input.restrictDeletions,
+  };
+  const singleEntry = rulesetOperation === 'delete'
+    ? buildDeleteEntry(singleFields, 'form')
+    : buildCreateEntry(singleFields, 'form');
 
-  const requirePullRequest = rulesetOperation === 'create'
-    ? normalizeBoolean(readField(parsed, ['require_pull_request', 'parsed_require_pull_request']) || input.requirePullRequest, false)
-    : false;
-  const blockForcePushes = rulesetOperation === 'create'
-    ? normalizeBoolean(readField(parsed, ['block_force_pushes', 'parsed_block_force_pushes']) || input.blockForcePushes, false)
-    : false;
-  const requireLinearHistory = rulesetOperation === 'create'
-    ? normalizeBoolean(readField(parsed, ['require_linear_history', 'parsed_require_linear_history']) || input.requireLinearHistory, false)
-    : false;
-  const restrictDeletions = rulesetOperation === 'create'
-    ? normalizeBoolean(readField(parsed, ['restrict_deletions', 'parsed_restrict_deletions']) || input.restrictDeletions, false)
-    : false;
+  const csvRaw = readField(parsed, ['rulesets_csv', 'parsed_rulesets_csv', 'bulk_csv_requested_rulesets']) || input.rulesetsCsv;
+  const csvEntries = parseRulesetsCsv(csvRaw, rulesetOperation);
+  const rulesetEntries = mergeRulesetEntries(singleEntry, csvEntries);
 
   const designatedApproverLogin = normalizeLogin(
     readField(parsed, ['designated_approver', 'parsed_designated_approver']) || input.designatedApprover
@@ -181,17 +292,7 @@ function parseRepositoryRulesetRequest(input = {}) {
     tenant_name_input: tenantNameInput,
     tenant_name_normalized: tenantNameNormalized,
     ruleset_operation: rulesetOperation,
-    repository_target_input: repositoryTargetInput,
-    repository_target_normalized: repositoryTargetNormalized,
-    ruleset_name_input: rulesetNameInput,
-    ruleset_name_normalized: rulesetNameInput,
-    ruleset_target: rulesetTarget,
-    ref_name_pattern: refNamePattern,
-    enforcement,
-    require_pull_request: requirePullRequest,
-    block_force_pushes: blockForcePushes,
-    require_linear_history: requireLinearHistory,
-    restrict_deletions: restrictDeletions,
+    ruleset_entries: rulesetEntries,
     designated_approver_login: designatedApproverLogin,
     dry_run: dryRun,
     business_justification: justification,
@@ -201,10 +302,10 @@ function parseRepositoryRulesetRequest(input = {}) {
   };
 }
 
-function buildRepositoryRulesetPayload(request = {}) {
+function buildRepositoryRulesetPayload(entry = {}) {
   const rules = [];
 
-  if (request.require_pull_request) {
+  if (entry.require_pull_request) {
     rules.push({
       type: 'pull_request',
       parameters: {
@@ -217,25 +318,25 @@ function buildRepositoryRulesetPayload(request = {}) {
     });
   }
 
-  if (request.block_force_pushes) {
+  if (entry.block_force_pushes) {
     rules.push({ type: 'non_fast_forward' });
   }
 
-  if (request.require_linear_history) {
+  if (entry.require_linear_history) {
     rules.push({ type: 'required_linear_history' });
   }
 
-  if (request.restrict_deletions) {
+  if (entry.restrict_deletions) {
     rules.push({ type: 'deletion' });
   }
 
   return {
-    name: request.ruleset_name_input || request.ruleset_name_normalized || '',
-    target: request.ruleset_target || 'branch',
-    enforcement: request.enforcement || 'active',
+    name: entry.ruleset_name || '',
+    target: entry.target || 'branch',
+    enforcement: entry.enforcement || 'active',
     conditions: {
       ref_name: {
-        include: [request.ref_name_pattern || DEFAULT_REF_NAME_PATTERN],
+        include: [entry.ref_name_pattern || DEFAULT_REF_NAME_PATTERN],
         exclude: [],
       },
     },
@@ -247,9 +348,13 @@ module.exports = {
   ALLOWED_RULESET_OPERATIONS,
   ALLOWED_RULESET_TARGETS,
   ALLOWED_RULESET_ENFORCEMENTS,
+  CREATE_CSV_COLUMNS,
+  DELETE_CSV_COLUMNS,
   DEFAULT_REF_NAME_PATTERN,
   buildRepositoryRulesetPayload,
+  mergeRulesetEntries,
   normalizeRepositoryName,
   normalizeRulesetName,
+  parseRulesetsCsv,
   parseRepositoryRulesetRequest,
 };

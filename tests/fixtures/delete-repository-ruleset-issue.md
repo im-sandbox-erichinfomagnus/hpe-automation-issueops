@@ -6,13 +6,19 @@ octo-org
 
 Acme Platform
 
-### Target repository
+### Rulesets CSV (spreadsheet batch)
 
-acme-service-api
+repository,ruleset_name
+acme-service-api,acme-main-protection
+acme-web,acme-web-protection
 
-### Ruleset name
+### Target repository (optional, single-item path)
 
-acme-default-branch-protection
+_No response_
+
+### Ruleset name (optional, single-item path)
+
+_No response_
 
 ### Designated approver
 
@@ -24,4 +30,4 @@ false
 
 ### Business justification
 
-Retire the deprecated branch protection ruleset for the tenant repository.
+Retire the deprecated branch protection rulesets for the tenant repositories.

@@ -7,6 +7,7 @@ const test = require('node:test');
 
 const {
   buildRepositoryRulesetPayload,
+  parseRulesetsCsv,
   parseRepositoryRulesetRequest,
 } = require('../../src/workflow-support/parse-repository-ruleset-request');
 
@@ -15,13 +16,10 @@ test('create-repository-ruleset parser fixture scaffold is present', () => {
   const fixture = fs.readFileSync(fixturePath, 'utf8');
 
   assert.match(fixture, /Target organization/i);
-  assert.match(fixture, /Tenant name/i);
+  assert.match(fixture, /Rulesets CSV/i);
   assert.match(fixture, /Target repository/i);
   assert.match(fixture, /Ruleset name/i);
-  assert.match(fixture, /Ruleset target/i);
   assert.match(fixture, /Enforcement/i);
-  assert.match(fixture, /Require pull request/i);
-  assert.match(fixture, /Block force pushes/i);
   assert.match(fixture, /Designated approver/i);
   assert.match(fixture, /Dry-run mode/i);
   assert.match(fixture, /Business justification/i);
@@ -32,16 +30,13 @@ test('create-repository-ruleset issue form scaffold includes required fields', (
   const form = fs.readFileSync(formPath, 'utf8');
 
   assert.match(form, /id:\s+organization/i);
-  assert.match(form, /id:\s+tenant_name/i);
+  assert.match(form, /id:\s+rulesets_csv/i);
   assert.match(form, /id:\s+repository/i);
   assert.match(form, /id:\s+ruleset_name/i);
   assert.match(form, /id:\s+target/i);
-  assert.match(form, /id:\s+ref_name_pattern/i);
   assert.match(form, /id:\s+enforcement/i);
   assert.match(form, /id:\s+require_pull_request/i);
   assert.match(form, /id:\s+block_force_pushes/i);
-  assert.match(form, /id:\s+require_linear_history/i);
-  assert.match(form, /id:\s+restrict_deletions/i);
   assert.match(form, /id:\s+designated_approver/i);
   assert.match(form, /id:\s+dry_run/i);
   assert.match(form, /id:\s+justification/i);
@@ -49,8 +44,9 @@ test('create-repository-ruleset issue form scaffold includes required fields', (
   assert.match(form, /labels:\s*\n\s+- issueops\s*\n\s+- create-repository-ruleset/);
 });
 
-test('parser normalizes a create request and derives the operation from create-only fields', () => {
+test('parser normalizes a single-item create request into one ruleset entry', () => {
   const request = parseRepositoryRulesetRequest({
+    rulesetOperation: 'create',
     parsedRequest: {
       organization: 'Octo-Org',
       tenant_name: 'Acme Platform',
@@ -74,46 +70,69 @@ test('parser normalizes a create request and derives the operation from create-o
 
   assert.equal(request.ruleset_operation, 'create');
   assert.equal(request.organization, 'octo-org');
-  assert.equal(request.tenant_name_input, 'Acme Platform');
-  assert.equal(request.repository_target_input, 'Acme Service API');
-  assert.equal(request.repository_target_normalized, 'acme-service-api');
-  assert.equal(request.ruleset_name_input, 'Acme Default Branch Protection');
-  assert.equal(request.ruleset_target, 'branch');
-  assert.equal(request.enforcement, 'active');
-  assert.equal(request.ref_name_pattern, '~DEFAULT_BRANCH');
-  assert.equal(request.require_pull_request, true);
-  assert.equal(request.block_force_pushes, true);
-  assert.equal(request.require_linear_history, false);
-  assert.equal(request.restrict_deletions, true);
   assert.equal(request.designated_approver_login, 'org-owner-user');
   assert.equal(request.dry_run, false);
-  assert.equal(request.requester_login, 'tenant-repo-admin');
-  assert.equal(request.intake_mode, 'manual');
-  assert.equal(request.request_status, 'submitted');
+  assert.equal(request.ruleset_entries.length, 1);
+  const entry = request.ruleset_entries[0];
+  assert.equal(entry.repository, 'acme-service-api');
+  assert.equal(entry.ruleset_name, 'Acme Default Branch Protection');
+  assert.equal(entry.target, 'branch');
+  assert.equal(entry.enforcement, 'active');
+  assert.equal(entry.ref_name_pattern, '~DEFAULT_BRANCH');
+  assert.equal(entry.require_pull_request, true);
+  assert.equal(entry.restrict_deletions, true);
+  assert.equal(entry.source, 'form');
 });
 
-test('parser applies default target, enforcement, and ref name pattern for create', () => {
+test('parser reads a spreadsheet CSV batch of create rows across repos and merges the single item', () => {
   const request = parseRepositoryRulesetRequest({
     rulesetOperation: 'create',
     parsedRequest: {
       organization: 'octo-org',
-      tenant_name: 'Acme Platform',
-      repository: 'acme-web',
-      ruleset_name: 'acme-baseline',
-      require_pull_request: 'true',
+      repository: 'acme-service-api',
+      ruleset_name: 'acme-main-protection',
+      target: 'branch',
+      enforcement: 'active',
+      rulesets_csv: [
+        'repository,ruleset_name,target,ref_name_pattern,enforcement,require_pull_request,block_force_pushes,require_linear_history,restrict_deletions',
+        'acme-web,acme-main-protection,branch,~DEFAULT_BRANCH,active,true,false,false,false',
+        'acme-web,acme-tag-protection,tag,~ALL,evaluate,false,true,false,true',
+      ].join('\n'),
+      designated_approver: 'org-owner-user',
+      dry_run: 'true',
+      justification: 'Batch protection.',
     },
-    issue: { number: 511, user: { login: 'tenant-repo-admin' } },
+    issue: { number: 511, user: { login: 'repo-admin' } },
   });
 
-  assert.equal(request.ruleset_target, 'branch');
-  assert.equal(request.enforcement, 'active');
-  assert.equal(request.ref_name_pattern, '~DEFAULT_BRANCH');
+  // single-item form entry + two CSV rows, header skipped, deduped by (repo, ruleset_name)
+  assert.equal(request.ruleset_entries.length, 3);
+  assert.deepEqual(
+    request.ruleset_entries.map((entry) => `${entry.repository}/${entry.ruleset_name}`),
+    ['acme-service-api/acme-main-protection', 'acme-web/acme-main-protection', 'acme-web/acme-tag-protection']
+  );
+  const tagRow = request.ruleset_entries.find((entry) => entry.ruleset_name === 'acme-tag-protection');
+  assert.equal(tagRow.target, 'tag');
+  assert.equal(tagRow.enforcement, 'evaluate');
+  assert.equal(tagRow.block_force_pushes, true);
+  assert.equal(tagRow.source, 'csv');
 });
 
-test('ruleset payload is built from the enabled toggles only', () => {
+test('parseRulesetsCsv defaults optional create columns per row', () => {
+  const rows = parseRulesetsCsv('acme-web,only-name', 'create');
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].repository, 'acme-web');
+  assert.equal(rows[0].ruleset_name, 'only-name');
+  assert.equal(rows[0].target, 'branch');
+  assert.equal(rows[0].enforcement, 'active');
+  assert.equal(rows[0].ref_name_pattern, '~DEFAULT_BRANCH');
+  assert.equal(rows[0].require_pull_request, false);
+});
+
+test('ruleset payload is built from a single enriched entry', () => {
   const payload = buildRepositoryRulesetPayload({
-    ruleset_name_input: 'acme-baseline',
-    ruleset_target: 'branch',
+    ruleset_name: 'acme-baseline',
+    target: 'branch',
     enforcement: 'evaluate',
     ref_name_pattern: 'refs/heads/main',
     require_pull_request: true,

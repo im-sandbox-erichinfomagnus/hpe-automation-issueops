@@ -144,6 +144,37 @@ test('tenant repo validation resolves canonical tenant context from registry and
   assert.match(result.canonical_tenant_context.context_marker, /^tenant-repo-context:/);
 });
 
+test('tenant repo validation authorizes a plain repo-admin member who is not the tenant admin', async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'issueops-tenant-repo-repoadmin-only-'));
+  const registryDir = path.join(tempRoot, 'tenant-registry');
+  fs.mkdirSync(registryDir, { recursive: true });
+  writeRegistryRecord(registryDir, 'tenant-a.json', buildLegacyRegistryRecord());
+
+  const result = await validateTenantRepoRequest({
+    parsedRequest: buildParsedRequest(),
+    issue: buildIssue(20),
+    repository: 'owner/repo',
+  }, buildTenantRepoApiOptions({
+    registryDir,
+    teams: [
+      { slug: 'tenanta-tenant', parent: null },
+      { slug: 'tenanta-repoadmin', parent: { slug: 'tenanta-tenant' } },
+    ],
+    // Not a maintainer of the tenant top team, only an active repo-admin member.
+    memberships: {
+      'tenanta-tenant': { state: 'absent', membership: null },
+      'tenanta-repoadmin': { state: 'active', membership: { role: 'member' } },
+    },
+  }));
+
+  assert.equal(result.is_valid, true);
+  assert.equal(result.request_status, 'awaiting_approval');
+  assert.equal(result.tenant_resolution.tenant_resolution_status, 'resolved');
+  assert.equal(result.requester_authorization.authorized, true);
+  assert.equal(result.requester_authorization.is_repo_admin_team_member, true);
+  assert.equal(result.requester_authorization.is_tenant_top_team_maintainer, false);
+});
+
 test('tenant repo validation blocks when requester has no authorized tenant match', async () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'issueops-tenant-repo-no-match-'));
   const registryDir = path.join(tempRoot, 'tenant-registry');

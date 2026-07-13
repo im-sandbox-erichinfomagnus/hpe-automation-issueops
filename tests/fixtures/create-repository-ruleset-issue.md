@@ -6,13 +6,19 @@ octo-org
 
 Acme Platform
 
-### Target repository
+### Rulesets CSV (spreadsheet batch)
 
-acme-service-api
+repository,ruleset_name,target,ref_name_pattern,enforcement,require_pull_request,block_force_pushes,require_linear_history,restrict_deletions
+acme-service-api,acme-main-protection,branch,~DEFAULT_BRANCH,active,true,true,false,true
+acme-web,acme-main-protection,branch,~DEFAULT_BRANCH,active,true,false,false,false
 
-### Ruleset name
+### Target repository (optional, single-item path)
 
-acme-default-branch-protection
+_No response_
+
+### Ruleset name (optional, single-item path)
+
+_No response_
 
 ### Ruleset target
 
@@ -28,11 +34,11 @@ active
 
 ### Require pull request
 
-true
+false
 
 ### Block force pushes
 
-true
+false
 
 ### Require linear history
 
@@ -40,7 +46,7 @@ false
 
 ### Restrict deletions
 
-true
+false
 
 ### Designated approver
 
@@ -52,4 +58,4 @@ false
 
 ### Business justification
 
-Enforce branch protection on the tenant service repository.
+Enforce branch protection across the tenant service repositories.

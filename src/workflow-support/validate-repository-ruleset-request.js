@@ -16,12 +16,50 @@ function normalizeLogin(value) {
   return String(value || '').trim().toLowerCase();
 }
 
-function normalizeTenantName(value) {
-  return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase();
+function normalizeRepositoryNameForComparison(value) {
+  return String(value || '').trim().toLowerCase();
 }
 
 function normalizeRulesetNameForComparison(value) {
   return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+function extractOwnedRepositories(record = {}) {
+  const topology = record.topology && typeof record.topology === 'object' ? record.topology : null;
+  const owned = topology && topology.repositories && Array.isArray(topology.repositories.owned)
+    ? topology.repositories.owned
+    : [];
+  return owned
+    .map((entry) => (typeof entry === 'string'
+      ? entry
+      : entry && (entry.name || entry.repository || entry.repo || entry.repo_name) || ''))
+    .filter(Boolean);
+}
+
+// Index every registry-owned repository in the organization to its tenant so a
+// row's target repository can resolve to a tenant. Repositories that are not in
+// the model simply do not appear here, which is expected for imports.
+function buildRepositoryTenantIndex(records, organization) {
+  const index = new Map();
+  for (const record of records) {
+    const view = readTopologyView(record);
+    if (!view.organization || view.organization !== organization) {
+      continue;
+    }
+    for (const ownedRepo of extractOwnedRepositories(record)) {
+      const key = normalizeRepositoryNameForComparison(ownedRepo);
+      if (!key || index.has(key)) {
+        continue;
+      }
+      index.set(key, {
+        tenant_key: view.tenant_key,
+        tenant_display_name: view.tenant_display_name,
+        repo_admin_team_slug: view.repo_admin_team_slug,
+        tenant_root_team_slug: view.tenant_root_team_slug,
+      });
+    }
+  }
+  return index;
 }
 
 function buildRulesetContextMarker(input = {}) {
@@ -29,10 +67,8 @@ function buildRulesetContextMarker(input = {}) {
     operation: String(input.operation || 'repository_ruleset'),
     ruleset_operation: String(input.ruleset_operation || ''),
     organization: normalizeLogin(input.organization),
-    tenant_key: normalizeLogin(input.tenant_key),
-    repository: normalizeLogin(input.repository),
-    ruleset_name: normalizeRulesetNameForComparison(input.ruleset_name),
     designated_approver_login: normalizeLogin(input.designated_approver_login),
+    entries: [...(input.entries || [])].sort(),
     registry_ref: String(input.registry_ref || 'main'),
   });
 
@@ -48,34 +84,19 @@ async function validateRepositoryRulesetRequest(input = {}, options = {}) {
   const registryRef = String(options.registryRef || process.env.TENANT_REGISTRY_REF || 'main');
   const organization = normalizeLogin(request.organization);
   const requesterLogin = normalizeLogin(request.requester_login);
-  const tenantNameNormalized = normalizeTenantName(request.tenant_name_normalized || request.tenant_name_input);
   const rulesetOperation = String(request.ruleset_operation || '').toLowerCase();
-  const repositoryTarget = String(request.repository_target_normalized || '').toLowerCase();
-  const rulesetName = String(request.ruleset_name_input || request.ruleset_name_normalized || '');
+  const inputEntries = Array.isArray(request.ruleset_entries) ? request.ruleset_entries : [];
 
   if (!request.organization) {
     errors.push('Target organization is required.');
-  }
-
-  if (!request.repository_target_input) {
-    errors.push('Target repository is required.');
-  }
-
-  if (!rulesetName) {
-    errors.push('Ruleset name is required.');
   }
 
   if (!ALLOWED_RULESET_OPERATIONS.includes(rulesetOperation)) {
     errors.push(`Ruleset operation '${request.ruleset_operation || ''}' is invalid. Allowed values are: ${ALLOWED_RULESET_OPERATIONS.join(', ')}.`);
   }
 
-  if (rulesetOperation === 'create') {
-    if (!ALLOWED_RULESET_TARGETS.includes(String(request.ruleset_target || '').toLowerCase())) {
-      errors.push(`Ruleset target '${request.ruleset_target || ''}' is invalid. Allowed values are: ${ALLOWED_RULESET_TARGETS.join(', ')}.`);
-    }
-    if (!ALLOWED_RULESET_ENFORCEMENTS.includes(String(request.enforcement || '').toLowerCase())) {
-      errors.push(`Ruleset enforcement '${request.enforcement || ''}' is invalid. Allowed values are: ${ALLOWED_RULESET_ENFORCEMENTS.join(', ')}.`);
-    }
+  if (inputEntries.length === 0) {
+    errors.push('Provide at least one ruleset via the single-item fields or the CSV batch.');
   }
 
   if (!request.designated_approver_login) {
@@ -91,10 +112,8 @@ async function validateRepositoryRulesetRequest(input = {}, options = {}) {
     }
   }
 
-  // Tenant context is OPTIONAL for repository ruleset operations. Repositories
-  // may be imported outside the tenant model and must still be manageable, so
-  // registry problems and unresolved tenants are recorded as context only, never
-  // as validation failures.
+  // Tenant context is OPTIONAL. Repositories may be imported outside the tenant
+  // model and must still be manageable, so registry problems are context only.
   const registryResult = readTenantRegistryRecords({ registryDirectory: options.registryDirectory });
   if (registryResult.missing_directory) {
     warnings.push('Tenant registry directory is not present; proceeding without tenant context.');
@@ -102,127 +121,222 @@ async function validateRepositoryRulesetRequest(input = {}, options = {}) {
   if (registryResult.malformed_files && registryResult.malformed_files.length > 0) {
     warnings.push('One or more tenant registry records were malformed and ignored.');
   }
+  const repositoryTenantIndex = buildRepositoryTenantIndex(registryResult.records, organization);
 
-  const orgViews = registryResult.records
-    .map((record) => readTopologyView(record))
-    .filter((view) => view.organization && view.organization === organization);
-  const nameMatches = tenantNameNormalized
-    ? orgViews.filter((view) => normalizeTenantName(view.tenant_display_name) === tenantNameNormalized)
-    : [];
+  // Per-requester caches so repeated repositories/teams cost one lookup each.
+  const permissionCache = new Map();
+  const membershipCache = new Map();
+  const repositoryExistsCache = new Map();
+  const rulesetsCache = new Map();
 
-  let tenantResolutionStatus = 'no_match';
-  if (nameMatches.length === 1) {
-    tenantResolutionStatus = 'resolved';
-  } else if (nameMatches.length > 1) {
-    tenantResolutionStatus = 'ambiguous';
-    warnings.push(`Tenant name '${request.tenant_name_input}' matched multiple tenant records in organization '${request.organization}'; proceeding with repository-level authorization only.`);
-  }
-
-  const resolvedView = tenantResolutionStatus === 'resolved' ? nameMatches[0] : null;
-  const availableTenantDisplayNames = [...new Set(orgViews
-    .map((view) => String(view.tenant_display_name || '').split(/[\r\n]+/)[0].trim())
-    .filter(Boolean))];
-
-  const tenantKey = resolvedView ? resolvedView.tenant_key : '';
-  const tenantDisplayName = resolvedView ? resolvedView.tenant_display_name : '';
-  const tenantTopTeamSlug = resolvedView ? resolvedView.tenant_root_team_slug : '';
-
-  // Optional repository existence pre-check for a clean, specific error.
-  let repositoryExists = false;
-  if (repositoryTarget && typeof options.getRepository === 'function') {
-    const repositoryResult = await options.getRepository({ owner: organization, repo: repositoryTarget });
-    repositoryExists = Boolean(repositoryResult && repositoryResult.exists);
-    if (!repositoryExists) {
-      errors.push(`Repository '${organization}/${repositoryTarget}' does not exist or is not visible to the workflow identity.`);
+  async function resolveRepositoryPermission(repo) {
+    if (permissionCache.has(repo)) {
+      return permissionCache.get(repo);
     }
+    let permission = 'unknown';
+    if (typeof options.getRepositoryCollaboratorPermission === 'function') {
+      const result = await options.getRepositoryCollaboratorPermission({
+        owner: organization,
+        repo,
+        username: requesterLogin,
+      });
+      permission = result && result.permission ? String(result.permission).toLowerCase() : 'none';
+    }
+    permissionCache.set(repo, permission);
+    return permission;
   }
 
-  // Primary authorization: the requester must have admin permission on the
-  // TARGET repository. Organization owners resolve to admin on every repository,
-  // direct repository admins pass for their own repositories, and repo-admin
-  // team members pass wherever the team was granted admin. This works for
-  // imported repositories that are not in the tenant model.
-  let requesterRepositoryPermission = 'unknown';
-  let isRepositoryAdmin = false;
-  let performedAuthorizationCheck = false;
-  if (repositoryTarget && typeof options.getRepositoryCollaboratorPermission === 'function') {
-    performedAuthorizationCheck = true;
-    const permissionResult = await options.getRepositoryCollaboratorPermission({
-      owner: organization,
-      repo: repositoryTarget,
-      username: requesterLogin,
-    });
-    requesterRepositoryPermission = permissionResult && permissionResult.permission
-      ? String(permissionResult.permission).toLowerCase()
-      : 'none';
-    isRepositoryAdmin = requesterRepositoryPermission === 'admin';
-  }
-
-  // Additive authorization: an active MAINTAINER of the tenant top team may
-  // manage rulesets on repositories that resolve to their tenant. This never
-  // blocks a repository that is not in the registry.
-  let requesterTenantMembershipState = 'not_applicable';
-  let isTenantTopMaintainer = false;
-  if (resolvedView && tenantTopTeamSlug && typeof options.getMembershipForUser === 'function') {
-    performedAuthorizationCheck = true;
+  async function resolveTeamMembership(teamSlug) {
+    if (!teamSlug || typeof options.getMembershipForUser !== 'function') {
+      return { state: 'unknown', role: '' };
+    }
+    if (membershipCache.has(teamSlug)) {
+      return membershipCache.get(teamSlug);
+    }
     const membership = await options.getMembershipForUser({
       organization,
-      teamSlug: tenantTopTeamSlug,
+      teamSlug,
       username: requesterLogin,
     });
-    const state = membership && membership.state ? String(membership.state).toLowerCase() : 'absent';
-    const role = membership && membership.membership && membership.membership.role
-      ? String(membership.membership.role).toLowerCase()
-      : '';
-    requesterTenantMembershipState = state === 'active' && role === 'maintainer'
-      ? 'active_maintainer'
-      : state === 'active'
-        ? 'active_member'
-        : state === 'absent'
-          ? 'absent'
-          : 'unknown';
-    isTenantTopMaintainer = requesterTenantMembershipState === 'active_maintainer';
+    const resolved = {
+      state: membership && membership.state ? String(membership.state).toLowerCase() : 'absent',
+      role: membership && membership.membership && membership.membership.role
+        ? String(membership.membership.role).toLowerCase()
+        : '',
+    };
+    membershipCache.set(teamSlug, resolved);
+    return resolved;
   }
 
-  const authorized = isRepositoryAdmin || isTenantTopMaintainer;
-  const authorizationPath = isRepositoryAdmin
-    ? 'repository_admin'
-    : isTenantTopMaintainer
-      ? 'tenant_top_team_maintainer'
-      : 'none';
-
-  if (performedAuthorizationCheck && !authorized) {
-    const tenantClause = resolvedView
-      ? ` and is not an active maintainer of the tenant top team '${tenantTopTeamSlug}'`
-      : '';
-    errors.push(`Requester '${request.requester_login}' does not have admin permission on repository '${organization}/${repositoryTarget}'${tenantClause} and cannot manage repository rulesets.`);
+  async function resolveRepositoryExists(repo) {
+    if (typeof options.getRepository !== 'function') {
+      return true;
+    }
+    if (repositoryExistsCache.has(repo)) {
+      return repositoryExistsCache.get(repo);
+    }
+    const result = await options.getRepository({ owner: organization, repo });
+    const exists = Boolean(result && result.exists);
+    repositoryExistsCache.set(repo, exists);
+    return exists;
   }
 
-  // Read current ruleset state so the reconciliation intent converges on re-runs.
-  let rulesetExists = false;
-  let existingRulesetId = null;
-  if (repositoryTarget && rulesetName && typeof options.listRepositoryRulesets === 'function') {
-    const rulesets = await options.listRepositoryRulesets({ owner: organization, repo: repositoryTarget });
-    const existing = (rulesets || []).find(
+  async function resolveRulesets(repo) {
+    if (typeof options.listRepositoryRulesets !== 'function') {
+      return [];
+    }
+    if (rulesetsCache.has(repo)) {
+      return rulesetsCache.get(repo);
+    }
+    const rulesets = (await options.listRepositoryRulesets({ owner: organization, repo })) || [];
+    rulesetsCache.set(repo, rulesets);
+    return rulesets;
+  }
+
+  const planEntries = [];
+  const seenKeys = new Set();
+  for (const entry of inputEntries) {
+    const repository = normalizeRepositoryNameForComparison(entry.repository);
+    const rulesetName = String(entry.ruleset_name || '');
+    const enriched = {
+      repository,
+      repository_input: entry.repository_input || entry.repository || '',
+      ruleset_name: rulesetName,
+      source: entry.source || 'form',
+      ruleset_operation: rulesetOperation,
+      tenant_key: '',
+      tenant_display_name: '',
+      requester_repository_permission: 'unknown',
+      authorization_path: 'none',
+      authorized: false,
+      repository_exists: false,
+      ruleset_exists: false,
+      existing_ruleset_id: null,
+      action: 'reject',
+      row_status: 'rejected',
+      failure_reason: null,
+      ruleset_payload: null,
+    };
+
+    if (rulesetOperation === 'create') {
+      enriched.target = entry.target || 'branch';
+      enriched.ref_name_pattern = entry.ref_name_pattern || '~DEFAULT_BRANCH';
+      enriched.enforcement = entry.enforcement || 'active';
+      enriched.require_pull_request = Boolean(entry.require_pull_request);
+      enriched.block_force_pushes = Boolean(entry.block_force_pushes);
+      enriched.require_linear_history = Boolean(entry.require_linear_history);
+      enriched.restrict_deletions = Boolean(entry.restrict_deletions);
+    }
+
+    if (!repository || !rulesetName) {
+      enriched.failure_reason = 'invalid_row';
+      warnings.push('A ruleset row is missing a repository or ruleset name and was rejected.');
+      planEntries.push(enriched);
+      continue;
+    }
+
+    const dedupeKey = `${repository} ${normalizeRulesetNameForComparison(rulesetName)}`;
+    if (seenKeys.has(dedupeKey)) {
+      enriched.failure_reason = 'duplicate_row';
+      enriched.action = 'noop';
+      warnings.push(`Ruleset '${rulesetName}' on '${repository}' was requested more than once; the first occurrence is used.`);
+      planEntries.push(enriched);
+      continue;
+    }
+    seenKeys.add(dedupeKey);
+
+    if (rulesetOperation === 'create') {
+      if (!ALLOWED_RULESET_TARGETS.includes(String(enriched.target).toLowerCase())) {
+        enriched.failure_reason = 'invalid_target';
+        warnings.push(`Ruleset '${rulesetName}' on '${repository}' has invalid target '${enriched.target}' and was rejected.`);
+        planEntries.push(enriched);
+        continue;
+      }
+      if (!ALLOWED_RULESET_ENFORCEMENTS.includes(String(enriched.enforcement).toLowerCase())) {
+        enriched.failure_reason = 'invalid_enforcement';
+        warnings.push(`Ruleset '${rulesetName}' on '${repository}' has invalid enforcement '${enriched.enforcement}' and was rejected.`);
+        planEntries.push(enriched);
+        continue;
+      }
+    }
+
+    const repositoryExists = await resolveRepositoryExists(repository);
+    enriched.repository_exists = repositoryExists;
+    if (!repositoryExists) {
+      enriched.failure_reason = 'repository_not_found';
+      warnings.push(`Repository '${organization}/${repository}' does not exist or is not visible; the row was rejected.`);
+      planEntries.push(enriched);
+      continue;
+    }
+
+    // Per-row authorization. Primary: admin permission on the target repository.
+    const permission = await resolveRepositoryPermission(repository);
+    enriched.requester_repository_permission = permission;
+    const isRepositoryAdmin = permission === 'admin';
+
+    // Additive: when the row's repository resolves to a tenant, an active
+    // member/maintainer of that tenant's repo-admin team or an active maintainer
+    // of the tenant top team is also authorized.
+    const tenant = repositoryTenantIndex.get(repository) || null;
+    let isRepoAdminTeamMember = false;
+    let isTenantTopMaintainer = false;
+    if (tenant) {
+      enriched.tenant_key = tenant.tenant_key || '';
+      enriched.tenant_display_name = tenant.tenant_display_name || '';
+      if (tenant.repo_admin_team_slug) {
+        const repoAdminMembership = await resolveTeamMembership(tenant.repo_admin_team_slug);
+        isRepoAdminTeamMember = repoAdminMembership.state === 'active'
+          && (repoAdminMembership.role === 'member' || repoAdminMembership.role === 'maintainer');
+      }
+      if (tenant.tenant_root_team_slug) {
+        const topMembership = await resolveTeamMembership(tenant.tenant_root_team_slug);
+        isTenantTopMaintainer = topMembership.state === 'active' && topMembership.role === 'maintainer';
+      }
+    }
+
+    const authorized = isRepositoryAdmin || isRepoAdminTeamMember || isTenantTopMaintainer;
+    enriched.authorized = authorized;
+    enriched.authorization_path = isRepositoryAdmin
+      ? 'repository_admin'
+      : isRepoAdminTeamMember
+        ? 'tenant_repo_admin_team'
+        : isTenantTopMaintainer
+          ? 'tenant_top_team_maintainer'
+          : 'none';
+
+    if (!authorized) {
+      enriched.failure_reason = 'unauthorized';
+      const tenantClause = tenant
+        ? ` and is not an active member of the tenant repo-admin team '${tenant.repo_admin_team_slug}' or maintainer of the tenant top team '${tenant.tenant_root_team_slug}'`
+        : '';
+      warnings.push(`Requester '${request.requester_login}' does not have admin permission on repository '${organization}/${repository}'${tenantClause}; the row was rejected.`);
+      planEntries.push(enriched);
+      continue;
+    }
+
+    // Read current ruleset state so the reconciliation intent converges.
+    const rulesets = await resolveRulesets(repository);
+    const existing = rulesets.find(
       (ruleset) => normalizeRulesetNameForComparison(ruleset.name) === normalizeRulesetNameForComparison(rulesetName)
     );
     if (existing) {
-      rulesetExists = true;
-      existingRulesetId = existing.id != null ? existing.id : null;
+      enriched.ruleset_exists = true;
+      enriched.existing_ruleset_id = existing.id != null ? existing.id : null;
     }
+
+    if (rulesetOperation === 'create') {
+      enriched.ruleset_payload = buildRepositoryRulesetPayload(entry);
+      enriched.action = enriched.ruleset_exists ? 'noop' : 'create';
+    } else {
+      enriched.action = enriched.ruleset_exists ? 'delete' : 'noop';
+    }
+    enriched.row_status = 'valid';
+    planEntries.push(enriched);
   }
 
-  let plannedAction = 'unknown';
-  if (rulesetOperation === 'create') {
-    plannedAction = rulesetExists ? 'noop' : 'create';
-    if (rulesetExists) {
-      warnings.push(`A ruleset named '${rulesetName}' already exists on '${repositoryTarget}'; execution will converge as no-op.`);
-    }
-  } else if (rulesetOperation === 'delete') {
-    plannedAction = rulesetExists ? 'delete' : 'noop';
-    if (!rulesetExists && repositoryTarget) {
-      warnings.push(`No ruleset named '${rulesetName}' was found on '${repositoryTarget}'; execution will converge as no-op.`);
-    }
+  const validEntries = planEntries.filter((entry) => entry.row_status === 'valid');
+  if (inputEntries.length > 0 && validEntries.length === 0 && errors.length === 0) {
+    errors.push('No ruleset rows are authorized or well-formed; there is nothing to execute.');
   }
 
   let designatedApproverAuthorization = {
@@ -256,40 +370,19 @@ async function validateRepositoryRulesetRequest(input = {}, options = {}) {
     warnings.push('Dry-run is enabled; reconciliation intent is reported without mutation.');
   }
 
-  const rulesetPayload = rulesetOperation === 'create' ? buildRepositoryRulesetPayload(request) : null;
   const requestStatus = errors.length === 0 ? 'awaiting_approval' : 'validation_failed';
   const contextMarker = buildRulesetContextMarker({
     operation: rulesetOperation === 'delete' ? 'repository_ruleset_deletion' : 'repository_ruleset_creation',
     ruleset_operation: rulesetOperation,
     organization,
-    tenant_key: tenantKey,
-    repository: repositoryTarget,
-    ruleset_name: rulesetName,
     designated_approver_login: request.designated_approver_login,
+    entries: planEntries.map((entry) => `${entry.repository}#${normalizeRulesetNameForComparison(entry.ruleset_name)}`),
     registry_ref: registryRef,
   });
 
-  const canonicalTenantContext = resolvedView
-    ? {
-        tenant_key: tenantKey,
-        tenant_display_name: tenantDisplayName,
-        organization,
-        registry_ref: registryRef,
-        tenant_team_name: tenantTopTeamSlug,
-        tenant_team_slug: tenantTopTeamSlug,
-        tenant_resolution_status: tenantResolutionStatus,
-        context_marker: contextMarker,
-      }
-    : null;
-
   const enrichedRequest = {
     ...request,
-    tenant_key: tenantKey,
-    tenant_display_name: tenantDisplayName,
-    tenant_team_name: tenantTopTeamSlug,
-    tenant_team_slug: tenantTopTeamSlug,
-    requester_repository_permission: requesterRepositoryPermission,
-    authorization_path: authorizationPath,
+    ruleset_entries: planEntries,
     context_marker: contextMarker,
     request_status: requestStatus,
   };
@@ -297,12 +390,9 @@ async function validateRepositoryRulesetRequest(input = {}, options = {}) {
   const plan = {
     organization,
     ruleset_operation: rulesetOperation,
-    repository: repositoryTarget,
-    ruleset_name: rulesetName,
-    ruleset_exists: rulesetExists,
-    existing_ruleset_id: existingRulesetId,
-    planned_action: plannedAction,
-    ruleset_payload: rulesetPayload,
+    entries: planEntries,
+    valid_entry_count: validEntries.length,
+    rejected_entry_count: planEntries.length - validEntries.length,
     dry_run: Boolean(request.dry_run),
   };
 
@@ -312,38 +402,21 @@ async function validateRepositoryRulesetRequest(input = {}, options = {}) {
     errors,
     warnings,
     organization_visible: organizationVisible,
-    repository_exists: repositoryExists,
-    ruleset_exists: rulesetExists,
-    existing_ruleset_id: existingRulesetId,
-    requester_repository_permission: requesterRepositoryPermission,
-    is_repository_admin: isRepositoryAdmin,
-    is_tenant_top_maintainer: isTenantTopMaintainer,
-    authorization_path: authorizationPath,
     designated_approver_authorization: designatedApproverAuthorization,
-    canonical_tenant_context: canonicalTenantContext,
+    entries: planEntries,
+    plan,
     tenant_resolution: {
-      tenant_match_count: nameMatches.length,
-      tenant_resolution_status: tenantResolutionStatus,
       registry_ref: registryRef,
       registry_directory: registryResult.registry_directory,
       registry_malformed_files: registryResult.malformed_files,
       registry_missing_directory: registryResult.missing_directory,
-      requested_tenant_name: request.tenant_name_input,
-      requested_tenant_name_normalized: tenantNameNormalized,
-      candidate_registry_record_count: nameMatches.length,
-      available_tenant_display_names: availableTenantDisplayNames,
+      indexed_repository_count: repositoryTenantIndex.size,
     },
-    plan,
     validation_findings: {
-      tenant_resolution_status: tenantResolutionStatus,
-      requester_repository_permission: requesterRepositoryPermission,
-      is_repository_admin: isRepositoryAdmin,
-      requester_tenant_membership_state: requesterTenantMembershipState,
-      is_tenant_top_maintainer: isTenantTopMaintainer,
-      authorization_path: authorizationPath,
       ruleset_operation: rulesetOperation,
-      ruleset_exists: rulesetExists,
-      planned_action: plannedAction,
+      requested_entry_count: inputEntries.length,
+      valid_entry_count: validEntries.length,
+      rejected_entry_count: planEntries.length - validEntries.length,
       context_marker: contextMarker,
       dry_run_no_mutation: Boolean(request.dry_run),
     },
@@ -353,6 +426,8 @@ async function validateRepositoryRulesetRequest(input = {}, options = {}) {
 }
 
 module.exports = {
+  buildRepositoryTenantIndex,
   buildRulesetContextMarker,
+  extractOwnedRepositories,
   validateRepositoryRulesetRequest,
 };

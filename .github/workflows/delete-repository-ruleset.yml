@@ -104,6 +104,7 @@ jobs:
           PARSED_TENANT_NAME: ${{ steps.parse_request.outputs.parsed_tenant_name }}
           PARSED_REPOSITORY: ${{ steps.parse_request.outputs.parsed_repository }}
           PARSED_RULESET_NAME: ${{ steps.parse_request.outputs.parsed_ruleset_name }}
+          PARSED_RULESETS_CSV: ${{ steps.parse_request.outputs.parsed_rulesets_csv }}
           PARSED_DESIGNATED_APPROVER: ${{ steps.parse_request.outputs.parsed_designated_approver }}
           PARSED_DRY_RUN: ${{ steps.parse_request.outputs.parsed_dry_run }}
           PARSED_JUSTIFICATION: ${{ steps.parse_request.outputs.parsed_justification }}

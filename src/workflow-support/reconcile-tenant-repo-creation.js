@@ -316,12 +316,232 @@ function reconcileTenantRepoCreation(input = {}) {
   };
 }
 
+function classifyFailureReason(error = {}) {
+  if (error.status === 429) {
+    return 'rate_limited';
+  }
+
+  const message = String(error.payload && error.payload.message ? error.payload.message : error.message || '').toLowerCase();
+  if (message.includes('secondary rate limit')) {
+    return 'rate_limited';
+  }
+
+  if (error.status) {
+    return `http_${error.status}`;
+  }
+
+  return 'unknown_error';
+}
+
+function buildRepositoryCustomProperties(entry = {}) {
+  const properties = [];
+  if (entry.primary_contact) {
+    properties.push({ property_name: 'primary_business_contact', value: String(entry.primary_contact) });
+  }
+  if (entry.secondary_contact) {
+    properties.push({ property_name: 'secondary_business_contact', value: String(entry.secondary_contact) });
+  }
+  return properties;
+}
+
+// Reconciliation-first, per-row execution for a batch of tenant repositories.
+// Each row is applied independently and idempotently: the repository is created
+// only when it is missing; the tenant repo-admin team is granted admin, the
+// caller is added as an admin collaborator (V2.2.1 "assign caller as RepoAdmin"),
+// custom properties are set, and the repository is persisted into the tenant
+// registry's owned collection. An already-existing repository is a per-row no-op.
+// A row rejected at validation is recorded as failed with no mutation. A failure
+// on one row never aborts the others. Dry-run reports intent without mutation.
+async function reconcileTenantRepoCreationBatch(input = {}) {
+  const api = input.api;
+  const organization = String(input.organization || '').toLowerCase();
+  const tenantContext = input.tenantContext || input.canonical_tenant_context || {};
+  const repoAdminTeamSlug = String(tenantContext.repo_admin_team_slug || '').trim();
+  const requesterLogin = String(input.requester_login || '').trim();
+  const entries = Array.isArray(input.entries) ? input.entries : [];
+  const dryRun = Boolean(input.dry_run);
+  const boundaryRevalidationStatus = input.boundary_revalidation_status || 'matched';
+  const registryDirectory = input.registryDirectory;
+
+  const applied = [];
+  const skipped = [];
+  const failed = [];
+
+  if (boundaryRevalidationStatus !== 'matched') {
+    for (const entry of entries) {
+      failed.push({
+        repository: entry.repository_name_normalized,
+        action: 'reject',
+        failure_reason: 'boundary_mismatch',
+      });
+    }
+    return {
+      status: 'blocked',
+      dry_run: dryRun,
+      boundary_revalidation_status: boundaryRevalidationStatus,
+      applied,
+      skipped,
+      failed,
+    };
+  }
+
+  for (const entry of entries) {
+    const repository = entry.repository_name_normalized;
+
+    if (entry.row_status === 'rejected' || entry.authorized === false || entry.action === 'reject') {
+      failed.push({
+        repository,
+        action: 'reject',
+        failure_reason: entry.failure_reason || 'unauthorized',
+      });
+      continue;
+    }
+
+    let repositoryState;
+    try {
+      repositoryState = await api.getRepository({ owner: organization, repo: repository });
+    } catch (error) {
+      failed.push({ repository, action: 'read', failure_reason: classifyFailureReason(error) });
+      continue;
+    }
+
+    if (repositoryState && repositoryState.exists) {
+      skipped.push({ repository, action: 'noop', reason: 'already_exists' });
+      continue;
+    }
+
+    if (dryRun) {
+      skipped.push({ repository, action: 'create', reason: 'dry_run' });
+      continue;
+    }
+
+    try {
+      await api.createOrganizationRepository({
+        organization,
+        name: repository,
+        visibility: entry.repository_visibility || null,
+        privateVisibility: (entry.repository_visibility || 'private') === 'private',
+      });
+    } catch (error) {
+      failed.push({ repository, action: 'create', failure_reason: classifyFailureReason(error) });
+      continue;
+    }
+
+    const rowResult = {
+      repository,
+      action: 'created',
+      repo_admin_grant: 'skipped',
+      caller_collaborator: 'skipped',
+      custom_properties: 'skipped',
+      topology_persistence: 'skipped',
+    };
+    let rowFailure = null;
+
+    if (repoAdminTeamSlug) {
+      try {
+        await api.addOrUpdateTeamRepositoryPermission({
+          organization,
+          teamSlug: repoAdminTeamSlug,
+          owner: organization,
+          repo: repository,
+          permission: 'admin',
+        });
+        rowResult.repo_admin_grant = 'granted';
+      } catch (error) {
+        rowResult.repo_admin_grant = 'failed';
+        rowFailure = rowFailure || classifyFailureReason(error);
+      }
+    }
+
+    if (requesterLogin && typeof api.addRepositoryCollaborator === 'function') {
+      try {
+        await api.addRepositoryCollaborator({
+          owner: organization,
+          repo: repository,
+          username: requesterLogin,
+          permission: 'admin',
+        });
+        rowResult.caller_collaborator = 'granted';
+      } catch (error) {
+        rowResult.caller_collaborator = 'failed';
+        rowFailure = rowFailure || classifyFailureReason(error);
+      }
+    }
+
+    const customProperties = buildRepositoryCustomProperties(entry);
+    if (customProperties.length > 0 && typeof api.setRepositoryCustomProperties === 'function') {
+      try {
+        await api.setRepositoryCustomProperties({ owner: organization, repo: repository, properties: customProperties });
+        rowResult.custom_properties = 'mutated';
+      } catch (error) {
+        rowResult.custom_properties = 'failed';
+        rowFailure = rowFailure || classifyFailureReason(error);
+      }
+    }
+
+    try {
+      const ownedEntry = buildOwnedRepositoryEntry(
+        {
+          organization,
+          repository_name_normalized: repository,
+          repository_name_input: entry.repository_name_input || repository,
+          repository_visibility: entry.repository_visibility,
+          tenant_key: entry.tenant_key || tenantContext.tenant_key,
+        },
+        tenantContext
+      ).entry;
+      const persistence = persistOwnedRepositoryEntry({
+        request: {
+          tenant_key: entry.tenant_key || tenantContext.tenant_key,
+          repository_name_input: entry.repository_name_input || repository,
+          repository_name_normalized: repository,
+          repository_visibility: entry.repository_visibility,
+        },
+        tenantContext,
+        ownedEntry,
+        registryDirectory,
+      });
+      rowResult.topology_persistence = persistence.status;
+      if (persistence.status === 'failed') {
+        rowFailure = rowFailure || persistence.failure_reason || 'topology_persistence_failed';
+      }
+    } catch (error) {
+      rowResult.topology_persistence = 'failed';
+      rowFailure = rowFailure || classifyFailureReason(error);
+    }
+
+    if (rowFailure) {
+      failed.push({ ...rowResult, action: 'create', failure_reason: rowFailure });
+    } else {
+      applied.push(rowResult);
+    }
+  }
+
+  const status = failed.length === 0
+    ? 'applied'
+    : applied.length > 0 || skipped.length > 0
+      ? 'partial_failure'
+      : 'failed';
+
+  return {
+    status,
+    dry_run: dryRun,
+    boundary_revalidation_status: boundaryRevalidationStatus,
+    applied,
+    skipped,
+    failed,
+  };
+}
+
 module.exports = {
   buildOwnedRepositoryEntry,
+  buildRepositoryCustomProperties,
+  classifyFailureReason,
   hasRequiredOwnedEntryFields,
   normalizeOwnedRepositoryName,
   persistOwnedRepositoryEntry,
   reconcileTenantRepoCreation,
+  reconcileTenantRepoCreationBatch,
   resolveTenantRegistryFilePath,
   resolveOwnedRepositoryMatch,
 };

@@ -128,33 +128,59 @@ async function validateTenantVariablesRequest(input = {}, options = {}) {
   const cicdAdminTeamSlug = resolvedView ? resolvedView.admin_team_slug : '';
   const prefix = deriveTenantVariablePrefix(tenantKey);
 
-  // Authorization gate: the requester must be an active MAINTAINER of the tenant
-  // top (root) team. This is stricter than the runner operations, which allow an
-  // active member or maintainer of the tenant -admin team.
+  // Authorization gate (V2.2.1): the requester must be an active member or
+  // maintainer of the tenant CI/CD admin team, OR the tenant admin (an active
+  // maintainer of the tenant top team). This matches the runner operations,
+  // which share the same CI/CD-level gate.
   let requesterMembershipState = 'unknown';
+  let requesterCicdMembershipState = 'not_applicable';
+  let isTopTeamMaintainer = false;
+  let isCicdTeamMember = false;
   if (resolvedView && !tenantTeamSlug) {
     errors.push(`Tenant '${tenantDisplayName}' has no resolvable top team and cannot authorize variable management.`);
   } else if (resolvedView && typeof options.getMembershipForUser === 'function') {
-    const membership = await options.getMembershipForUser({
+    const topMembership = await options.getMembershipForUser({
       organization,
       teamSlug: tenantTeamSlug,
       username: requesterLogin,
     });
-    const state = membership && membership.state ? String(membership.state).toLowerCase() : 'absent';
-    const role = membership && membership.membership && membership.membership.role
-      ? String(membership.membership.role).toLowerCase()
+    const topState = topMembership && topMembership.state ? String(topMembership.state).toLowerCase() : 'absent';
+    const topRole = topMembership && topMembership.membership && topMembership.membership.role
+      ? String(topMembership.membership.role).toLowerCase()
       : '';
 
-    requesterMembershipState = state === 'active' && role === 'maintainer'
+    requesterMembershipState = topState === 'active' && topRole === 'maintainer'
       ? 'active_maintainer'
-      : state === 'active'
+      : topState === 'active'
         ? 'active_member'
-        : state === 'absent'
+        : topState === 'absent'
           ? 'absent'
           : 'unknown';
+    isTopTeamMaintainer = requesterMembershipState === 'active_maintainer';
 
-    if (requesterMembershipState !== 'active_maintainer') {
-      errors.push(`Requester '${request.requester_login}' is not an active maintainer of the tenant top team '${tenantTeamSlug}' and cannot manage variables for tenant '${tenantDisplayName}'.`);
+    if (cicdAdminTeamSlug) {
+      const cicdMembership = await options.getMembershipForUser({
+        organization,
+        teamSlug: cicdAdminTeamSlug,
+        username: requesterLogin,
+      });
+      const cicdState = cicdMembership && cicdMembership.state ? String(cicdMembership.state).toLowerCase() : 'absent';
+      const cicdRole = cicdMembership && cicdMembership.membership && cicdMembership.membership.role
+        ? String(cicdMembership.membership.role).toLowerCase()
+        : '';
+
+      requesterCicdMembershipState = cicdState === 'active' && cicdRole === 'maintainer'
+        ? 'active_maintainer'
+        : cicdState === 'active'
+          ? 'active_member'
+          : cicdState === 'absent'
+            ? 'absent'
+            : 'unknown';
+      isCicdTeamMember = cicdState === 'active';
+    }
+
+    if (!isTopTeamMaintainer && !isCicdTeamMember) {
+      errors.push(`Requester '${request.requester_login}' is not a member of the tenant CI/CD admin team '${cicdAdminTeamSlug || 'n/a'}' and is not an active maintainer of the tenant top team '${tenantTeamSlug}' and cannot manage variables for tenant '${tenantDisplayName}'.`);
     }
   }
 
@@ -365,6 +391,7 @@ async function validateTenantVariablesRequest(input = {}, options = {}) {
     validation_findings: {
       tenant_resolution_status: tenantResolutionStatus,
       requester_membership_state: requesterMembershipState,
+      requester_cicd_membership_state: requesterCicdMembershipState,
       variable_operation: variableOperation,
       variable_prefix: prefix,
       variable_plan: planEntries,

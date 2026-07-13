@@ -23,23 +23,39 @@ body:
     validations:
       required: false
 
+  - type: textarea
+    id: rulesets_csv
+    attributes:
+      label: Rulesets CSV (spreadsheet batch)
+      description: >-
+        Primary input. Paste one row per ruleset in the column order
+        repository,ruleset_name,target,ref_name_pattern,enforcement,require_pull_request,block_force_pushes,require_linear_history,restrict_deletions.
+        One issue can carry many rows across many repositories. An optional header row is allowed.
+        The single-item fields below are used only when this is empty.
+      placeholder: |
+        repository,ruleset_name,target,ref_name_pattern,enforcement,require_pull_request,block_force_pushes,require_linear_history,restrict_deletions
+        acme-service-api,acme-main-protection,branch,~DEFAULT_BRANCH,active,true,true,false,true
+        acme-web,acme-main-protection,branch,~DEFAULT_BRANCH,active,true,false,false,false
+    validations:
+      required: false
+
   - type: input
     id: repository
     attributes:
-      label: Target repository
-      description: Repository name in the target organization. Authorization is by admin permission on this repository.
+      label: Target repository (optional, single-item path)
+      description: Repository name in the target organization. Used only when the CSV batch is empty. Authorization is by admin permission on this repository.
       placeholder: acme-service-api
     validations:
-      required: true
+      required: false
 
   - type: input
     id: ruleset_name
     attributes:
-      label: Ruleset name
-      description: Name for the repository ruleset. Creation is idempotent by this name.
+      label: Ruleset name (optional, single-item path)
+      description: Name for the repository ruleset. Creation is idempotent by this name. Used only when the CSV batch is empty.
       placeholder: acme-default-branch-protection
     validations:
-      required: true
+      required: false
 
   - type: dropdown
     id: target

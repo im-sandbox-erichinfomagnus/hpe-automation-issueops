@@ -141,16 +141,20 @@ This list should be updated as new IssueOps workflows are added.
 - `manage-tenant-variables`: Request, validate, approve, and reconcile create,
 	update, or delete of tenant-prefixed organization Actions variables,
 	authorized by active maintainership of the tenant top team.
-- `create-repository-ruleset`: Request, validate, approve, and reconcile
-	creation of a repository-level ruleset on a target repository, idempotent by
-	ruleset name, authorized by admin permission on the target repository (or an
-	active maintainer of the tenant top team when the repository resolves to a
-	tenant). Works on imported repositories that are not in the tenant model.
-- `delete-repository-ruleset`: Request, validate, approve, and reconcile
-	deletion of a repository-level ruleset on a target repository, a no-op when
-	the named ruleset is absent, authorized by admin permission on the target
-	repository (or an active maintainer of the tenant top team when the
-	repository resolves to a tenant).
+- `create-repository-ruleset`: Spreadsheet-first batch. Request, validate,
+	approve, and reconcile creation of repository-level rulesets across many
+	repositories from a CSV textarea (single-item form fields are the secondary
+	path), idempotent per row by ruleset name. Each row is authorized
+	independently by admin permission on that row's repository, or, when the
+	repository resolves to a tenant, an active member/maintainer of that tenant's
+	repo-admin team or an active maintainer of the tenant top team. Works on
+	imported repositories that are not in the tenant model; an unauthorized or
+	failing row never aborts the others.
+- `delete-repository-ruleset`: Spreadsheet-first batch. Request, validate,
+	approve, and reconcile deletion of repository-level rulesets across many
+	repositories from a CSV textarea (single-item form fields are the secondary
+	path), a no-op per row when the named ruleset is absent, with the same
+	per-row authorization and per-row audit as the create op.
 
 Detailed design and operator guidance for the current operation live in:
 

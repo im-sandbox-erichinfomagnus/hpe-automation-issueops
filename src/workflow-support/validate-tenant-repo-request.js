@@ -327,6 +327,200 @@ async function validateTenantRepoRequest(input = {}, options = {}) {
     errors.splice(0, errors.length, ...errors.filter((entry) => !/already present in tenant topology owned repositories/i.test(entry)));
   }
 
+  // Per-request authorization gate (V2.2.1 create-repo rule): the requester must
+  // be an active member or maintainer of the tenant repo-admin team, or an active
+  // maintainer of the tenant top team (aka Tenant Admin). Evaluated once against
+  // live team membership and stamped on every repository row.
+  const repoAdminTeamSlug = resolvedContext ? resolvedContext.repo_admin_team_slug : '';
+  const tenantTopTeamSlug = resolvedContext ? resolvedContext.tenant_team_slug : '';
+  const gateMembershipCache = new Map();
+  async function resolveGateMembership(teamSlug) {
+    if (!teamSlug || typeof options.getMembershipForUser !== 'function') {
+      return { state: 'unknown', role: '' };
+    }
+    if (gateMembershipCache.has(teamSlug)) {
+      return gateMembershipCache.get(teamSlug);
+    }
+    const membership = await options.getMembershipForUser({
+      organization: request.organization,
+      teamSlug,
+      username: request.requester_login,
+    });
+    const resolved = {
+      state: membership && membership.state ? String(membership.state).toLowerCase() : 'absent',
+      role: membership && membership.membership && membership.membership.role
+        ? String(membership.membership.role).toLowerCase()
+        : '',
+    };
+    gateMembershipCache.set(teamSlug, resolved);
+    return resolved;
+  }
+
+  let requesterIsRepoAdminTeamMember = false;
+  let requesterIsTenantTopMaintainer = false;
+  if (resolvedContext) {
+    const repoAdminMembership = await resolveGateMembership(repoAdminTeamSlug);
+    requesterIsRepoAdminTeamMember = repoAdminMembership.state === 'active'
+      && (repoAdminMembership.role === 'member' || repoAdminMembership.role === 'maintainer');
+    const topMembership = await resolveGateMembership(tenantTopTeamSlug);
+    requesterIsTenantTopMaintainer = topMembership.state === 'active' && topMembership.role === 'maintainer';
+  }
+  const requesterAuthorizedForTenant = requesterIsRepoAdminTeamMember || requesterIsTenantTopMaintainer;
+  const requesterAuthorizationPath = requesterIsRepoAdminTeamMember
+    ? 'tenant_repo_admin_team'
+    : requesterIsTenantTopMaintainer
+      ? 'tenant_admin_maintainer'
+      : 'none';
+
+  // Evaluate every requested repository row independently. The primary row (the
+  // single-item fields or the first CSV row) also drives the backward-compatible
+  // top-level findings above; additional rows are evaluated here and never fail
+  // the whole request unless they are all rejected.
+  const inputRepositoryEntries = Array.isArray(request.repository_entries) && request.repository_entries.length > 0
+    ? request.repository_entries
+    : [{
+        repository_name_input: request.repository_name_input,
+        repository_name_normalized: request.repository_name_normalized,
+        repository_visibility: request.repository_visibility,
+        repository_visibility_source: request.repository_visibility_source,
+        primary_contact: request.primary_contact,
+        primary_contact_type: request.primary_contact_type,
+        secondary_contact: request.secondary_contact,
+        secondary_contact_type: request.secondary_contact_type,
+        source: 'form',
+      }];
+
+  const repositoryExistsCache = new Map();
+  if (request.repository_name_normalized) {
+    repositoryExistsCache.set(request.repository_name_normalized, repositoryState);
+  }
+  async function resolveEntryRepositoryState(repoName) {
+    if (repositoryExistsCache.has(repoName)) {
+      return repositoryExistsCache.get(repoName);
+    }
+    let state = { exists: false, repository: null };
+    if (request.organization && repoName && typeof options.getRepository === 'function') {
+      state = await options.getRepository({ owner: request.organization, repo: repoName });
+    }
+    repositoryExistsCache.set(repoName, state);
+    return state;
+  }
+
+  function resolveOwnedDuplicate(entry) {
+    if (!resolvedContext) {
+      return false;
+    }
+    const ownedRepositories = Array.isArray(resolvedContext.owned_repositories)
+      ? resolvedContext.owned_repositories
+      : [];
+    const requestedNormalized = normalizeOwnedRepositoryName(entry.repository_name_input || entry.repository_name_normalized);
+    const contextTenantId = String(resolvedContext.tenant_id || resolvedContext.tenant_key || '').trim().toLowerCase();
+    return ownedRepositories.some((owned) => {
+      const candidateName = owned && typeof owned === 'object' ? normalizeOwnedRepositoryName(owned.repoName) : '';
+      const candidateTenantId = owned && typeof owned === 'object' ? String(owned.tenantId || '').trim().toLowerCase() : '';
+      if (!candidateName || !requestedNormalized) {
+        return false;
+      }
+      if (candidateTenantId && contextTenantId && candidateTenantId !== contextTenantId) {
+        return false;
+      }
+      return candidateName === requestedNormalized;
+    });
+  }
+
+  async function evaluateRepositoryEntry(entry) {
+    const repositoryNameNormalized = entry.repository_name_normalized
+      || normalizeRepositoryName(entry.repository_name_input);
+    const repoState = await resolveEntryRepositoryState(repositoryNameNormalized);
+    const exists = Boolean(repoState && repoState.exists);
+    const enriched = {
+      repository_name_input: entry.repository_name_input || '',
+      repository_name_normalized: repositoryNameNormalized,
+      repository_visibility: entry.repository_visibility || '',
+      repository_visibility_source: entry.repository_visibility_source || 'not_provided',
+      primary_contact: entry.primary_contact ?? null,
+      primary_contact_type: entry.primary_contact_type || 'absent',
+      secondary_contact: entry.secondary_contact ?? null,
+      secondary_contact_type: entry.secondary_contact_type || 'absent',
+      source: entry.source || 'form',
+      tenant_key: resolvedContext ? resolvedContext.tenant_key : '',
+      tenant_id: resolvedContext ? (resolvedContext.tenant_id || resolvedContext.tenant_key || '') : '',
+      repo_admin_team_slug: repoAdminTeamSlug,
+      authorization_path: requesterAuthorizationPath,
+      authorized: requesterAuthorizedForTenant,
+      repository_exists: exists,
+      existing_visibility: exists && repoState.repository && repoState.repository.visibility
+        ? String(repoState.repository.visibility).toLowerCase()
+        : null,
+      action: 'reject',
+      row_status: 'rejected',
+      failure_reason: null,
+    };
+
+    if (!repositoryNameNormalized || !isSafeRepositoryName(repositoryNameNormalized)) {
+      enriched.failure_reason = 'invalid_repository_name';
+      return enriched;
+    }
+    if (!requesterAuthorizedForTenant) {
+      enriched.failure_reason = 'unauthorized';
+      return enriched;
+    }
+    if (enriched.repository_visibility_source === 'not_provided') {
+      enriched.failure_reason = 'missing_visibility';
+      return enriched;
+    }
+    if (!ALLOWED_REPOSITORY_VISIBILITIES.includes(enriched.repository_visibility)) {
+      enriched.failure_reason = 'invalid_visibility';
+      return enriched;
+    }
+    if (enriched.primary_contact_type === 'absent') {
+      enriched.failure_reason = 'missing_primary_contact';
+      return enriched;
+    }
+    if (enriched.primary_contact_type === 'invalid') {
+      enriched.failure_reason = 'invalid_primary_contact';
+      return enriched;
+    }
+    if (enriched.secondary_contact_type === 'invalid') {
+      enriched.failure_reason = 'invalid_secondary_contact';
+      return enriched;
+    }
+    if (exists) {
+      // Idempotency: an already-existing repository is a per-row no-op.
+      enriched.action = 'noop';
+      enriched.row_status = 'valid';
+      return enriched;
+    }
+    if (resolveOwnedDuplicate(entry)) {
+      enriched.failure_reason = 'duplicate_owned_repository';
+      return enriched;
+    }
+    enriched.action = 'create';
+    enriched.row_status = 'valid';
+    return enriched;
+  }
+
+  const repositoryPlanEntries = [];
+  const seenEntryKeys = new Set();
+  for (const entry of inputRepositoryEntries) {
+    const enriched = await evaluateRepositoryEntry(entry);
+    const dedupeKey = enriched.repository_name_normalized;
+    if (dedupeKey && seenEntryKeys.has(dedupeKey)) {
+      enriched.action = 'noop';
+      enriched.row_status = 'rejected';
+      enriched.failure_reason = 'duplicate_row';
+      warnings.push(`Repository '${enriched.repository_name_input}' was requested more than once; the first occurrence is used.`);
+    } else if (dedupeKey) {
+      seenEntryKeys.add(dedupeKey);
+    }
+    if (enriched.row_status !== 'valid' && enriched.source === 'csv') {
+      warnings.push(`Repository row '${enriched.repository_name_input || enriched.repository_name_normalized}' was rejected (${enriched.failure_reason}).`);
+    }
+    repositoryPlanEntries.push(enriched);
+  }
+  const validRepositoryEntryCount = repositoryPlanEntries.filter((entry) => entry.row_status === 'valid').length;
+  const rejectedRepositoryEntryCount = repositoryPlanEntries.length - validRepositoryEntryCount;
+
   if (request.dry_run) {
     warnings.push('Dry-run is enabled; reconciliation intent is reported without mutation.');
   }
@@ -374,6 +568,7 @@ async function validateTenantRepoRequest(input = {}, options = {}) {
     repo_admin_team_slug: canonicalTenantContext ? canonicalTenantContext.repo_admin_team_slug : '',
     topology_mode: canonicalTenantContext ? canonicalTenantContext.topology_mode : '',
     context_marker: canonicalTenantContext ? canonicalTenantContext.context_marker : '',
+    repository_entries: repositoryPlanEntries,
     request_status: requestStatus,
     no_mutation_evidence: request.dry_run
       ? {
@@ -390,6 +585,24 @@ async function validateTenantRepoRequest(input = {}, options = {}) {
     warnings,
     organization_visible: organizationVisible,
     designated_approver_authorization: designatedApproverAuthorization,
+    requester_authorization: {
+      authorized: requesterAuthorizedForTenant,
+      authorization_path: requesterAuthorizationPath,
+      is_repo_admin_team_member: requesterIsRepoAdminTeamMember,
+      is_tenant_top_team_maintainer: requesterIsTenantTopMaintainer,
+      repo_admin_team_slug: repoAdminTeamSlug,
+      tenant_top_team_slug: tenantTopTeamSlug,
+    },
+    entries: repositoryPlanEntries,
+    valid_entry_count: validRepositoryEntryCount,
+    rejected_entry_count: rejectedRepositoryEntryCount,
+    plan: {
+      organization: request.organization,
+      entries: repositoryPlanEntries,
+      valid_entry_count: validRepositoryEntryCount,
+      rejected_entry_count: rejectedRepositoryEntryCount,
+      dry_run: Boolean(request.dry_run),
+    },
     canonical_tenant_context: canonicalTenantContext,
     tenant_resolution: {
       tenant_match_count: tenantResolution.tenant_match_count,
