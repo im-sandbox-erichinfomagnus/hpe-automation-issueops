@@ -309,7 +309,7 @@ function isTenantRepoCreationParsedRequest(parsedRequest = {}) {
   // later as an uploaded CSV file), so key on the tenant signal plus the mode.
   const intakeMode = String(
     parsedRequest.intake_mode || parsedRequest.parsed_intake_mode || ''
-  ).trim().toLowerCase();
+  ).replace(/[\[\]"'\s,]/g, '').toLowerCase();
   const hasTenantName = Boolean(
     parsedRequest.tenant_name ||
     parsedRequest.parsed_tenant_name ||

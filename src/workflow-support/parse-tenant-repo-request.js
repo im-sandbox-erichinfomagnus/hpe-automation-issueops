@@ -194,7 +194,7 @@ function buildRequestId(repository, issueNumber, runId, runAttempt) {
 }
 
 function normalizeIntakeMode(value) {
-  const normalized = normalizeText(value).toLowerCase();
+  const normalized = normalizeText(value).replace(/[\[\]"'\s,]/g, '').toLowerCase();
   if (normalized === 'csv_attachment') {
     return 'csv_attachment';
   }

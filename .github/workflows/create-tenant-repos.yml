@@ -121,7 +121,7 @@ jobs:
 
           if [ "${EVENT_NAME:-}" = "issues" ] && [ "${EVENT_ACTION:-}" = "labeled" ] && [ "$terminal_label_event" = "true" ]; then
             matches_request=false
-          elif [ -n "${PARSED_ORGANIZATION:-}" ] && [ -n "${PARSED_TENANT_NAME:-}" ] && { [ -n "${PARSED_REPOSITORY_NAME:-}" ] || [ -n "${PARSED_REPOSITORIES_CSV:-}" ] || [ "${PARSED_INTAKE_MODE:-}" = "csv_attachment" ]; }; then
+          elif [ -n "${PARSED_ORGANIZATION:-}" ] && [ -n "${PARSED_TENANT_NAME:-}" ] && { [ -n "${PARSED_REPOSITORY_NAME:-}" ] || [ -n "${PARSED_REPOSITORIES_CSV:-}" ] || printf '%s' "${PARSED_INTAKE_MODE:-}" | grep -qi csv_attachment; }; then
             matches_request=true
           fi
 
