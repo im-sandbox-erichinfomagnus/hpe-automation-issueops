@@ -133,7 +133,7 @@ test('workflow assumptions keep create-tenant-repos issue_comment trigger and in
   assert.match(workflow, /issue_comment:\s*[\s\S]*- deleted/);
   assert.match(workflow, /name:\s+Check request applicability/);
   assert.match(workflow, /PARSED_INTAKE_MODE: \$\{\{ steps\.parse_request\.outputs\.parsed_intake_mode \}\}/);
-  assert.match(workflow, /\$\{PARSED_INTAKE_MODE:-\}" = "csv_attachment"/);
+  assert.match(workflow, /PARSED_INTAKE_MODE:-\}" \| grep -qi csv_attachment/);
   assert.match(workflow, /COMMENT_ID: \$\{\{ github\.event\.comment\.id \|\| '' \}\}/);
   assert.match(workflow, /COMMENT_AUTHOR_LOGIN: \$\{\{ github\.event\.comment\.user\.login \|\| '' \}\}/);
   assert.match(workflow, /COMMENT_BODY: \$\{\{ github\.event\.comment\.body \|\| '' \}\}/);
