@@ -60,6 +60,9 @@ function formatAuditSummary(auditArtifact = {}) {
       `- Visibility conflict: ${reconciliation.visibility_conflict ? 'true' : 'false'}`,
       `- Designated approver: ${request.designated_approver_login || 'n/a'}`,
       `- Intake mode: ${request.intake_mode || 'n/a'}`,
+      isCsvAttachment && request.request_status === 'waiting_for_attachment'
+        ? '- Attachment status: waiting for requester CSV attachment comment. Please upload the repositories spreadsheet as a .csv file attachment in a new comment.'
+        : null,
       `- Dry-run mode: ${request.dry_run ? 'true' : 'false'}`,
       `- Request status: ${request.request_status || 'submitted'}`,
       `- Central assignment: ${assignment.assignment_status || 'not_attempted'}${assignment.assigned_login ? ` (${assignment.assigned_login})` : ''}`,

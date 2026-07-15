@@ -305,7 +305,19 @@ function isTenantRepoCreationParsedRequest(parsedRequest = {}) {
     parsedRequest.parsed_repositories_csv
   );
 
-  return (looksLikeRepositoryName || hasRepositoriesCsv) && !hasTenantModelSpecificSignals;
+  // csv_attachment intake opens with the repository fields blank (they arrive
+  // later as an uploaded CSV file), so key on the tenant signal plus the mode.
+  const intakeMode = String(
+    parsedRequest.intake_mode || parsedRequest.parsed_intake_mode || ''
+  ).trim().toLowerCase();
+  const hasTenantName = Boolean(
+    parsedRequest.tenant_name ||
+    parsedRequest.parsed_tenant_name ||
+    parsedRequest.tenant_display_name
+  );
+  const isCsvAttachmentTenantRepo = intakeMode === 'csv_attachment' && hasTenantName;
+
+  return (looksLikeRepositoryName || hasRepositoriesCsv || isCsvAttachmentTenantRepo) && !hasTenantModelSpecificSignals;
 }
 
 function isHostedRunnerCreationParsedRequest(parsedRequest = {}) {
@@ -1268,6 +1280,17 @@ async function runRequestValidation(options = {}) {
           dry_run: validation.request.dry_run,
         });
       } else if (isTenantRepoCreation) {
+        const issueComments = env.ISSUE_NUMBER
+          ? typeof api.listIssueComments === 'function'
+            ? await executeGitHubReadWithRetry(
+                () => api.listIssueComments({
+                  repository: env.GITHUB_REPOSITORY || '',
+                  issueNumber: env.ISSUE_NUMBER,
+                }),
+                { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+              )
+            : []
+          : [];
         validation = await validateTenantRepoRequest(request, {
           getOrganization: ({ organization }) => executeGitHubReadWithRetry(
             () => api.getOrganization({ organization }),
@@ -1293,6 +1316,14 @@ async function runRequestValidation(options = {}) {
             () => tenantRepoApi.getTeamRepositoryPermission({ organization, teamSlug, owner, repo }),
             { maxRetries: options.maxRetries || 2, sleep: options.sleep }
           ),
+          issueComments,
+          latestFailedValidationAt: priorAttachmentRetryState.latestFailedValidationAt,
+          latestFailedValidationAttemptId: priorAttachmentRetryState.latestFailedValidationAttemptId,
+          token: tokenInfo.token,
+          fetchImpl: options.fetchImpl,
+          maxAttachmentBytes: options.maxAttachmentBytes,
+          maxRetries: options.maxRetries,
+          sleep: options.sleep,
           registryRef: env.TENANT_REGISTRY_REF || 'main',
           registryDirectory: env.TENANT_REGISTRY_DIR || 'tenant-registry',
         });

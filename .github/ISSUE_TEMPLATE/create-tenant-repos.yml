@@ -23,16 +23,33 @@ body:
     validations:
       required: true
 
+  - type: dropdown
+    id: intake_mode
+    attributes:
+      label: Intake mode
+      description: >-
+        Choose how repositories are supplied. single uses the single-item fields
+        below. bulk_csv pastes the spreadsheet batch directly into the CSV field.
+        csv_attachment leaves the repository fields blank and uploads a .csv file
+        as an attachment in a follow-up issue comment.
+      options:
+        - single
+        - bulk_csv
+        - csv_attachment
+      default: 0
+    validations:
+      required: true
+
   - type: textarea
     id: repositories_csv
     attributes:
       label: Repositories CSV (spreadsheet batch)
       description: >-
-        Primary input. Paste one row per repository in the column order
+        Primary input for bulk_csv intake. Paste one row per repository in the column order
         repository_name,repository_visibility,primary_contact,secondary_contact.
         One issue can create many repositories in the resolved tenant boundary.
         An optional header row is allowed. The single-item fields below are used
-        only when this is empty.
+        only when this is empty. Leave this blank when intake mode is csv_attachment.
       placeholder: |
         repository_name,repository_visibility,primary_contact,secondary_contact
         acme-platform-service,private,octocat,hubot

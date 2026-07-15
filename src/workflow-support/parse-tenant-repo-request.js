@@ -193,6 +193,52 @@ function buildRequestId(repository, issueNumber, runId, runAttempt) {
   return `${repository || 'unknown-repo'}#${issuePart}/${runPart}.${attemptPart}`;
 }
 
+function normalizeIntakeMode(value) {
+  const normalized = normalizeText(value).toLowerCase();
+  if (normalized === 'csv_attachment') {
+    return 'csv_attachment';
+  }
+  if (normalized === 'bulk_csv') {
+    return 'bulk_csv';
+  }
+  if (normalized === 'single') {
+    return 'single';
+  }
+  return 'manual';
+}
+
+// Empty attachment scaffolds mirror the team-ops csv_attachment intake so the
+// audit artifact and downstream approval gate see the same shape.
+function createEmptyAttachmentSubmission() {
+  return {
+    comment_id: null,
+    comment_created_at: null,
+    uploader_login: null,
+    attachment_url: null,
+    filename: null,
+    extension: null,
+    content_hash: null,
+    downloaded_at: null,
+    byte_size: 0,
+    acceptance_status: 'waiting',
+    rejection_reason: null,
+  };
+}
+
+function createEmptyAttachmentValidationAttempt() {
+  return {
+    attempt_id: null,
+    request_id: null,
+    candidate_comment_id: null,
+    attempt_status: 'waiting',
+    selection_rule: 'newest requester attachment comment after the latest failed CSV attachment validation result',
+    evaluated_at: null,
+    errors: [],
+    warnings: [],
+    supersedes_attempt_id: null,
+  };
+}
+
 function parseTenantRepoRequest(input = {}) {
   const parsed = input.parsedRequest || input.parsed_request || {};
   const issue = input.issue || {};
@@ -215,6 +261,16 @@ function parseTenantRepoRequest(input = {}) {
   );
   const justification = normalizeText(
     readField(parsed, ['justification', 'parsed_justification', 'business_justification']) || input.justification
+  );
+  const intakeMode = normalizeIntakeMode(
+    readField(parsed, ['intake_mode', 'parsed_intake_mode']) || input.intakeMode
+  );
+
+  const comment = input.comment || input.comment_context || {};
+  const issueComments = input.issueComments || input.issue_comments || [];
+  const commentId = input.commentId || comment.id || comment.comment_id || null;
+  const commentAuthorLogin = normalizeLogin(
+    input.commentAuthorLogin || comment.author_login || (comment.user && comment.user.login) || ''
   );
 
   // Secondary single-item path (used when the CSV batch is empty).
@@ -268,8 +324,16 @@ function parseTenantRepoRequest(input = {}) {
     dry_run: dryRun,
     business_justification: justification,
     submitted_at: submittedAt,
-    intake_mode: 'manual',
-    request_status: 'submitted',
+    intake_mode: intakeMode,
+    comment_context: {
+      comment_id: commentId,
+      comment_author_login: commentAuthorLogin || null,
+      comment_body: comment.body || input.commentBody || '',
+      issue_comment_count: Array.isArray(issueComments) ? issueComments.length : 0,
+    },
+    accepted_attachment_submission: createEmptyAttachmentSubmission(),
+    attachment_validation_attempt: createEmptyAttachmentValidationAttempt(),
+    request_status: intakeMode === 'csv_attachment' ? 'waiting_for_attachment' : 'submitted',
   };
 }
 
@@ -278,6 +342,7 @@ module.exports = {
   buildRepositoryEntry,
   mergeRepositoryEntries,
   normalizeBoolean,
+  normalizeIntakeMode,
   normalizeRepositoryName,
   normalizeTenantName,
   parseRepositoriesCsv,
