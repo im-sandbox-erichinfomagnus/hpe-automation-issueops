@@ -123,6 +123,10 @@ async function validateTenantCreationRequest(input = {}, options = {}) {
   const errors = [];
   const warnings = [];
 
+  if (Array.isArray(request.csv_input_errors)) {
+    errors.push(...request.csv_input_errors);
+  }
+
   if (!request.organization) {
     errors.push('Target organization is required.');
   }
@@ -141,6 +145,10 @@ async function validateTenantCreationRequest(input = {}, options = {}) {
 
   if (!request.designated_approver_login) {
     errors.push('A designated approver is required.');
+  }
+
+  if (!request.tenant_admin_login) {
+    errors.push('A tenant admin GitHub login is required.');
   }
 
   const allowedTenantTypes = ['application', 'platform', 'shared-services'];
@@ -286,6 +294,7 @@ async function validateTenantCreationRequest(input = {}, options = {}) {
   let requesterEligibility = {
     state: 'unknown',
     exists: false,
+    role: 'other',
   };
 
   if (request.organization && request.requester_login && typeof options.getOrganizationMembership === 'function') {
@@ -299,10 +308,40 @@ async function validateTenantCreationRequest(input = {}, options = {}) {
       state: requesterMembership && requesterMembership.membership
         ? requesterMembership.membership.state || 'active'
         : 'absent',
+      role: requesterMembership && requesterMembership.membership
+        ? requesterMembership.membership.role || 'member'
+        : 'other',
     };
 
-    if (!requesterEligibility.exists || requesterEligibility.state !== 'active') {
-      errors.push('Requester is not an active member of the target organization.');
+    if (!requesterEligibility.exists || requesterEligibility.state !== 'active' || requesterEligibility.role !== 'admin') {
+      errors.push('Requester must be an active owner in the target organization to create a tenant.');
+    }
+  }
+
+  let tenantAdminEligibility = {
+    state: 'unknown',
+    exists: false,
+    role: 'other',
+  };
+
+  if (request.organization && request.tenant_admin_login && typeof options.getOrganizationMembership === 'function') {
+    const tenantAdminMembership = await options.getOrganizationMembership({
+      organization: request.organization,
+      username: request.tenant_admin_login,
+    });
+
+    tenantAdminEligibility = {
+      exists: Boolean(tenantAdminMembership && tenantAdminMembership.exists),
+      state: tenantAdminMembership && tenantAdminMembership.membership
+        ? tenantAdminMembership.membership.state || 'active'
+        : 'absent',
+      role: tenantAdminMembership && tenantAdminMembership.membership
+        ? tenantAdminMembership.membership.role || 'member'
+        : 'other',
+    };
+
+    if (!tenantAdminEligibility.exists || tenantAdminEligibility.state !== 'active') {
+      errors.push(`Tenant admin '${request.tenant_admin_login}' must be an active member of the target organization.`);
     }
   }
 
@@ -386,6 +425,7 @@ async function validateTenantCreationRequest(input = {}, options = {}) {
     organization_visible: organizationVisible,
     designated_approver_authorization: designatedApproverAuthorization,
     requester_eligibility: requesterEligibility,
+    tenant_admin_eligibility: tenantAdminEligibility,
     requested_teams: requestedTeams,
     existing_teams: existingTeams,
     requested_child_links: requestedChildLinks,
@@ -412,6 +452,14 @@ async function validateTenantCreationRequest(input = {}, options = {}) {
       cicd_capability_status: cicdCapabilityPreview.status,
       cicd_capability_reason_code: cicdCapabilityPreview.reason_code,
       dry_run_no_mutation: Boolean(request.dry_run),
+      intake_mode: request.intake_mode,
+      csv_row_count: request.csv_row_count || 0,
+      requester_owner_gate: requesterEligibility.state === 'active' && requesterEligibility.role === 'admin'
+        ? 'authorized'
+        : 'unauthorized',
+      tenant_admin_membership: tenantAdminEligibility.state === 'active'
+        ? 'active'
+        : 'inactive_or_unknown',
     },
     request: {
       ...request,

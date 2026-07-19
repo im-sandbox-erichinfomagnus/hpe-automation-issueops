@@ -1603,18 +1603,18 @@ async function runApprovedExecution(options = {}) {
         organization: auditArtifact.request.organization,
       })
     : null;
-  let tenantRequesterMembership = null;
+  let tenantAdminMembership = null;
   if (
     isTenantCreation &&
     typeof api.getMembershipForUser === 'function' &&
     auditArtifact.request &&
     auditArtifact.request.tenant_team_slug &&
-    auditArtifact.request.requester_login
+    (auditArtifact.request.tenant_admin_login || auditArtifact.request.requester_login)
   ) {
-    tenantRequesterMembership = await api.getMembershipForUser({
+    tenantAdminMembership = await api.getMembershipForUser({
       organization: auditArtifact.request.organization,
       teamSlug: auditArtifact.request.tenant_team_slug,
-      username: auditArtifact.request.requester_login,
+      username: auditArtifact.request.tenant_admin_login || auditArtifact.request.requester_login,
     });
   }
   let latestRateLimitSnapshot = tenantValidationRateLimitSnapshot || auditArtifact.reconciliation && auditArtifact.reconciliation.rate_limit_snapshot || null;
@@ -1653,7 +1653,8 @@ async function runApprovedExecution(options = {}) {
         request: auditArtifact.request,
         validatedTeams: buildValidatedTeams(auditArtifact),
         currentTeams,
-        requesterMembership: tenantRequesterMembership,
+        tenantAdminMembership,
+        requesterMembership: tenantAdminMembership,
         organization_exists: auditArtifact.validation.organization_visible,
         dry_run: auditArtifact.request.dry_run,
       })
@@ -2729,30 +2730,41 @@ async function runApprovedExecution(options = {}) {
               tokenInfo: mutationDecision.tokenInfo,
             });
 
-            const requesterMembership = typeof api.getMembershipForUser === 'function'
-              ? await api.getMembershipForUser({
-                  organization: auditArtifact.request.organization,
-                  teamSlug: parentTeam.slug,
-                  username: auditArtifact.request.requester_login,
-                })
-              : tenantRequesterMembership;
+            const tenantAdminLogin = auditArtifact.request.tenant_admin_login || auditArtifact.request.requester_login;
+            const tenantTeamSlugs = [...new Set((auditArtifact.request.requested_teams || [])
+              .map((team) => String(team && team.normalized_slug || '').toLowerCase())
+              .filter(Boolean))];
 
-            const requesterRole = requesterMembership && requesterMembership.membership
-              ? String(requesterMembership.membership.role || '').toLowerCase()
-              : '';
+            for (const teamSlug of tenantTeamSlugs) {
+              const currentMembership = typeof api.getMembershipForUser === 'function'
+                ? await api.getMembershipForUser({
+                    organization: auditArtifact.request.organization,
+                    teamSlug,
+                    username: tenantAdminLogin,
+                  })
+                : teamSlug === parentTeam.slug
+                  ? tenantAdminMembership
+                  : null;
 
-            if (requesterMembership && requesterMembership.state === 'active' && requesterRole === 'maintainer') {
-              executionResults.push({
-                username: auditArtifact.request.requester_login,
-                execution_result: 'noop',
-                failure_reason: null,
-              });
-            } else {
+              const currentRole = currentMembership && currentMembership.membership
+                ? String(currentMembership.membership.role || '').toLowerCase()
+                : '';
+
+              if (currentMembership && currentMembership.state === 'active' && currentRole === 'maintainer') {
+                executionResults.push({
+                  team_slug: teamSlug,
+                  username: tenantAdminLogin,
+                  execution_result: 'noop',
+                  failure_reason: null,
+                });
+                continue;
+              }
+
               const membershipResult = await executeWithBoundedRetry(
                 () => api.addOrUpdateTeamMembership({
                   organization: auditArtifact.request.organization,
-                  teamSlug: parentTeam.slug,
-                  username: auditArtifact.request.requester_login,
+                  teamSlug,
+                  username: tenantAdminLogin,
                   role: 'maintainer',
                 }),
                 {
@@ -2763,7 +2775,8 @@ async function runApprovedExecution(options = {}) {
 
               latestRateLimitSnapshot = membershipResult.retry_plan.rate_limit_snapshot || latestRateLimitSnapshot;
               executionResults.push({
-                username: auditArtifact.request.requester_login,
+                team_slug: teamSlug,
+                username: tenantAdminLogin,
                 execution_result: membershipResult.ok ? 'added' : 'failed',
                 failure_reason: membershipResult.ok ? null : classifyFailureReason(membershipResult.error),
               });

@@ -7,6 +7,9 @@ const {
   normalizeRunnerBaseName,
   normalizeTenantName,
 } = require('./parse-hosted-runner-request');
+const { parseSingleCsvRow } = require('./parse-single-csv-row');
+
+const HOSTED_RUNNER_DELETION_CSV_COLUMNS = ['runner_name'];
 
 function normalizeText(value) {
   return String(value || '').trim();
@@ -40,6 +43,11 @@ function parseHostedRunnerDeletionRequest(input = {}) {
 
   const repository = input.repository || runContext.repository || process.env.GITHUB_REPOSITORY || '';
   const issueNumber = input.issueNumber || issue.number || runContext.issue_number || process.env.ISSUE_NUMBER;
+  const runnerCsv = parseSingleCsvRow(
+    readField(parsed, ['runner_csv', 'parsed_runner_csv']) || input.runner_csv || input.runnerCsv,
+    HOSTED_RUNNER_DELETION_CSV_COLUMNS
+  );
+  const csvRow = runnerCsv.row || {};
   const requesterLogin = normalizeLogin(input.requesterLogin || issue.user && issue.user.login || '');
   const organization = normalizeLogin(readField(parsed, ['organization', 'parsed_organization']) || input.organization);
   const tenantNameInput = normalizeText(
@@ -47,7 +55,7 @@ function parseHostedRunnerDeletionRequest(input = {}) {
   );
   const tenantNameNormalized = normalizeTenantName(tenantNameInput);
   const runnerBaseNameInput = normalizeText(
-    readField(parsed, ['runner_name', 'parsed_runner_name']) || input.runnerName
+    csvRow.runner_name || readField(parsed, ['runner_name', 'parsed_runner_name']) || input.runnerName
   );
   const designatedApproverLogin = normalizeLogin(
     readField(parsed, ['designated_approver', 'parsed_designated_approver']) || input.designatedApprover
@@ -85,12 +93,16 @@ function parseHostedRunnerDeletionRequest(input = {}) {
     dry_run: dryRun,
     business_justification: justification,
     submitted_at: submittedAt,
-    intake_mode: 'manual',
+    intake_mode: runnerCsv.provided ? 'csv' : 'manual',
+    csv_input_provided: runnerCsv.provided,
+    csv_row_count: runnerCsv.row_count,
+    csv_input_errors: runnerCsv.errors,
     request_status: 'submitted',
   };
 }
 
 module.exports = {
+  HOSTED_RUNNER_DELETION_CSV_COLUMNS,
   buildTenantRunnerPrefix,
   normalizeRunnerBaseName,
   parseHostedRunnerDeletionRequest,

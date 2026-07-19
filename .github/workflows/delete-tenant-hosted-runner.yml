@@ -102,6 +102,7 @@ jobs:
           PARSED_REQUEST_JSON: ${{ steps.parse_request.outputs.json }}
           PARSED_ORGANIZATION: ${{ steps.parse_request.outputs.parsed_organization }}
           PARSED_TENANT_NAME: ${{ steps.parse_request.outputs.parsed_tenant_name }}
+          PARSED_RUNNER_CSV: ${{ steps.parse_request.outputs.parsed_runner_csv }}
           PARSED_RUNNER_NAME: ${{ steps.parse_request.outputs.parsed_runner_name }}
           PARSED_DESIGNATED_APPROVER: ${{ steps.parse_request.outputs.parsed_designated_approver }}
           PARSED_DRY_RUN: ${{ steps.parse_request.outputs.parsed_dry_run }}

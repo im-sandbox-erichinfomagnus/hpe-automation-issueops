@@ -1,5 +1,22 @@
 'use strict';
 
+const { parseSingleCsvRow } = require('./parse-single-csv-row');
+
+const TENANT_CSV_COLUMNS = [
+  'tenant_name',
+  'tenant_admin_login',
+  'tenant_type',
+  'cmdb_id',
+  'cost_center',
+  'business_unit',
+  'environment',
+  'primary_contact',
+  'secondary_contact',
+  'code_scanning_enabled',
+  'secret_scanning_enabled',
+  'dependabot_enabled',
+];
+
 function normalizeText(value) {
   return String(value || '').trim();
 }
@@ -292,6 +309,11 @@ function parseTenantCreationRequest(input = {}) {
   const issueNumber = input.issueNumber || issue.number || runContext.issue_number || process.env.ISSUE_NUMBER;
   const requesterLogin = normalizeText(input.requesterLogin || issue.user && issue.user.login || '').toLowerCase();
   const legacyProjection = projectLegacyTenantRecord(input.legacyTenantRecord || input.legacy_tenant_record || null);
+  const tenantCsv = parseSingleCsvRow(
+    readField(parsed, ['tenant_csv', 'parsed_tenant_csv']) || input.tenant_csv || input.tenantCsv,
+    TENANT_CSV_COLUMNS
+  );
+  const csvRow = tenantCsv.row || {};
   const organization = normalizeText(
     pickFirstNonEmpty(
       readField(parsed, ['organization', 'parsed_organization']),
@@ -301,14 +323,25 @@ function parseTenantCreationRequest(input = {}) {
   );
   const tenantDisplayName = normalizeIssueFormScalar(
     pickFirstNonEmpty(
+      csvRow.tenant_name,
       readField(parsed, ['tenant_name', 'parsed_tenant_name']),
       input.tenant_name,
       legacyProjection && legacyProjection.tenant_name
     )
   );
+  const tenantAdminLogin = normalizeIssueFormScalar(
+    pickFirstNonEmpty(
+      csvRow.tenant_admin_login,
+      readField(parsed, ['tenant_admin_login', 'parsed_tenant_admin_login']),
+      input.tenant_admin_login,
+      input.tenantAdminLogin,
+      requesterLogin
+    )
+  ).toLowerCase();
   const designatedApprover = normalizeIssueFormScalar(readField(parsed, ['designated_approver', 'parsed_designated_approver']) || input.designated_approver).toLowerCase();
   const tenantType = normalizeTenantType(
     pickFirstNonEmpty(
+      csvRow.tenant_type,
       readField(parsed, ['tenant_type', 'parsed_tenant_type']),
       input.tenant_type,
       legacyProjection && legacyProjection.tenant_type
@@ -316,6 +349,7 @@ function parseTenantCreationRequest(input = {}) {
   );
   const primaryContact = normalizeContactField(
     pickFirstNonEmpty(
+      csvRow.primary_contact,
       readField(parsed, ['primary_contact', 'parsed_primary_contact']),
       input.primary_contact,
       legacyProjection && legacyProjection.metadata && legacyProjection.metadata.primaryContact
@@ -323,25 +357,26 @@ function parseTenantCreationRequest(input = {}) {
   );
   const secondaryContact = normalizeContactField(
     pickFirstNonEmpty(
+      csvRow.secondary_contact,
       readField(parsed, ['secondary_contact', 'parsed_secondary_contact']),
       input.secondary_contact,
       legacyProjection && legacyProjection.metadata && legacyProjection.metadata.secondaryContact
     )
   ) || null;
-  const cmdbId = normalizeIssueFormScalar(readField(parsed, ['cmdb_id', 'parsed_cmdb_id']) || input.cmdb_id) || null;
-  const costCenter = normalizeIssueFormScalar(readField(parsed, ['cost_center', 'parsed_cost_center']) || input.cost_center) || null;
-  const businessUnit = normalizeIssueFormScalar(readField(parsed, ['business_unit', 'parsed_business_unit']) || input.business_unit) || null;
-  const environment = normalizeEnvironment(readField(parsed, ['environment', 'parsed_environment']) || input.environment);
+  const cmdbId = normalizeIssueFormScalar(pickFirstNonEmpty(csvRow.cmdb_id, readField(parsed, ['cmdb_id', 'parsed_cmdb_id']), input.cmdb_id)) || null;
+  const costCenter = normalizeIssueFormScalar(pickFirstNonEmpty(csvRow.cost_center, readField(parsed, ['cost_center', 'parsed_cost_center']), input.cost_center)) || null;
+  const businessUnit = normalizeIssueFormScalar(pickFirstNonEmpty(csvRow.business_unit, readField(parsed, ['business_unit', 'parsed_business_unit']), input.business_unit)) || null;
+  const environment = normalizeEnvironment(pickFirstNonEmpty(csvRow.environment, readField(parsed, ['environment', 'parsed_environment']), input.environment));
   const governanceCodeScanningEnabled = normalizeBoolean(
-    readField(parsed, ['governance_code_scanning_enabled', 'parsed_governance_code_scanning_enabled']) || input.governance_code_scanning_enabled,
+    pickFirstNonEmpty(csvRow.code_scanning_enabled, readField(parsed, ['governance_code_scanning_enabled', 'parsed_governance_code_scanning_enabled']), input.governance_code_scanning_enabled),
     true
   );
   const governanceSecretScanningEnabled = normalizeBoolean(
-    readField(parsed, ['governance_secret_scanning_enabled', 'parsed_governance_secret_scanning_enabled']) || input.governance_secret_scanning_enabled,
+    pickFirstNonEmpty(csvRow.secret_scanning_enabled, readField(parsed, ['governance_secret_scanning_enabled', 'parsed_governance_secret_scanning_enabled']), input.governance_secret_scanning_enabled),
     true
   );
   const governanceDependabotEnabled = normalizeBoolean(
-    readField(parsed, ['governance_dependabot_enabled', 'parsed_governance_dependabot_enabled']) || input.governance_dependabot_enabled,
+    pickFirstNonEmpty(csvRow.dependabot_enabled, readField(parsed, ['governance_dependabot_enabled', 'parsed_governance_dependabot_enabled']), input.governance_dependabot_enabled),
     true
   );
   const dryRun = normalizeBoolean(readField(parsed, ['dry_run', 'parsed_dry_run']) || input.dry_run, true);
@@ -368,6 +403,7 @@ function parseTenantCreationRequest(input = {}) {
     tenant_display_name: tenantDisplayName,
     tenant_key: tenantKey,
     tenant_type: tenantType,
+    tenant_admin_login: tenantAdminLogin,
     designated_approver_login: designatedApprover,
     primary_contact: primaryContact,
     secondary_contact: secondaryContact,
@@ -414,7 +450,10 @@ function parseTenantCreationRequest(input = {}) {
     dry_run: dryRun,
     business_justification: justification,
     submitted_at: submittedAt,
-    intake_mode: 'manual',
+    intake_mode: tenantCsv.provided ? 'csv' : 'manual',
+    csv_input_provided: tenantCsv.provided,
+    csv_row_count: tenantCsv.row_count,
+    csv_input_errors: tenantCsv.errors,
     request_status: 'submitted',
     requested_teams: [
       {
@@ -490,6 +529,7 @@ function parseTenantCreationRequest(input = {}) {
 }
 
 module.exports = {
+  TENANT_CSV_COLUMNS,
   parseTenantCreationRequest,
   normalizeEnvironment,
   normalizeTenantType,

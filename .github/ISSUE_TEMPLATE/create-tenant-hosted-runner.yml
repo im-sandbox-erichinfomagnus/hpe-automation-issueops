@@ -23,6 +23,20 @@ body:
     validations:
       required: true
 
+  - type: textarea
+    id: runner_csv
+    attributes:
+      label: Hosted runner CSV (spreadsheet input)
+      description: >-
+        Preferred input. Paste exactly one runner row. The optional header is
+        runner_name,runner_image_id,runner_image_source,runner_size,runner_group_name,maximum_runners.
+        This row overrides the individual runner fields below.
+      placeholder: |
+        runner_name,runner_image_id,runner_image_source,runner_size,runner_group_name,maximum_runners
+        linux-build,2295,github,4-core,DemoCorp_Builders,1
+    validations:
+      required: false
+
   - type: input
     id: runner_name
     attributes:
@@ -30,7 +44,7 @@ body:
       description: Base name for the runner. The full runner name is derived as TenantName_RunnerName (letters, digits, ., -, _ only; 64 characters max after derivation).
       placeholder: ubuntu-build
     validations:
-      required: true
+      required: false
 
   - type: dropdown
     id: runner_image_id
@@ -43,7 +57,7 @@ body:
         - "windows-2022"
       default: 0
     validations:
-      required: true
+      required: false
 
   - type: dropdown
     id: runner_image_source
@@ -56,7 +70,7 @@ body:
         - custom
       default: 0
     validations:
-      required: true
+      required: false
 
   - type: dropdown
     id: runner_size
@@ -73,7 +87,7 @@ body:
         - arm-8-core
       default: 0
     validations:
-      required: true
+      required: false
 
   - type: input
     id: runner_group_name

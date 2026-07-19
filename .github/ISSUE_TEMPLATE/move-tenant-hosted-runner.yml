@@ -23,6 +23,19 @@ body:
     validations:
       required: true
 
+  - type: textarea
+    id: runner_moves_csv
+    attributes:
+      label: Runner moves CSV (spreadsheet input)
+      description: >-
+        Preferred input. Paste exactly one row using runner_name,hosted_runner_id,target_runner_group_name.
+        The header is optional. hosted_runner_id may be blank when the runner name is unique.
+      placeholder: |
+        runner_name,hosted_runner_id,target_runner_group_name
+        linux-build,,DemoCorp_Builders
+    validations:
+      required: false
+
   - type: input
     id: runner_name
     attributes:
@@ -30,7 +43,7 @@ body:
       description: Runner to move. Accepts the full tenant-prefixed name or the base name.
       placeholder: ubuntu-build
     validations:
-      required: true
+      required: false
 
   - type: input
     id: hosted_runner_id
@@ -46,7 +59,7 @@ body:
       description: Existing tenant-prefixed runner group that should receive the runner.
       placeholder: ContosoUK_Builders
     validations:
-      required: true
+      required: false
 
   - type: input
     id: designated_approver

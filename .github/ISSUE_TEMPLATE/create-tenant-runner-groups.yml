@@ -23,6 +23,19 @@ body:
     validations:
       required: true
 
+  - type: textarea
+    id: runner_groups_csv
+    attributes:
+      label: Runner groups CSV (spreadsheet input)
+      description: >-
+        Preferred input. Paste exactly one row using runner_group_name,runner_group_visibility,allows_public_repositories.
+        The header is optional and the row overrides the individual fields below.
+      placeholder: |
+        runner_group_name,runner_group_visibility,allows_public_repositories
+        Builders,selected,false
+    validations:
+      required: false
+
   - type: input
     id: runner_group_name
     attributes:
@@ -30,7 +43,7 @@ body:
       description: Base name for the runner group. The full group name is derived as TenantName_GroupName.
       placeholder: Builders
     validations:
-      required: true
+      required: false
 
   - type: dropdown
     id: runner_group_visibility

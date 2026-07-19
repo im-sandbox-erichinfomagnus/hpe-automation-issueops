@@ -43,7 +43,7 @@ function baseValidationOptions(overrides = {}) {
 
       return {
         exists: true,
-        membership: { role: 'member', state: 'active' },
+        membership: { role: 'admin', state: 'active' },
       };
     },
     listTeams: async () => [],
@@ -64,6 +64,31 @@ test('validateTenantCreationRequest passes valid dry-run request and emits no-mu
   assert.equal(validation.request_status, 'awaiting_approval');
   assert.equal(validation.validation_findings.dry_run_no_mutation, true);
   assert.match(validation.warnings.join('\n'), /Dry-run is enabled/i);
+});
+
+test('validateTenantCreationRequest rejects a requester who is not an active organization owner', async () => {
+  const request = parseTenantCreationRequest({
+    parsedRequest: buildValidParsedRequest(),
+    issue: { number: 910, user: { login: 'requester-user' } },
+    repository: 'octo-org/issueops-speckit',
+  });
+
+  const validation = await validateTenantCreationRequest(
+    request,
+    baseValidationOptions({
+      getOrganizationMembership: async ({ username }) => ({
+        exists: true,
+        membership: {
+          role: username === 'org-owner-user' ? 'admin' : 'member',
+          state: 'active',
+        },
+      }),
+    })
+  );
+
+  assert.equal(validation.is_valid, false);
+  assert.match(validation.errors.join('\n'), /Requester must be an active owner/i);
+  assert.equal(validation.validation_findings.requester_owner_gate, 'unauthorized');
 });
 
 test('validateTenantCreationRequest rejects derived team slug collision', async () => {

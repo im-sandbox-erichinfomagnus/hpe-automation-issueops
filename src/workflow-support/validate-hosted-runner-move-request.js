@@ -82,6 +82,10 @@ async function validateHostedRunnerMoveRequest(input = {}, options = {}) {
   const errors = [];
   const warnings = [];
 
+  if (Array.isArray(request.csv_input_errors)) {
+    errors.push(...request.csv_input_errors);
+  }
+
   if (!request.organization) {
     errors.push('Target organization is required.');
   }
