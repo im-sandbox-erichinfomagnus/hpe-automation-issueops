@@ -213,7 +213,7 @@ jobs:
           node src/scripts/run-approved-execution.js
 
       - name: Upload validation audit artifact
-        if: always()
+        if: ${{ always() && steps.request_scope.outputs.matches-request == 'true' }}
         uses: actions/upload-artifact@v7
         with:
           name: create-tenant-repos-execution-${{ steps.issue_context.outputs.issue_number || 'manual' }}-${{ github.run_attempt }}
