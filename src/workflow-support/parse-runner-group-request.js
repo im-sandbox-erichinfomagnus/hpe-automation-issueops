@@ -1,7 +1,14 @@
 'use strict';
 
+const { parseSingleCsvRow } = require('./parse-single-csv-row');
+
 const RUNNER_GROUP_NAME_MAX_LENGTH = 100;
 const ALLOWED_RUNNER_GROUP_VISIBILITIES = ['selected', 'all', 'private'];
+const RUNNER_GROUP_CSV_COLUMNS = [
+  'runner_group_name',
+  'runner_group_visibility',
+  'allows_public_repositories',
+];
 
 function normalizeText(value) {
   return String(value || '').trim();
@@ -115,6 +122,11 @@ function parseRunnerGroupRequest(input = {}) {
 
   const repository = input.repository || runContext.repository || process.env.GITHUB_REPOSITORY || '';
   const issueNumber = input.issueNumber || issue.number || runContext.issue_number || process.env.ISSUE_NUMBER;
+  const runnerGroupCsv = parseSingleCsvRow(
+    readField(parsed, ['runner_groups_csv', 'parsed_runner_groups_csv']) || input.runner_groups_csv || input.runnerGroupsCsv,
+    RUNNER_GROUP_CSV_COLUMNS
+  );
+  const csvRow = runnerGroupCsv.row || {};
   const requesterLogin = normalizeLogin(input.requesterLogin || issue.user && issue.user.login || '');
   const organization = normalizeLogin(readField(parsed, ['organization', 'parsed_organization']) || input.organization);
   const tenantNameInput = normalizeText(
@@ -122,12 +134,12 @@ function parseRunnerGroupRequest(input = {}) {
   );
   const tenantNameNormalized = normalizeTenantName(tenantNameInput);
   const groupBaseNameInput = normalizeText(
-    readField(parsed, ['runner_group_name', 'parsed_runner_group_name']) || input.runnerGroupName
+    csvRow.runner_group_name || readField(parsed, ['runner_group_name', 'parsed_runner_group_name']) || input.runnerGroupName
   );
-  const visibilityInput = readField(parsed, ['runner_group_visibility', 'parsed_runner_group_visibility']) || input.runnerGroupVisibility;
+  const visibilityInput = csvRow.runner_group_visibility || readField(parsed, ['runner_group_visibility', 'parsed_runner_group_visibility']) || input.runnerGroupVisibility;
   const { visibility: runnerGroupVisibility, source: runnerGroupVisibilitySource } = normalizeRunnerGroupVisibility(visibilityInput);
   const allowsPublicRepositories = normalizeBoolean(
-    readField(parsed, ['allows_public_repositories', 'parsed_allows_public_repositories']) || input.allowsPublicRepositories,
+    csvRow.allows_public_repositories || readField(parsed, ['allows_public_repositories', 'parsed_allows_public_repositories']) || input.allowsPublicRepositories,
     false
   );
   const designatedApproverLogin = normalizeLogin(
@@ -168,13 +180,17 @@ function parseRunnerGroupRequest(input = {}) {
     dry_run: dryRun,
     business_justification: justification,
     submitted_at: submittedAt,
-    intake_mode: 'manual',
+    intake_mode: runnerGroupCsv.provided ? 'csv' : 'manual',
+    csv_input_provided: runnerGroupCsv.provided,
+    csv_row_count: runnerGroupCsv.row_count,
+    csv_input_errors: runnerGroupCsv.errors,
     request_status: 'submitted',
   };
 }
 
 module.exports = {
   ALLOWED_RUNNER_GROUP_VISIBILITIES,
+  RUNNER_GROUP_CSV_COLUMNS,
   RUNNER_GROUP_NAME_MAX_LENGTH,
   deriveRunnerGroupName,
   normalizeRunnerGroupBaseName,

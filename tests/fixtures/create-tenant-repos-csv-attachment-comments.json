@@ -1,0 +1,38 @@
+[
+  {
+    "id": 9101,
+    "created_at": "2026-05-25T10:00:00Z",
+    "body": "Following up with an attachment from another actor: [create-tenant-repos.csv](https://github.com/user-attachments/files/9101/create-tenant-repos.csv)",
+    "user": { "login": "other-user" }
+  },
+  {
+    "id": 9102,
+    "created_at": "2026-05-25T10:02:00Z",
+    "body": "Requester posted non-CSV content first: [create-tenant-repos.txt](https://github.com/user-attachments/files/9102/create-tenant-repos.txt)",
+    "user": { "login": "tenant-admin-user" }
+  },
+  {
+    "id": 9103,
+    "created_at": "2026-05-25T10:04:00Z",
+    "body": "Ambiguous requester upload set:\n[create-tenant-repos-a.csv](https://github.com/user-attachments/files/9103/create-tenant-repos-a.csv)\n[create-tenant-repos-b.csv](https://github.com/user-attachments/files/9104/create-tenant-repos-b.csv)",
+    "user": { "login": "tenant-admin-user" }
+  },
+  {
+    "id": 9104,
+    "created_at": "2026-05-25T10:06:00Z",
+    "body": "Requester posted valid csv for attempt 1: [create-tenant-repos.csv](https://github.com/user-attachments/files/9105/create-tenant-repos.csv)",
+    "user": { "login": "tenant-admin-user" }
+  },
+  {
+    "id": 9105,
+    "created_at": "2026-05-25T10:07:00Z",
+    "body": "Requester posted corrected CSV after failed validation: [create-tenant-repos-corrected.csv](https://github.com/user-attachments/files/9106/create-tenant-repos-corrected.csv)",
+    "user": { "login": "tenant-admin-user" }
+  },
+  {
+    "id": 9106,
+    "created_at": "2026-05-25T10:08:00Z",
+    "body": "approved",
+    "user": { "login": "org-owner-user" }
+  }
+]

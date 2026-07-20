@@ -192,6 +192,26 @@ function createGitHubTeamRepoApi(options = {}) {
       };
     },
 
+    async addRepositoryCollaborator({ owner, repo, username, permission = 'admin' }) {
+      const result = await request(`/repos/${owner}/${repo}/collaborators/${encodeURIComponent(String(username || ''))}`, {
+        method: 'PUT',
+        body: { permission: String(permission || 'admin') },
+      });
+
+      if (!result.ok && result.status !== 204) {
+        throw Object.assign(new Error('Failed to add repository collaborator'), result, {
+          retry_after: getHeader(result.headers, 'retry-after'),
+        });
+      }
+
+      return {
+        repository_full_name: `${owner}/${repo}`.toLowerCase(),
+        username: String(username || '').toLowerCase(),
+        permission: String(permission || 'admin'),
+        invited: result.status === 201,
+      };
+    },
+
     async getOrganizationCustomPropertiesSchema({ organization }) {
       const result = await request(`/orgs/${organization}/properties/schema`);
 

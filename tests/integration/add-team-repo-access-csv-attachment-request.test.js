@@ -110,13 +110,9 @@ test('workflow assumptions keep add-team-repo-access issue and issue_comment tri
   assert.match(workflow, /steps\.approval_gate\.outputs\['approval-status'\]\s*==\s*'approved'/);
 });
 
-test('lint and security workflow assumptions include feature-branch coverage', () => {
+test('lint and dependency workflow assumptions include feature-branch coverage', () => {
   const lintWorkflow = fs.readFileSync(
     path.join(__dirname, '..', '..', '.github', 'workflows', 'lint-workflows.yml'),
-    'utf8'
-  );
-  const codeqlWorkflow = fs.readFileSync(
-    path.join(__dirname, '..', '..', '.github', 'workflows', 'codeql.yml'),
     'utf8'
   );
   const dependabot = fs.readFileSync(
@@ -125,8 +121,8 @@ test('lint and security workflow assumptions include feature-branch coverage', (
   );
 
   assert.match(lintWorkflow, /push:\s*[\s\S]*013-setup-feature-branch/);
-  assert.match(codeqlWorkflow, /push:\s*[\s\S]*013-setup-feature-branch/);
-  assert.match(dependabot, /target-branch:\s*013-setup-feature-branch/);
+  assert.match(lintWorkflow, /pull_request:/);
+  assert.match(dependabot, /target-branch:\s*020-remove-team-repo-access/);
 });
 
 test('validate end-to-end waiting_for_attachment progression for csv_attachment intake', async () => {

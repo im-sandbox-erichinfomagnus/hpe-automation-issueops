@@ -804,15 +804,13 @@ test('US3 blocks approved execution when boundary revalidation mismatches', asyn
     },
   });
 
+  // Force a genuine boundary mismatch under the V2.2.1 OR authorization rule:
+  // the requester must be neither an active tenant top-team maintainer nor an
+  // active repo-admin member during re-validation, so the tenant no longer
+  // resolves and execution fails closed.
   const boundaryMismatchTeamApi = {
     ...buildValidationApi(),
-    getMembershipForUser: async ({ teamSlug }) => {
-      if (teamSlug === 'contosouk_tenant') {
-        return { state: 'absent', membership: null };
-      }
-
-      return { state: 'active', membership: { role: 'member' } };
-    },
+    getMembershipForUser: async () => ({ state: 'absent', membership: null }),
   };
 
   const result = await runApprovedExecution({

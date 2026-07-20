@@ -304,15 +304,22 @@ async function resolveTenantContextFromRegistry(input = {}, options = {}) {
             : 'unknown';
       repoAdminMembershipState = repoAdminState === 'active' ? 'active_member' : repoAdminState === 'absent' ? 'absent' : 'unknown';
 
+      // V2.2.1 create-repo authorization: a requester may act on the tenant when
+      // they are an active maintainer of the tenant top team OR an active
+      // member/maintainer of the repo-admin team (an active repo-admin membership
+      // maps to 'active_member' above). This is an OR, not an AND: a plain
+      // repo-admin member who is not the tenant admin is authorized.
+      const requesterIsTopMaintainer = tenantRoleState === 'active_maintainer';
+      const requesterIsRepoAdminMember = repoAdminMembershipState === 'active_member';
+      const membershipUnknown = tenantRoleState === 'unknown' || repoAdminMembershipState === 'unknown';
+
       authorizationStatus =
-        tenantRoleState === 'active_maintainer' &&
-        repoAdminMembershipState === 'active_member' &&
-        governanceRelationStatus === 'valid'
+        governanceRelationStatus === 'valid' && (requesterIsTopMaintainer || requesterIsRepoAdminMember)
           ? 'authorized'
-          : tenantRoleState === 'active_member'
-            ? 'unauthorized'
-            : tenantRoleState === 'unknown' || repoAdminMembershipState === 'unknown'
-              ? 'ambiguous'
+          : membershipUnknown
+            ? 'ambiguous'
+            : governanceRelationStatus === 'valid' && tenantRoleState === 'active_member'
+              ? 'unauthorized'
               : 'blocked';
     }
 

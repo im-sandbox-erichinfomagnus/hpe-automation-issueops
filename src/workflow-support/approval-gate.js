@@ -8,6 +8,8 @@ const { resolveTenantRepoApprover } = require('./resolve-tenant-repo-approver');
 const { resolveTenantCreationApprover } = require('./resolve-tenant-creation-approver');
 const { resolveHostedRunnerApprover } = require('./resolve-hosted-runner-approver');
 const { resolveRunnerGroupApprover } = require('./resolve-runner-group-approver');
+const { resolveTenantVariablesApprover } = require('./resolve-tenant-variables-approver');
+const { resolveRepositoryRulesetApprover } = require('./resolve-repository-ruleset-approver');
 
 const APPROVAL_COMMAND = 'approved';
 
@@ -16,6 +18,9 @@ const TENANT_RUNNER_APPROVAL_MODES = [
   'hosted_runner_deletion',
   'hosted_runner_move',
   'runner_group_creation',
+  'tenant_variable_management',
+  'repository_ruleset_creation',
+  'repository_ruleset_deletion',
 ];
 
 function describeTenantRunnerMutation(approvalMode) {
@@ -29,6 +34,18 @@ function describeTenantRunnerMutation(approvalMode) {
 
   if (approvalMode === 'runner_group_creation') {
     return 'tenant runner group creation';
+  }
+
+  if (approvalMode === 'tenant_variable_management') {
+    return 'tenant variable management';
+  }
+
+  if (approvalMode === 'repository_ruleset_creation') {
+    return 'repository ruleset creation';
+  }
+
+  if (approvalMode === 'repository_ruleset_deletion') {
+    return 'repository ruleset deletion';
   }
 
   return 'tenant hosted-runner creation';
@@ -168,6 +185,14 @@ async function evaluateApprovalGate(input = {}, options = {}) {
 
     if (approvalMode === 'runner_group_creation') {
       return resolveRunnerGroupApprover(args, options);
+    }
+
+    if (approvalMode === 'tenant_variable_management') {
+      return resolveTenantVariablesApprover(args, options);
+    }
+
+    if (approvalMode === 'repository_ruleset_creation' || approvalMode === 'repository_ruleset_deletion') {
+      return resolveRepositoryRulesetApprover(args, options);
     }
 
     return resolveApproverRole(args, options);

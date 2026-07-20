@@ -1,8 +1,18 @@
 'use strict';
 
+const { parseSingleCsvRow } = require('./parse-single-csv-row');
+
 const RUNNER_NAME_MAX_LENGTH = 64;
 const RUNNER_NAME_PATTERN = /^[A-Za-z0-9._-]+$/;
 const ALLOWED_IMAGE_SOURCES = ['github', 'partner', 'custom'];
+const HOSTED_RUNNER_CSV_COLUMNS = [
+  'runner_name',
+  'runner_image_id',
+  'runner_image_source',
+  'runner_size',
+  'runner_group_name',
+  'maximum_runners',
+];
 
 function normalizeText(value) {
   return String(value || '').trim();
@@ -130,6 +140,11 @@ function parseHostedRunnerRequest(input = {}) {
 
   const repository = input.repository || runContext.repository || process.env.GITHUB_REPOSITORY || '';
   const issueNumber = input.issueNumber || issue.number || runContext.issue_number || process.env.ISSUE_NUMBER;
+  const runnerCsv = parseSingleCsvRow(
+    readField(parsed, ['runner_csv', 'parsed_runner_csv']) || input.runner_csv || input.runnerCsv,
+    HOSTED_RUNNER_CSV_COLUMNS
+  );
+  const csvRow = runnerCsv.row || {};
   const requesterLogin = normalizeLogin(input.requesterLogin || issue.user && issue.user.login || '');
   const organization = normalizeLogin(readField(parsed, ['organization', 'parsed_organization']) || input.organization);
   const tenantNameInput = normalizeText(
@@ -137,22 +152,22 @@ function parseHostedRunnerRequest(input = {}) {
   );
   const tenantNameNormalized = normalizeTenantName(tenantNameInput);
   const runnerBaseNameInput = normalizeText(
-    readField(parsed, ['runner_name', 'parsed_runner_name']) || input.runnerName
+    csvRow.runner_name || readField(parsed, ['runner_name', 'parsed_runner_name']) || input.runnerName
   );
   const runnerImageId = normalizeText(
-    readField(parsed, ['runner_image_id', 'parsed_runner_image_id']) || input.runnerImageId
+    csvRow.runner_image_id || readField(parsed, ['runner_image_id', 'parsed_runner_image_id']) || input.runnerImageId
   );
   const runnerImageSource = normalizeDropdownValue(
-    readField(parsed, ['runner_image_source', 'parsed_runner_image_source']) || input.runnerImageSource || 'github'
+    csvRow.runner_image_source || readField(parsed, ['runner_image_source', 'parsed_runner_image_source']) || input.runnerImageSource || 'github'
   ) || 'github';
   const runnerSize = normalizeText(
-    readField(parsed, ['runner_size', 'parsed_runner_size']) || input.runnerSize
+    csvRow.runner_size || readField(parsed, ['runner_size', 'parsed_runner_size']) || input.runnerSize
   );
   const runnerGroupNameInput = normalizeText(
-    readField(parsed, ['runner_group_name', 'parsed_runner_group_name']) || input.runnerGroupName
+    csvRow.runner_group_name || readField(parsed, ['runner_group_name', 'parsed_runner_group_name']) || input.runnerGroupName
   );
   const maximumRunnersResult = normalizeMaximumRunners(
-    readField(parsed, ['maximum_runners', 'parsed_maximum_runners']) || input.maximumRunners
+    csvRow.maximum_runners || readField(parsed, ['maximum_runners', 'parsed_maximum_runners']) || input.maximumRunners
   );
   const designatedApproverLogin = normalizeLogin(
     readField(parsed, ['designated_approver', 'parsed_designated_approver']) || input.designatedApprover
@@ -195,13 +210,17 @@ function parseHostedRunnerRequest(input = {}) {
     dry_run: dryRun,
     business_justification: justification,
     submitted_at: submittedAt,
-    intake_mode: 'manual',
+    intake_mode: runnerCsv.provided ? 'csv' : 'manual',
+    csv_input_provided: runnerCsv.provided,
+    csv_row_count: runnerCsv.row_count,
+    csv_input_errors: runnerCsv.errors,
     request_status: 'submitted',
   };
 }
 
 module.exports = {
   ALLOWED_IMAGE_SOURCES,
+  HOSTED_RUNNER_CSV_COLUMNS,
   RUNNER_NAME_MAX_LENGTH,
   buildTenantRunnerPrefix,
   deriveRunnerName,

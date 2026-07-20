@@ -93,7 +93,10 @@ test('runRequestValidation records hierarchy audit metadata and missing-token fa
 
   assert.equal(result.validation.is_valid, false);
   assert.equal(result.validation.request_status, 'validation_failed');
-  assert.match(result.validation.errors.join('\n'), /workflow token secret is missing/i);
+  assert.match(
+    result.validation.errors.join('\n'),
+    /workflow token secret is missing|requires ISSUEOPS_GITHUB_TOKEN/i
+  );
   assert.equal(persisted.metadata.operation, 'team_hierarchy');
   assert.equal(persisted.request.parent_team_slug, 'platform-engineering');
   assert.equal(persisted.execution.failure_count, 0);

@@ -105,6 +105,8 @@ jobs:
           PARSED_ORGANIZATION: ${{ steps.parse_request.outputs.parsed_organization }}
           PARSED_TENANT_NAME: ${{ steps.parse_request.outputs.parsed_tenant_name }}
           PARSED_REPOSITORY_NAME: ${{ steps.parse_request.outputs.parsed_repository_name }}
+          PARSED_REPOSITORIES_CSV: ${{ steps.parse_request.outputs.parsed_repositories_csv }}
+          PARSED_INTAKE_MODE: ${{ steps.parse_request.outputs.parsed_intake_mode }}
         run: |
           set -euo pipefail
 
@@ -119,7 +121,7 @@ jobs:
 
           if [ "${EVENT_NAME:-}" = "issues" ] && [ "${EVENT_ACTION:-}" = "labeled" ] && [ "$terminal_label_event" = "true" ]; then
             matches_request=false
-          elif [ -n "${PARSED_ORGANIZATION:-}" ] && [ -n "${PARSED_TENANT_NAME:-}" ] && [ -n "${PARSED_REPOSITORY_NAME:-}" ]; then
+          elif [ -n "${PARSED_ORGANIZATION:-}" ] && [ -n "${PARSED_TENANT_NAME:-}" ] && { [ -n "${PARSED_REPOSITORY_NAME:-}" ] || [ -n "${PARSED_REPOSITORIES_CSV:-}" ] || printf '%s' "${PARSED_INTAKE_MODE:-}" | grep -qi csv_attachment; }; then
             matches_request=true
           fi
 
@@ -143,12 +145,17 @@ jobs:
           PARSED_ORGANIZATION: ${{ steps.parse_request.outputs.parsed_organization }}
           PARSED_TENANT_NAME: ${{ steps.parse_request.outputs.parsed_tenant_name }}
           PARSED_REPOSITORY_NAME: ${{ steps.parse_request.outputs.parsed_repository_name }}
+          PARSED_REPOSITORIES_CSV: ${{ steps.parse_request.outputs.parsed_repositories_csv }}
           PARSED_REPOSITORY_VISIBILITY: ${{ steps.parse_request.outputs.parsed_repository_visibility }}
           PARSED_PRIMARY_CONTACT: ${{ steps.parse_request.outputs.parsed_primary_contact }}
           PARSED_SECONDARY_CONTACT: ${{ steps.parse_request.outputs.parsed_secondary_contact }}
           PARSED_DESIGNATED_APPROVER: ${{ steps.parse_request.outputs.parsed_designated_approver }}
+          PARSED_INTAKE_MODE: ${{ steps.parse_request.outputs.parsed_intake_mode }}
           PARSED_DRY_RUN: ${{ steps.parse_request.outputs.parsed_dry_run }}
           PARSED_JUSTIFICATION: ${{ steps.parse_request.outputs.parsed_justification }}
+          COMMENT_ID: ${{ github.event.comment.id || '' }}
+          COMMENT_AUTHOR_LOGIN: ${{ github.event.comment.user.login || '' }}
+          COMMENT_BODY: ${{ github.event.comment.body || '' }}
           TENANT_REGISTRY_DIR: tenant-registry
           TENANT_REGISTRY_REF: ${{ env.TENANT_REGISTRY_REF }}
           ISSUEOPS_GITHUB_TOKEN: ${{ secrets.ISSUEOPS_GITHUB_TOKEN }}
@@ -206,7 +213,7 @@ jobs:
           node src/scripts/run-approved-execution.js
 
       - name: Upload validation audit artifact
-        if: always()
+        if: ${{ always() && steps.request_scope.outputs.matches-request == 'true' }}
         uses: actions/upload-artifact@v7
         with:
           name: create-tenant-repos-execution-${{ steps.issue_context.outputs.issue_number || 'manual' }}-${{ github.run_attempt }}

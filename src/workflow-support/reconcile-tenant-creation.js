@@ -164,8 +164,8 @@ function reconcileTenantCreation(input = {}) {
     childLinksToApply.push({ child_team_slug: childSlug, parent_team_slug: tenantParentSlug });
   }
 
-  const requesterMembership = input.requesterMembership || null;
-  const requesterBootstrapAction = requesterMembership && requesterMembership.membership && requesterMembership.membership.role === 'maintainer'
+  const tenantAdminMembership = input.tenantAdminMembership || input.requesterMembership || null;
+  const tenantAdminBootstrapAction = tenantAdminMembership && tenantAdminMembership.membership && tenantAdminMembership.membership.role === 'maintainer'
     ? 'noop'
     : 'ensure_maintainer';
 
@@ -220,7 +220,8 @@ function reconcileTenantCreation(input = {}) {
     child_links_to_apply: childLinksToApply,
     child_links_already_present: childLinksAlreadyPresent,
     child_links_rejected: childLinksRejected,
-    requester_bootstrap_action: requesterBootstrapAction,
+    tenant_admin_bootstrap_action: tenantAdminBootstrapAction,
+    requester_bootstrap_action: tenantAdminBootstrapAction,
     registry_persistence_action: 'write',
     intake_mode: request.intake_mode || 'manual',
     canonical_topology_draft: canonicalTopologyDraft,

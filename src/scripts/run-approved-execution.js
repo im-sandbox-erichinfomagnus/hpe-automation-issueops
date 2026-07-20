@@ -27,11 +27,14 @@ const { persistTenantRegistryRecord } = require('../workflow-support/persist-ten
 const { commitRegistryRecord } = require('../workflow-support/commit-registry-record');
 const { reconcileTenantCreation } = require('../workflow-support/reconcile-tenant-creation');
 const { reconcileTenantRepoCreation } = require('../workflow-support/reconcile-tenant-repo-creation');
+const { reconcileTenantRepoCreationBatch } = require('../workflow-support/reconcile-tenant-repo-creation');
 const { persistOwnedRepositoryEntry } = require('../workflow-support/reconcile-tenant-repo-creation');
 const { reconcileHostedRunnerCreation } = require('../workflow-support/reconcile-hosted-runner-creation');
 const { reconcileHostedRunnerDeletion } = require('../workflow-support/reconcile-hosted-runner-deletion');
 const { reconcileHostedRunnerMove } = require('../workflow-support/reconcile-hosted-runner-move');
 const { reconcileRunnerGroupCreation } = require('../workflow-support/reconcile-runner-group-creation');
+const { reconcileTenantVariables } = require('../workflow-support/reconcile-tenant-variables');
+const { reconcileRepositoryRuleset } = require('../workflow-support/reconcile-repository-ruleset');
 const { reconcileTeamHierarchy } = require('../workflow-support/reconcile-team-hierarchy');
 const { reconcileTeamCreation } = require('../workflow-support/reconcile-team-creation');
 const { reconcileTeamMembers } = require('../workflow-support/reconcile-team-members');
@@ -44,6 +47,12 @@ const { validateHostedRunnerRequest } = require('../workflow-support/validate-ho
 const { validateHostedRunnerDeletionRequest } = require('../workflow-support/validate-hosted-runner-deletion-request');
 const { validateHostedRunnerMoveRequest } = require('../workflow-support/validate-hosted-runner-move-request');
 const { validateRunnerGroupRequest } = require('../workflow-support/validate-runner-group-request');
+const { validateTenantVariablesRequest } = require('../workflow-support/validate-tenant-variables-request');
+const { createGitHubOrgVariablesApi } = require('../workflow-support/github-org-variables-api');
+const { validateRepositoryRulesetRequest } = require('../workflow-support/validate-repository-ruleset-request');
+const { createGitHubRepoRulesetsApi } = require('../workflow-support/github-repo-rulesets-api');
+const { assertRunnerGroupCreationAllowed: assertTenantVariablesMutationAllowed } = require('../actions/runner-group-policy');
+const { assertRunnerGroupCreationAllowed: assertRepositoryRulesetMutationAllowed } = require('../actions/runner-group-policy');
 const { emitAuditSummary } = require('./emit-audit-summary');
 
 function terminalStateLabelPrefix(operation) {
@@ -58,6 +67,9 @@ function terminalStateLabelPrefix(operation) {
     hosted_runner_deletion: 'issueops:delete-tenant-hosted-runner:',
     hosted_runner_move: 'issueops:move-tenant-hosted-runner:',
     runner_group_creation: 'issueops:create-tenant-runner-groups:',
+    tenant_variable_management: 'issueops:manage-tenant-variables:',
+    repository_ruleset_creation: 'issueops:create-repository-ruleset:',
+    repository_ruleset_deletion: 'issueops:delete-repository-ruleset:',
   };
   return operationPrefixes[operation] || 'issueops:add-team-members:';
 }
@@ -504,6 +516,641 @@ function buildPreMutationFailureArtifact(options = {}) {
   return updatedArtifact;
 }
 
+async function executeTenantVariableManagement(context = {}) {
+  const auditArtifact = context.auditArtifact;
+  const artifactPath = context.artifactPath;
+  const env = context.env || process.env;
+  const mutationDecision = context.mutationDecision;
+  const options = context.options || {};
+  const operation = context.operation || 'tenant_variable_management';
+  const shouldSetExitCode = context.shouldSetExitCode === true;
+
+  const teamApi = options.teamApi || createGitHubTeamApi({ token: mutationDecision.tokenInfo.token });
+  const orgVariablesApi = options.orgVariablesApi || createGitHubOrgVariablesApi({ token: mutationDecision.tokenInfo.token });
+
+  // Re-validate against live state so a requester who lost tenant top-team
+  // maintainership (or a context change) fails closed before any mutation.
+  const revalidation = await validateTenantVariablesRequest(auditArtifact.request, {
+    getOrganization: ({ organization }) => teamApi.getOrganization({ organization }),
+    listTeams: ({ organization }) => teamApi.listOrgTeams({ organization }),
+    getMembershipForUser: ({ organization, teamSlug, username }) =>
+      teamApi.getMembershipForUser({ organization, teamSlug, username }),
+    getOrganizationMembership: ({ organization, username }) =>
+      teamApi.getOrganizationMembership({ organization, username }),
+    getOrganizationVariable: ({ organization, name }) =>
+      orgVariablesApi.getOrganizationVariable({ organization, name }),
+    registryRef: env.TENANT_REGISTRY_REF || 'main',
+    registryDirectory: env.TENANT_REGISTRY_DIR || 'tenant-registry',
+  });
+
+  auditArtifact.validation = {
+    ...auditArtifact.validation,
+    ...revalidation,
+  };
+
+  const boundaryStatus = revalidation.is_valid ? 'matched' : 'mismatched';
+  const planEntries = revalidation.plan && Array.isArray(revalidation.plan.entries)
+    ? revalidation.plan.entries
+    : [];
+
+  const reconcileOutcome = await reconcileTenantVariables({
+    api: orgVariablesApi,
+    organization: auditArtifact.request.organization,
+    variable_operation: auditArtifact.request.variable_operation,
+    entries: planEntries,
+    dry_run: false,
+    boundary_revalidation_status: boundaryStatus,
+  });
+
+  const executionResults = [];
+  for (const applied of reconcileOutcome.applied) {
+    executionResults.push({
+      requested_name: applied.name,
+      result_kind: 'organization_variable',
+      execution_result: applied.action === 'created'
+        ? 'created'
+        : applied.action === 'deleted'
+          ? 'deleted'
+          : 'mutated',
+      failure_reason: null,
+    });
+  }
+  for (const entry of reconcileOutcome.skipped) {
+    executionResults.push({
+      requested_name: entry.name,
+      result_kind: 'organization_variable',
+      execution_result: 'noop',
+      failure_reason: null,
+    });
+  }
+  for (const failure of reconcileOutcome.failed) {
+    executionResults.push({
+      requested_name: failure.name,
+      result_kind: 'organization_variable',
+      execution_result: 'failed',
+      failure_reason: failure.failure_reason || 'unknown_error',
+    });
+  }
+
+  const executionOutcome = buildExecutionOutcome({
+    executionResults,
+    operationLabel: 'variable',
+    runContext: {
+      run_id: env.GITHUB_RUN_ID,
+      run_attempt: env.GITHUB_RUN_ATTEMPT,
+    },
+    intake_mode: auditArtifact.request && auditArtifact.request.intake_mode,
+    approved_context_marker: auditArtifact.approval && auditArtifact.approval.approved_context_marker || null,
+    latest_context_marker: auditArtifact.approval && auditArtifact.approval.latest_context_marker || null,
+    execution_context_marker: auditArtifact.request && auditArtifact.request.context_marker || null,
+    audit_persistence_result: 'pending',
+    mutation_token_source: mutationDecision.tokenInfo && mutationDecision.tokenInfo.source || null,
+    mutation_token_kind: mutationDecision.tokenInfo && mutationDecision.tokenInfo.token_kind || null,
+    mutation_token_is_pat_backed: Boolean(mutationDecision.tokenInfo && mutationDecision.tokenInfo.is_pat_backed),
+    artifact_path: artifactPath,
+  });
+
+  const requestStatus = deriveApprovedExecutionTerminalState(executionOutcome, {
+    operation,
+    intakeMode: auditArtifact.request && auditArtifact.request.intake_mode,
+    approvalStatus: auditArtifact.approval && auditArtifact.approval.approval_status,
+  });
+  const isExecutedNoMutationOutcome =
+    requestStatus === 'executed' &&
+    executionOutcome.mutation_count === 0 &&
+    executionOutcome.pending_count === 0 &&
+    executionOutcome.failure_count === 0;
+  const summaryPrefix = isExecutedNoMutationOutcome
+    ? 'Request is already satisfied. Additional approval comments do not trigger a new tenant variable mutation run.'
+    : requestStatus === 'executed'
+      ? 'Approved tenant variable execution completed.'
+      : requestStatus === 'partially_executed'
+        ? 'Approved tenant variable execution completed with partial failure.'
+        : 'Approved tenant variable execution failed.';
+
+  auditArtifact.request.request_status = requestStatus;
+  auditArtifact.reconciliation = {
+    ...(auditArtifact.reconciliation || {}),
+    state: reconcileOutcome.status,
+    dry_run: false,
+    boundary_revalidation_status: boundaryStatus,
+    variable_operation: auditArtifact.request.variable_operation,
+    variable_entries_applied: reconcileOutcome.applied,
+    variable_entries_skipped: reconcileOutcome.skipped,
+    variable_entries_failed: reconcileOutcome.failed,
+  };
+  auditArtifact.execution = {
+    ...executionOutcome,
+    summary: `${summaryPrefix} ${executionOutcome.summary}`,
+  };
+
+  const updatedArtifact = buildAuditArtifact({
+    request: auditArtifact.request,
+    validation: auditArtifact.validation,
+    assignment: auditArtifact.assignment,
+    approval: auditArtifact.approval,
+    reconciliationPlan: auditArtifact.reconciliation,
+    executionOutcome: auditArtifact.execution,
+    runContext: {
+      run_id: env.GITHUB_RUN_ID || auditArtifact.metadata && auditArtifact.metadata.run_id,
+      run_attempt: env.GITHUB_RUN_ATTEMPT || auditArtifact.metadata && auditArtifact.metadata.run_attempt,
+      operation,
+      artifact_name: path.basename(artifactPath),
+      artifact_retention_days: env.AUDIT_ARTIFACT_RETENTION_DAYS || '',
+    },
+  });
+
+  let auditPersistenceResult = 'persisted';
+  try {
+    fs.writeFileSync(artifactPath, toAuditArtifactJson({
+      request: updatedArtifact.request,
+      validation: updatedArtifact.validation,
+      assignment: updatedArtifact.assignment,
+      approval: updatedArtifact.approval,
+      reconciliationPlan: updatedArtifact.reconciliation,
+      executionOutcome: updatedArtifact.execution,
+      runContext: updatedArtifact.metadata,
+    }), 'utf8');
+  } catch (error) {
+    auditPersistenceResult = 'failed';
+    updatedArtifact.execution.failure_count = (updatedArtifact.execution.failure_count || 0) + 1;
+    updatedArtifact.execution.rollback_status = 'manual_remediation_required';
+    updatedArtifact.request.request_status = updatedArtifact.request.request_status === 'executed'
+      ? 'partially_executed'
+      : 'failed';
+    updatedArtifact.execution.summary = `${updatedArtifact.execution.summary} Audit artifact persistence failed: ${error.message}.`;
+  }
+  updatedArtifact.execution.audit_persistence_result = auditPersistenceResult;
+
+  if (
+    updatedArtifact.request &&
+    updatedArtifact.request.issue_number != null &&
+    typeof teamApi.addIssueLabels === 'function'
+  ) {
+    const labelPrefix = terminalStateLabelPrefix(operation);
+    const targetLabel = `${labelPrefix}${updatedArtifact.request.request_status}`;
+    try {
+      if (typeof teamApi.listIssueLabels === 'function' && typeof teamApi.removeIssueLabel === 'function') {
+        const existingLabels = await teamApi.listIssueLabels({
+          repository: updatedArtifact.request.repository,
+          issueNumber: updatedArtifact.request.issue_number,
+        });
+        const managedTerminalLabels = new Set(buildTerminalStateLabels(buildTerminalLabelPrefixes(operation)));
+        const staleTerminalLabels = existingLabels
+          .filter((label) => managedTerminalLabels.has(label) && label !== targetLabel);
+        for (const staleLabel of staleTerminalLabels) {
+          await teamApi.removeIssueLabel({
+            repository: updatedArtifact.request.repository,
+            issueNumber: updatedArtifact.request.issue_number,
+            label: staleLabel,
+          });
+        }
+      }
+      await teamApi.addIssueLabels({
+        repository: updatedArtifact.request.repository,
+        issueNumber: updatedArtifact.request.issue_number,
+        labels: [targetLabel],
+      });
+    } catch (labelError) {
+      console.warn(`[warn] Failed to add terminal state label: ${labelError.message}`);
+    }
+  }
+
+  writeGitHubOutput('execution-status', updatedArtifact.request.request_status, env.GITHUB_OUTPUT);
+  writeGitHubOutput('audit-artifact-path', artifactPath, env.GITHUB_OUTPUT);
+  emitAuditSummary(updatedArtifact, { summaryPath: env.GITHUB_STEP_SUMMARY, overwrite: true });
+
+  if (shouldSetExitCode && updatedArtifact.request.request_status !== 'executed') {
+    process.exitCode = 1;
+  }
+
+  return updatedArtifact;
+}
+
+async function executeRepositoryRulesetManagement(context = {}) {
+  const auditArtifact = context.auditArtifact;
+  const artifactPath = context.artifactPath;
+  const env = context.env || process.env;
+  const mutationDecision = context.mutationDecision;
+  const options = context.options || {};
+  const operation = context.operation
+    || (auditArtifact.request && auditArtifact.request.ruleset_operation === 'delete'
+      ? 'repository_ruleset_deletion'
+      : 'repository_ruleset_creation');
+  const shouldSetExitCode = context.shouldSetExitCode === true;
+
+  const teamApi = options.teamApi || createGitHubTeamApi({ token: mutationDecision.tokenInfo.token });
+  const rulesetsApi = options.rulesetsApi || createGitHubRepoRulesetsApi({ token: mutationDecision.tokenInfo.token });
+
+  // Re-validate against live state so a requester who lost repository-admin
+  // credentials (or a row that became unauthorized) fails closed per row before
+  // any ruleset mutation.
+  const revalidation = await validateRepositoryRulesetRequest(auditArtifact.request, {
+    getOrganization: ({ organization }) => teamApi.getOrganization({ organization }),
+    getMembershipForUser: ({ organization, teamSlug, username }) =>
+      teamApi.getMembershipForUser({ organization, teamSlug, username }),
+    getOrganizationMembership: ({ organization, username }) =>
+      teamApi.getOrganizationMembership({ organization, username }),
+    getRepositoryCollaboratorPermission: ({ owner, repo, username }) =>
+      rulesetsApi.getRepositoryCollaboratorPermission({ owner, repo, username }),
+    getRepository: ({ owner, repo }) => rulesetsApi.getRepository({ owner, repo }),
+    listRepositoryRulesets: ({ owner, repo }) => rulesetsApi.listRepositoryRulesets({ owner, repo }),
+    registryRef: env.TENANT_REGISTRY_REF || 'main',
+    registryDirectory: env.TENANT_REGISTRY_DIR || 'tenant-registry',
+  });
+
+  auditArtifact.validation = {
+    ...auditArtifact.validation,
+    ...revalidation,
+  };
+
+  const boundaryStatus = revalidation.is_valid ? 'matched' : 'mismatched';
+  const plan = revalidation.plan || {};
+  const reconcileEntries = Array.isArray(plan.entries) ? plan.entries : [];
+
+  const reconcileOutcome = await reconcileRepositoryRuleset({
+    api: rulesetsApi,
+    organization: auditArtifact.request.organization,
+    ruleset_operation: auditArtifact.request.ruleset_operation,
+    entries: reconcileEntries,
+    dry_run: false,
+    boundary_revalidation_status: boundaryStatus,
+  });
+
+  const rowName = (row) => `${row.repository || ''}/${row.ruleset_name || ''}`;
+  const executionResults = [];
+  for (const applied of reconcileOutcome.applied) {
+    executionResults.push({
+      requested_name: rowName(applied),
+      result_kind: 'repository_ruleset',
+      execution_result: applied.action === 'created'
+        ? 'created'
+        : applied.action === 'deleted'
+          ? 'deleted'
+          : 'mutated',
+      failure_reason: null,
+    });
+  }
+  for (const entry of reconcileOutcome.skipped) {
+    executionResults.push({
+      requested_name: rowName(entry),
+      result_kind: 'repository_ruleset',
+      execution_result: 'noop',
+      failure_reason: null,
+    });
+  }
+  for (const failure of reconcileOutcome.failed) {
+    executionResults.push({
+      requested_name: rowName(failure),
+      result_kind: 'repository_ruleset',
+      execution_result: 'failed',
+      failure_reason: failure.failure_reason || 'unknown_error',
+    });
+  }
+
+  const executionOutcome = buildExecutionOutcome({
+    executionResults,
+    operationLabel: 'repository_ruleset',
+    runContext: {
+      run_id: env.GITHUB_RUN_ID,
+      run_attempt: env.GITHUB_RUN_ATTEMPT,
+    },
+    intake_mode: auditArtifact.request && auditArtifact.request.intake_mode,
+    approved_context_marker: auditArtifact.approval && auditArtifact.approval.approved_context_marker || null,
+    latest_context_marker: auditArtifact.approval && auditArtifact.approval.latest_context_marker || null,
+    execution_context_marker: auditArtifact.request && auditArtifact.request.context_marker || null,
+    audit_persistence_result: 'pending',
+    mutation_token_source: mutationDecision.tokenInfo && mutationDecision.tokenInfo.source || null,
+    mutation_token_kind: mutationDecision.tokenInfo && mutationDecision.tokenInfo.token_kind || null,
+    mutation_token_is_pat_backed: Boolean(mutationDecision.tokenInfo && mutationDecision.tokenInfo.is_pat_backed),
+    artifact_path: artifactPath,
+  });
+
+  const requestStatus = deriveApprovedExecutionTerminalState(executionOutcome, {
+    operation,
+    intakeMode: auditArtifact.request && auditArtifact.request.intake_mode,
+    approvalStatus: auditArtifact.approval && auditArtifact.approval.approval_status,
+  });
+  const isExecutedNoMutationOutcome =
+    requestStatus === 'executed' &&
+    executionOutcome.mutation_count === 0 &&
+    executionOutcome.pending_count === 0 &&
+    executionOutcome.failure_count === 0;
+  const summaryPrefix = isExecutedNoMutationOutcome
+    ? 'Request is already satisfied. Additional approval comments do not trigger a new repository ruleset mutation run.'
+    : requestStatus === 'executed'
+      ? 'Approved repository ruleset execution completed.'
+      : requestStatus === 'partially_executed'
+        ? 'Approved repository ruleset execution completed with partial failure.'
+        : 'Approved repository ruleset execution failed.';
+
+  auditArtifact.request.request_status = requestStatus;
+  auditArtifact.reconciliation = {
+    ...(auditArtifact.reconciliation || {}),
+    state: reconcileOutcome.status,
+    dry_run: false,
+    boundary_revalidation_status: boundaryStatus,
+    ruleset_operation: auditArtifact.request.ruleset_operation,
+    ruleset_entries_applied: reconcileOutcome.applied,
+    ruleset_entries_skipped: reconcileOutcome.skipped,
+    ruleset_entries_failed: reconcileOutcome.failed,
+  };
+  auditArtifact.execution = {
+    ...executionOutcome,
+    summary: `${summaryPrefix} ${executionOutcome.summary}`,
+  };
+
+  const updatedArtifact = buildAuditArtifact({
+    request: auditArtifact.request,
+    validation: auditArtifact.validation,
+    assignment: auditArtifact.assignment,
+    approval: auditArtifact.approval,
+    reconciliationPlan: auditArtifact.reconciliation,
+    executionOutcome: auditArtifact.execution,
+    runContext: {
+      run_id: env.GITHUB_RUN_ID || auditArtifact.metadata && auditArtifact.metadata.run_id,
+      run_attempt: env.GITHUB_RUN_ATTEMPT || auditArtifact.metadata && auditArtifact.metadata.run_attempt,
+      operation,
+      artifact_name: path.basename(artifactPath),
+      artifact_retention_days: env.AUDIT_ARTIFACT_RETENTION_DAYS || '',
+    },
+  });
+
+  let auditPersistenceResult = 'persisted';
+  try {
+    fs.writeFileSync(artifactPath, toAuditArtifactJson({
+      request: updatedArtifact.request,
+      validation: updatedArtifact.validation,
+      assignment: updatedArtifact.assignment,
+      approval: updatedArtifact.approval,
+      reconciliationPlan: updatedArtifact.reconciliation,
+      executionOutcome: updatedArtifact.execution,
+      runContext: updatedArtifact.metadata,
+    }), 'utf8');
+  } catch (error) {
+    auditPersistenceResult = 'failed';
+    updatedArtifact.execution.failure_count = (updatedArtifact.execution.failure_count || 0) + 1;
+    updatedArtifact.execution.rollback_status = 'manual_remediation_required';
+    updatedArtifact.request.request_status = updatedArtifact.request.request_status === 'executed'
+      ? 'partially_executed'
+      : 'failed';
+    updatedArtifact.execution.summary = `${updatedArtifact.execution.summary} Audit artifact persistence failed: ${error.message}.`;
+  }
+  updatedArtifact.execution.audit_persistence_result = auditPersistenceResult;
+
+  if (
+    updatedArtifact.request &&
+    updatedArtifact.request.issue_number != null &&
+    typeof teamApi.addIssueLabels === 'function'
+  ) {
+    const labelPrefix = terminalStateLabelPrefix(operation);
+    const targetLabel = `${labelPrefix}${updatedArtifact.request.request_status}`;
+    try {
+      if (typeof teamApi.listIssueLabels === 'function' && typeof teamApi.removeIssueLabel === 'function') {
+        const existingLabels = await teamApi.listIssueLabels({
+          repository: updatedArtifact.request.repository,
+          issueNumber: updatedArtifact.request.issue_number,
+        });
+        const managedTerminalLabels = new Set(buildTerminalStateLabels(buildTerminalLabelPrefixes(operation)));
+        const staleTerminalLabels = existingLabels
+          .filter((label) => managedTerminalLabels.has(label) && label !== targetLabel);
+        for (const staleLabel of staleTerminalLabels) {
+          await teamApi.removeIssueLabel({
+            repository: updatedArtifact.request.repository,
+            issueNumber: updatedArtifact.request.issue_number,
+            label: staleLabel,
+          });
+        }
+      }
+      await teamApi.addIssueLabels({
+        repository: updatedArtifact.request.repository,
+        issueNumber: updatedArtifact.request.issue_number,
+        labels: [targetLabel],
+      });
+    } catch (labelError) {
+      console.warn(`[warn] Failed to add terminal state label: ${labelError.message}`);
+    }
+  }
+
+  writeGitHubOutput('execution-status', updatedArtifact.request.request_status, env.GITHUB_OUTPUT);
+  writeGitHubOutput('audit-artifact-path', artifactPath, env.GITHUB_OUTPUT);
+  emitAuditSummary(updatedArtifact, { summaryPath: env.GITHUB_STEP_SUMMARY, overwrite: true });
+
+  if (shouldSetExitCode && updatedArtifact.request.request_status !== 'executed') {
+    process.exitCode = 1;
+  }
+
+  return updatedArtifact;
+}
+
+// Dedicated batch execution for create-tenant-repos when one issue carries more
+// than one repository. Mirrors executeRepositoryRulesetManagement: re-validate
+// against live state (per-row fail-closed), reconcile each row idempotently, then
+// persist the audit and terminal labels. Single-repository requests continue to
+// flow through the legacy generic execution path unchanged.
+async function executeTenantRepoCreationBatch(context = {}) {
+  const auditArtifact = context.auditArtifact;
+  const artifactPath = context.artifactPath;
+  const env = context.env || process.env;
+  const mutationDecision = context.mutationDecision;
+  const options = context.options || {};
+  const operation = context.operation || 'tenant_repo_creation';
+  const shouldSetExitCode = context.shouldSetExitCode === true;
+
+  const teamApi = options.teamApi || createGitHubTeamApi({ token: mutationDecision.tokenInfo.token });
+  const tenantRepoApi = options.createApi
+    ? options.createApi({ token: mutationDecision.tokenInfo.token, auditArtifact })
+    : (options.tenantRepoApi || createGitHubTeamRepoApi({ token: mutationDecision.tokenInfo.token }));
+
+  // Re-validate the whole batch against live state so a requester who lost the
+  // tenant authorization gate (or a row that became invalid) fails closed per row
+  // before any repository mutation.
+  const revalidation = await validateTenantRepoRequest(auditArtifact.request, {
+    getOrganization: ({ organization }) => teamApi.getOrganization({ organization }),
+    listTeams: ({ organization }) => teamApi.listOrgTeams({ organization }),
+    getMembershipForUser: ({ organization, teamSlug, username }) =>
+      teamApi.getMembershipForUser({ organization, teamSlug, username }),
+    getOrganizationMembership: ({ organization, username }) =>
+      teamApi.getOrganizationMembership({ organization, username }),
+    getRepository: ({ owner, repo }) => tenantRepoApi.getRepository({ owner, repo }),
+    getTeamRepositoryPermission: ({ organization, teamSlug, owner, repo }) =>
+      tenantRepoApi.getTeamRepositoryPermission({ organization, teamSlug, owner, repo }),
+    registryRef: env.TENANT_REGISTRY_REF || 'main',
+    registryDirectory: env.TENANT_REGISTRY_DIR || 'tenant-registry',
+  });
+
+  auditArtifact.validation = {
+    ...auditArtifact.validation,
+    ...revalidation,
+  };
+
+  const boundaryStatus = revalidation.is_valid ? 'matched' : 'mismatched';
+  const reconcileEntries = Array.isArray(revalidation.entries) ? revalidation.entries : [];
+
+  const reconcileOutcome = await reconcileTenantRepoCreationBatch({
+    api: tenantRepoApi,
+    organization: auditArtifact.request.organization,
+    tenantContext: revalidation.canonical_tenant_context || {},
+    requester_login: auditArtifact.request.requester_login,
+    entries: reconcileEntries,
+    dry_run: false,
+    boundary_revalidation_status: boundaryStatus,
+    registryDirectory: env.TENANT_REGISTRY_DIR || 'tenant-registry',
+  });
+
+  const executionResults = [];
+  for (const appliedRow of reconcileOutcome.applied) {
+    executionResults.push({
+      repository_full_name: `${auditArtifact.request.organization}/${appliedRow.repository}`,
+      result_kind: 'repository_creation',
+      execution_result: 'created',
+      failure_reason: null,
+    });
+  }
+  for (const skippedRow of reconcileOutcome.skipped) {
+    executionResults.push({
+      repository_full_name: `${auditArtifact.request.organization}/${skippedRow.repository}`,
+      result_kind: 'repository_creation',
+      execution_result: 'noop',
+      failure_reason: null,
+    });
+  }
+  for (const failure of reconcileOutcome.failed) {
+    executionResults.push({
+      repository_full_name: `${auditArtifact.request.organization}/${failure.repository}`,
+      result_kind: 'repository_creation',
+      execution_result: 'failed',
+      failure_reason: failure.failure_reason || 'unknown_error',
+    });
+  }
+
+  const executionOutcome = buildExecutionOutcome({
+    executionResults,
+    operationLabel: 'repository',
+    runContext: {
+      run_id: env.GITHUB_RUN_ID,
+      run_attempt: env.GITHUB_RUN_ATTEMPT,
+    },
+    intake_mode: auditArtifact.request && auditArtifact.request.intake_mode,
+    approved_context_marker: auditArtifact.approval && auditArtifact.approval.approved_context_marker || null,
+    latest_context_marker: auditArtifact.approval && auditArtifact.approval.latest_context_marker || null,
+    execution_context_marker: auditArtifact.request && auditArtifact.request.context_marker || null,
+    audit_persistence_result: 'pending',
+    mutation_token_source: mutationDecision.tokenInfo && mutationDecision.tokenInfo.source || null,
+    mutation_token_kind: mutationDecision.tokenInfo && mutationDecision.tokenInfo.token_kind || null,
+    mutation_token_is_pat_backed: Boolean(mutationDecision.tokenInfo && mutationDecision.tokenInfo.is_pat_backed),
+    artifact_path: artifactPath,
+  });
+
+  const requestStatus = deriveApprovedExecutionTerminalState(executionOutcome, {
+    operation,
+    intakeMode: auditArtifact.request && auditArtifact.request.intake_mode,
+    approvalStatus: auditArtifact.approval && auditArtifact.approval.approval_status,
+  });
+  const summaryPrefix = requestStatus === 'executed'
+    ? 'Approved tenant repository batch execution completed.'
+    : requestStatus === 'partially_executed'
+      ? 'Approved tenant repository batch execution completed with partial failure.'
+      : 'Approved tenant repository batch execution failed.';
+
+  auditArtifact.request.request_status = requestStatus;
+  auditArtifact.reconciliation = {
+    ...(auditArtifact.reconciliation || {}),
+    state: reconcileOutcome.status,
+    dry_run: false,
+    boundary_revalidation_status: boundaryStatus,
+    repository_entries_applied: reconcileOutcome.applied,
+    repository_entries_skipped: reconcileOutcome.skipped,
+    repository_entries_failed: reconcileOutcome.failed,
+  };
+  auditArtifact.execution = {
+    ...executionOutcome,
+    summary: `${summaryPrefix} ${executionOutcome.summary}`,
+  };
+
+  const updatedArtifact = buildAuditArtifact({
+    request: auditArtifact.request,
+    validation: auditArtifact.validation,
+    assignment: auditArtifact.assignment,
+    approval: auditArtifact.approval,
+    reconciliationPlan: auditArtifact.reconciliation,
+    executionOutcome: auditArtifact.execution,
+    runContext: {
+      run_id: env.GITHUB_RUN_ID || auditArtifact.metadata && auditArtifact.metadata.run_id,
+      run_attempt: env.GITHUB_RUN_ATTEMPT || auditArtifact.metadata && auditArtifact.metadata.run_attempt,
+      operation,
+      artifact_name: path.basename(artifactPath),
+      artifact_retention_days: env.AUDIT_ARTIFACT_RETENTION_DAYS || '',
+    },
+  });
+
+  let auditPersistenceResult = 'persisted';
+  try {
+    fs.writeFileSync(artifactPath, toAuditArtifactJson({
+      request: updatedArtifact.request,
+      validation: updatedArtifact.validation,
+      assignment: updatedArtifact.assignment,
+      approval: updatedArtifact.approval,
+      reconciliationPlan: updatedArtifact.reconciliation,
+      executionOutcome: updatedArtifact.execution,
+      runContext: updatedArtifact.metadata,
+    }), 'utf8');
+  } catch (error) {
+    auditPersistenceResult = 'failed';
+    updatedArtifact.execution.failure_count = (updatedArtifact.execution.failure_count || 0) + 1;
+    updatedArtifact.execution.rollback_status = 'manual_remediation_required';
+    updatedArtifact.request.request_status = updatedArtifact.request.request_status === 'executed'
+      ? 'partially_executed'
+      : 'failed';
+    updatedArtifact.execution.summary = `${updatedArtifact.execution.summary} Audit artifact persistence failed: ${error.message}.`;
+  }
+  updatedArtifact.execution.audit_persistence_result = auditPersistenceResult;
+
+  if (
+    updatedArtifact.request &&
+    updatedArtifact.request.issue_number != null &&
+    typeof teamApi.addIssueLabels === 'function'
+  ) {
+    const labelPrefix = terminalStateLabelPrefix(operation);
+    const targetLabel = `${labelPrefix}${updatedArtifact.request.request_status}`;
+    try {
+      if (typeof teamApi.listIssueLabels === 'function' && typeof teamApi.removeIssueLabel === 'function') {
+        const existingLabels = await teamApi.listIssueLabels({
+          repository: updatedArtifact.request.repository,
+          issueNumber: updatedArtifact.request.issue_number,
+        });
+        const managedTerminalLabels = new Set(buildTerminalStateLabels(buildTerminalLabelPrefixes(operation)));
+        const staleTerminalLabels = existingLabels
+          .filter((label) => managedTerminalLabels.has(label) && label !== targetLabel);
+        for (const staleLabel of staleTerminalLabels) {
+          await teamApi.removeIssueLabel({
+            repository: updatedArtifact.request.repository,
+            issueNumber: updatedArtifact.request.issue_number,
+            label: staleLabel,
+          });
+        }
+      }
+      await teamApi.addIssueLabels({
+        repository: updatedArtifact.request.repository,
+        issueNumber: updatedArtifact.request.issue_number,
+        labels: [targetLabel],
+      });
+    } catch (labelError) {
+      console.warn(`[warn] Failed to add terminal state label: ${labelError.message}`);
+    }
+  }
+
+  writeGitHubOutput('execution-status', updatedArtifact.request.request_status, env.GITHUB_OUTPUT);
+  writeGitHubOutput('audit-artifact-path', artifactPath, env.GITHUB_OUTPUT);
+  emitAuditSummary(updatedArtifact, { summaryPath: env.GITHUB_STEP_SUMMARY, overwrite: true });
+
+  if (shouldSetExitCode && updatedArtifact.request.request_status !== 'executed') {
+    process.exitCode = 1;
+  }
+
+  return updatedArtifact;
+}
+
 async function runApprovedExecution(options = {}) {
   const env = options.env || process.env;
   const shouldSetExitCode = options.setProcessExitCode === true;
@@ -522,6 +1169,10 @@ async function runApprovedExecution(options = {}) {
   const isHostedRunnerDeletion = auditArtifact.metadata && auditArtifact.metadata.operation === 'hosted_runner_deletion';
   const isHostedRunnerMove = auditArtifact.metadata && auditArtifact.metadata.operation === 'hosted_runner_move';
   const isRunnerGroupCreation = auditArtifact.metadata && auditArtifact.metadata.operation === 'runner_group_creation';
+  const isTenantVariableManagement = auditArtifact.metadata && auditArtifact.metadata.operation === 'tenant_variable_management';
+  const isRepositoryRulesetCreation = auditArtifact.metadata && auditArtifact.metadata.operation === 'repository_ruleset_creation';
+  const isRepositoryRulesetDeletion = auditArtifact.metadata && auditArtifact.metadata.operation === 'repository_ruleset_deletion';
+  const isRepositoryRulesetOperation = isRepositoryRulesetCreation || isRepositoryRulesetDeletion;
   const isTenantRunnerOperation = isHostedRunnerCreation || isHostedRunnerDeletion || isHostedRunnerMove || isRunnerGroupCreation;
   const operation = auditArtifact.metadata && auditArtifact.metadata.operation || 'team_membership';
 
@@ -622,6 +1273,26 @@ async function runApprovedExecution(options = {}) {
             dry_run: auditArtifact.request.dry_run,
             tokenInfo: options.tokenInfo,
           })
+      : isTenantVariableManagement
+        ? assertTenantVariablesMutationAllowed({
+            approval_status: auditArtifact.approval.approval_status,
+            approver_login: auditArtifact.approval.approver_login,
+            designated_approver_login: auditArtifact.request.designated_approver_login,
+            approver_role: auditArtifact.approval.approver_role,
+            approver_authorization_state: auditArtifact.approval.approver_authorization_state,
+            dry_run: auditArtifact.request.dry_run,
+            tokenInfo: options.tokenInfo,
+          })
+      : isRepositoryRulesetOperation
+        ? assertRepositoryRulesetMutationAllowed({
+            approval_status: auditArtifact.approval.approval_status,
+            approver_login: auditArtifact.approval.approver_login,
+            designated_approver_login: auditArtifact.request.designated_approver_login,
+            approver_role: auditArtifact.approval.approver_role,
+            approver_authorization_state: auditArtifact.approval.approver_authorization_state,
+            dry_run: auditArtifact.request.dry_run,
+            tokenInfo: options.tokenInfo,
+          })
       : assertMutationAllowed({
           approval_status: auditArtifact.approval.approval_status,
           approver_role: auditArtifact.approval.approver_role,
@@ -632,7 +1303,7 @@ async function runApprovedExecution(options = {}) {
     auditArtifact.request.request_status = 'failed';
     auditArtifact.execution = buildExecutionOutcome({
       executionResults: [],
-      operationLabel: isTeamCreation ? 'team' : isTeamHierarchy ? 'child link' : (isTeamRepoAccess || isTeamRepoAccessRemoval || isTenantRepoCreation) ? 'repository' : (isHostedRunnerCreation || isHostedRunnerDeletion || isHostedRunnerMove) ? 'hosted_runner' : isRunnerGroupCreation ? 'runner_group' : 'membership',
+      operationLabel: isTeamCreation ? 'team' : isTeamHierarchy ? 'child link' : (isTeamRepoAccess || isTeamRepoAccessRemoval || isTenantRepoCreation) ? 'repository' : (isHostedRunnerCreation || isHostedRunnerDeletion || isHostedRunnerMove) ? 'hosted_runner' : isRunnerGroupCreation ? 'runner_group' : isRepositoryRulesetOperation ? 'repository_ruleset' : 'membership',
       runContext: {
         run_id: env.GITHUB_RUN_ID,
         run_attempt: env.GITHUB_RUN_ATTEMPT,
@@ -648,7 +1319,7 @@ async function runApprovedExecution(options = {}) {
     });
     auditArtifact.execution.failure_count = 1;
     auditArtifact.execution.rollback_status = 'manual_follow_up_required';
-    auditArtifact.execution.summary = `${error.message}. No ${isTenantCreation ? 'tenant bootstrap mutation' : isTeamCreation ? 'team creation' : isTeamHierarchy ? 'child-team mutation' : isTenantRepoCreation ? 'tenant repository mutation' : isHostedRunnerCreation ? 'tenant hosted-runner mutation' : isHostedRunnerMove ? 'tenant hosted-runner move' : isHostedRunnerDeletion ? 'tenant hosted-runner deletion' : isRunnerGroupCreation ? 'tenant runner-group mutation' : (isTeamRepoAccess || isTeamRepoAccessRemoval) ? 'repository-access mutation' : 'membership mutation'} was attempted.`;
+    auditArtifact.execution.summary = `${error.message}. No ${isTenantCreation ? 'tenant bootstrap mutation' : isTeamCreation ? 'team creation' : isTeamHierarchy ? 'child-team mutation' : isTenantRepoCreation ? 'tenant repository mutation' : isHostedRunnerCreation ? 'tenant hosted-runner mutation' : isHostedRunnerMove ? 'tenant hosted-runner move' : isHostedRunnerDeletion ? 'tenant hosted-runner deletion' : isRunnerGroupCreation ? 'tenant runner-group mutation' : isTenantVariableManagement ? 'tenant variable mutation' : isRepositoryRulesetOperation ? 'repository ruleset mutation' : (isTeamRepoAccess || isTeamRepoAccessRemoval) ? 'repository-access mutation' : 'membership mutation'} was attempted.`;
     fs.writeFileSync(artifactPath, toAuditArtifactJson({
       request: auditArtifact.request,
       validation: auditArtifact.validation,
@@ -667,7 +1338,7 @@ async function runApprovedExecution(options = {}) {
   }
 
   if (!mutationDecision.allowed) {
-    auditArtifact.execution.summary = `Approved execution remains blocked because the request is dry-run only. No ${isTenantCreation ? 'tenant bootstrap mutation' : isTeamCreation ? 'team creation' : isTeamHierarchy ? 'child-team mutation' : isTenantRepoCreation ? 'tenant repository mutation' : isHostedRunnerCreation ? 'tenant hosted-runner mutation' : isHostedRunnerMove ? 'tenant hosted-runner move' : isHostedRunnerDeletion ? 'tenant hosted-runner deletion' : isRunnerGroupCreation ? 'tenant runner-group mutation' : (isTeamRepoAccess || isTeamRepoAccessRemoval) ? 'repository-access mutation' : 'membership mutation'} was attempted.`;
+    auditArtifact.execution.summary = `Approved execution remains blocked because the request is dry-run only. No ${isTenantCreation ? 'tenant bootstrap mutation' : isTeamCreation ? 'team creation' : isTeamHierarchy ? 'child-team mutation' : isTenantRepoCreation ? 'tenant repository mutation' : isHostedRunnerCreation ? 'tenant hosted-runner mutation' : isHostedRunnerMove ? 'tenant hosted-runner move' : isHostedRunnerDeletion ? 'tenant hosted-runner deletion' : isRunnerGroupCreation ? 'tenant runner-group mutation' : isTenantVariableManagement ? 'tenant variable mutation' : isRepositoryRulesetOperation ? 'repository ruleset mutation' : (isTeamRepoAccess || isTeamRepoAccessRemoval) ? 'repository-access mutation' : 'membership mutation'} was attempted.`;
     auditArtifact.execution.rollback_status = auditArtifact.execution.rollback_status || 'not_needed';
     writeGitHubOutput('execution-status', mutationDecision.reason, env.GITHUB_OUTPUT);
     emitAuditSummary(auditArtifact, { summaryPath: env.GITHUB_STEP_SUMMARY, overwrite: true });
@@ -709,6 +1380,49 @@ async function runApprovedExecution(options = {}) {
       }
       return auditArtifact;
     }
+  }
+
+  if (isTenantVariableManagement) {
+    return await executeTenantVariableManagement({
+      auditArtifact,
+      artifactPath,
+      env,
+      mutationDecision,
+      options,
+      operation,
+      shouldSetExitCode,
+    });
+  }
+
+  if (isRepositoryRulesetOperation) {
+    return await executeRepositoryRulesetManagement({
+      auditArtifact,
+      artifactPath,
+      env,
+      mutationDecision,
+      options,
+      operation,
+      shouldSetExitCode,
+    });
+  }
+
+  // A tenant-repo request that carries more than one repository row runs through
+  // the dedicated per-row batch executor. Single-repository requests fall through
+  // to the legacy generic execution path below to preserve its exact behavior.
+  if (
+    isTenantRepoCreation &&
+    Array.isArray(auditArtifact.request.repository_entries) &&
+    auditArtifact.request.repository_entries.length > 1
+  ) {
+    return await executeTenantRepoCreationBatch({
+      auditArtifact,
+      artifactPath,
+      env,
+      mutationDecision,
+      options,
+      operation,
+      shouldSetExitCode,
+    });
   }
 
   const api = options.createApi
@@ -889,18 +1603,18 @@ async function runApprovedExecution(options = {}) {
         organization: auditArtifact.request.organization,
       })
     : null;
-  let tenantRequesterMembership = null;
+  let tenantAdminMembership = null;
   if (
     isTenantCreation &&
     typeof api.getMembershipForUser === 'function' &&
     auditArtifact.request &&
     auditArtifact.request.tenant_team_slug &&
-    auditArtifact.request.requester_login
+    (auditArtifact.request.tenant_admin_login || auditArtifact.request.requester_login)
   ) {
-    tenantRequesterMembership = await api.getMembershipForUser({
+    tenantAdminMembership = await api.getMembershipForUser({
       organization: auditArtifact.request.organization,
       teamSlug: auditArtifact.request.tenant_team_slug,
-      username: auditArtifact.request.requester_login,
+      username: auditArtifact.request.tenant_admin_login || auditArtifact.request.requester_login,
     });
   }
   let latestRateLimitSnapshot = tenantValidationRateLimitSnapshot || auditArtifact.reconciliation && auditArtifact.reconciliation.rate_limit_snapshot || null;
@@ -939,7 +1653,8 @@ async function runApprovedExecution(options = {}) {
         request: auditArtifact.request,
         validatedTeams: buildValidatedTeams(auditArtifact),
         currentTeams,
-        requesterMembership: tenantRequesterMembership,
+        tenantAdminMembership,
+        requesterMembership: tenantAdminMembership,
         organization_exists: auditArtifact.validation.organization_visible,
         dry_run: auditArtifact.request.dry_run,
       })
@@ -2015,30 +2730,41 @@ async function runApprovedExecution(options = {}) {
               tokenInfo: mutationDecision.tokenInfo,
             });
 
-            const requesterMembership = typeof api.getMembershipForUser === 'function'
-              ? await api.getMembershipForUser({
-                  organization: auditArtifact.request.organization,
-                  teamSlug: parentTeam.slug,
-                  username: auditArtifact.request.requester_login,
-                })
-              : tenantRequesterMembership;
+            const tenantAdminLogin = auditArtifact.request.tenant_admin_login || auditArtifact.request.requester_login;
+            const tenantTeamSlugs = [...new Set((auditArtifact.request.requested_teams || [])
+              .map((team) => String(team && team.normalized_slug || '').toLowerCase())
+              .filter(Boolean))];
 
-            const requesterRole = requesterMembership && requesterMembership.membership
-              ? String(requesterMembership.membership.role || '').toLowerCase()
-              : '';
+            for (const teamSlug of tenantTeamSlugs) {
+              const currentMembership = typeof api.getMembershipForUser === 'function'
+                ? await api.getMembershipForUser({
+                    organization: auditArtifact.request.organization,
+                    teamSlug,
+                    username: tenantAdminLogin,
+                  })
+                : teamSlug === parentTeam.slug
+                  ? tenantAdminMembership
+                  : null;
 
-            if (requesterMembership && requesterMembership.state === 'active' && requesterRole === 'maintainer') {
-              executionResults.push({
-                username: auditArtifact.request.requester_login,
-                execution_result: 'noop',
-                failure_reason: null,
-              });
-            } else {
+              const currentRole = currentMembership && currentMembership.membership
+                ? String(currentMembership.membership.role || '').toLowerCase()
+                : '';
+
+              if (currentMembership && currentMembership.state === 'active' && currentRole === 'maintainer') {
+                executionResults.push({
+                  team_slug: teamSlug,
+                  username: tenantAdminLogin,
+                  execution_result: 'noop',
+                  failure_reason: null,
+                });
+                continue;
+              }
+
               const membershipResult = await executeWithBoundedRetry(
                 () => api.addOrUpdateTeamMembership({
                   organization: auditArtifact.request.organization,
-                  teamSlug: parentTeam.slug,
-                  username: auditArtifact.request.requester_login,
+                  teamSlug,
+                  username: tenantAdminLogin,
                   role: 'maintainer',
                 }),
                 {
@@ -2049,7 +2775,8 @@ async function runApprovedExecution(options = {}) {
 
               latestRateLimitSnapshot = membershipResult.retry_plan.rate_limit_snapshot || latestRateLimitSnapshot;
               executionResults.push({
-                username: auditArtifact.request.requester_login,
+                team_slug: teamSlug,
+                username: tenantAdminLogin,
                 execution_result: membershipResult.ok ? 'added' : 'failed',
                 failure_reason: membershipResult.ok ? null : classifyFailureReason(membershipResult.error),
               });

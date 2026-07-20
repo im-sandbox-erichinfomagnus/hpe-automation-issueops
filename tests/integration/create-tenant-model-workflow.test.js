@@ -195,17 +195,20 @@ test('runApprovedExecution for create-tenant-model completes full tenant bootstr
   assert.equal(result.reconciliation.requester_bootstrap_action, 'ensure_maintainer');
   assert.equal(result.reconciliation.registry_persistence_action, 'write');
   assert.equal(result.reconciliation.registry_persistence_result.status, 'created');
-  assert.equal(result.execution.mutation_count, 8);
+  assert.equal(result.execution.mutation_count, 11);
   assert.equal(result.execution.noop_count, 4);
   assert.equal(result.execution.pending_count, 0);
   assert.equal(result.execution.failure_count, 0);
   assert.equal(result.execution.rollback_status, 'not_needed');
   assert.equal(fs.existsSync(registryPath), true);
   assert.equal(state.teams.length, 4);
-  assert.equal(state.memberships.length, 1);
-  assert.equal(state.memberships[0].teamSlug, 'fabrikam-root');
-  assert.equal(state.memberships[0].username, 'himanshu-im');
-  assert.equal(state.memberships[0].role, 'maintainer');
+  assert.equal(state.memberships.length, 4);
+  assert.deepEqual(
+    state.memberships.map((membership) => membership.teamSlug).sort(),
+    ['fabrikam-admin', 'fabrikam-cicd-admin', 'fabrikam-repo-admin', 'fabrikam-root']
+  );
+  assert.equal(state.memberships.every((membership) => membership.username === 'himanshu-im'), true);
+  assert.equal(state.memberships.every((membership) => membership.role === 'maintainer'), true);
   assert.equal(repoAdminTeam.parent.slug, 'fabrikam-root');
   assert.equal(registryRecord.tenant_key, 'fabrikam');
   assert.equal(registryRecord.tenant_team_slug, 'fabrikam-root');
@@ -214,7 +217,7 @@ test('runApprovedExecution for create-tenant-model completes full tenant bootstr
   assert.equal(registryRecord.requester_login, 'himanshu-im');
   assert.equal(registryRecord.approver_login, 'himanshu-im');
   assert.match(result.execution.summary, /Approved tenant bootstrap execution completed\./i);
-  assert.match(result.execution.summary, /Processed 8 tenant_bootstrap\(ies\), 4 no-op tenant_bootstrap\(ies\)/i);
+  assert.match(result.execution.summary, /Processed 11 tenant_bootstrap\(ies\), 4 no-op tenant_bootstrap\(ies\)/i);
   assert.match(result.execution.summary, /authenticated creator a team maintainer/i);
 });
 
@@ -339,8 +342,8 @@ test('runApprovedExecution for create-tenant-model provisions canonical organiza
   );
   assert.equal(result.reconciliation.organization_roles_to_create.length, 4);
   assert.equal(result.reconciliation.organization_roles_failed.length, 0);
-  assert.equal(result.execution.mutation_count, 12);
-  assert.match(result.execution.summary, /Processed 12 tenant_bootstrap\(ies\)/i);
+  assert.equal(result.execution.mutation_count, 15);
+  assert.match(result.execution.summary, /Processed 15 tenant_bootstrap\(ies\)/i);
 });
 
 test('runApprovedExecution for create-tenant-model skips org-role provisioning when endpoint is unavailable', async () => {
@@ -453,9 +456,9 @@ test('runApprovedExecution for create-tenant-model skips org-role provisioning w
   assert.equal(result.reconciliation.organization_roles_skipped.length, 4);
   assert.ok(result.reconciliation.organization_roles_skipped.every((entry) => entry.skip_reason === 'organization_role_provisioning_skipped_http_404'));
   assert.equal(result.execution.failure_count, 0);
-  assert.equal(result.execution.mutation_count, 8);
+  assert.equal(result.execution.mutation_count, 11);
   assert.equal(result.execution.noop_count, 4);
-  assert.match(result.execution.summary, /processed 8 tenant_bootstrap\(ies\), 4 no-op tenant_bootstrap\(ies\)/i);
+  assert.match(result.execution.summary, /processed 11 tenant_bootstrap\(ies\), 4 no-op tenant_bootstrap\(ies\)/i);
 });
 
 test('runApprovedExecution for create-tenant-model skips org-role provisioning on generic role API failures', async () => {
@@ -565,9 +568,9 @@ test('runApprovedExecution for create-tenant-model skips org-role provisioning o
   assert.equal(result.reconciliation.organization_roles_skipped.length, 4);
   assert.ok(result.reconciliation.organization_roles_skipped.every((entry) => entry.skip_reason === 'organization_role_provisioning_skipped_http_403'));
   assert.equal(result.execution.failure_count, 0);
-  assert.equal(result.execution.mutation_count, 8);
+  assert.equal(result.execution.mutation_count, 11);
   assert.equal(result.execution.noop_count, 4);
-  assert.match(result.execution.summary, /processed 8 tenant_bootstrap\(ies\), 4 no-op tenant_bootstrap\(ies\)/i);
+  assert.match(result.execution.summary, /processed 11 tenant_bootstrap\(ies\), 4 no-op tenant_bootstrap\(ies\)/i);
 });
 
 test('runApprovedExecution for create-tenant-model falls back to custom repository role APIs', async () => {
@@ -693,8 +696,8 @@ test('runApprovedExecution for create-tenant-model falls back to custom reposito
   assert.equal(result.reconciliation.organization_roles_skipped.length, 0);
   assert.ok(result.reconciliation.organization_roles_to_create.every((entry) => entry.role_api_provider === 'custom_repository_role'));
   assert.equal(result.execution.failure_count, 0);
-  assert.equal(result.execution.mutation_count, 12);
-  assert.match(result.execution.summary, /Processed 12 tenant_bootstrap\(ies\)/i);
+  assert.equal(result.execution.mutation_count, 15);
+  assert.match(result.execution.summary, /Processed 15 tenant_bootstrap\(ies\)/i);
 });
 
 test('runApprovedExecution for create-tenant-model persists canonical topology-first record fields', async () => {
@@ -1036,19 +1039,19 @@ test('runApprovedExecution for create-tenant-model rerun stays idempotent for co
   assert.equal(rerun.reconciliation.registry_persistence_result.status, 'unchanged');
   assert.equal(rerun.reconciliation.registry_commit_result.status, 'noop');
   assert.equal(rerun.execution.mutation_count, 0);
-  assert.equal(rerun.execution.noop_count, 12);
+  assert.equal(rerun.execution.noop_count, 15);
   assert.equal(rerun.execution.failure_count, 0);
   assert.equal(rerun.execution.rollback_status, 'not_needed');
   assert.equal(state.teams.length, 4);
   assert.equal(state.teams.filter((team) => team.slug === 'contoso-cicd-admin').length, 1);
-  assert.equal(state.memberships.length, 1);
+  assert.equal(state.memberships.length, 4);
   assert.equal(fs.readFileSync(registryPath, 'utf8'), registryAfterFirstRun);
   assert.match(rerun.execution.summary, /Request is already satisfied\./i);
   assert.match(rerun.execution.summary, /Additional approval comments do not trigger a new tenant bootstrap mutation run\./i);
-  assert.match(rerun.execution.summary, /Processed 0 tenant_bootstrap\(ies\), 12 no-op tenant_bootstrap\(ies\)/i);
+  assert.match(rerun.execution.summary, /Processed 0 tenant_bootstrap\(ies\), 15 no-op tenant_bootstrap\(ies\)/i);
 });
 
-test('runApprovedExecution for create-tenant-model promotes requester from member to maintainer', async () => {
+test('runApprovedExecution for create-tenant-model assigns tenant admin as maintainer on every tenant team', async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'create-tenant-model-promote-'));
   const artifactPath = path.join(workspace, 'audit.json');
   const registryDirectory = path.join(workspace, 'tenant-registry');
@@ -1169,12 +1172,12 @@ test('runApprovedExecution for create-tenant-model promotes requester from membe
   assert.equal(result.reconciliation.teams_already_present.length, 4);
   assert.equal(result.reconciliation.child_links_already_present.length, 3);
   assert.equal(result.reconciliation.requester_bootstrap_action, 'ensure_maintainer');
-  assert.equal(result.execution.mutation_count, 1);
+  assert.equal(result.execution.mutation_count, 4);
   assert.equal(result.execution.noop_count, 11);
   assert.equal(result.execution.failure_count, 0);
-  assert.equal(state.memberships.length, 1);
-  assert.equal(state.memberships[0].role, 'maintainer');
-  assert.match(result.execution.summary, /Processed 1 tenant_bootstrap\(ies\), 11 no-op tenant_bootstrap\(ies\)/i);
+  assert.equal(state.memberships.length, 4);
+  assert.equal(state.memberships.every((membership) => membership.role === 'maintainer'), true);
+  assert.match(result.execution.summary, /Processed 4 tenant_bootstrap\(ies\), 11 no-op tenant_bootstrap\(ies\)/i);
 });
 
 test('runApprovedExecution for create-tenant-model reports partial execution when durable registry persistence fails', async () => {
@@ -1272,7 +1275,7 @@ test('runApprovedExecution for create-tenant-model reports partial execution whe
 
   assert.equal(result.request.request_status, 'partially_executed');
   assert.equal(result.reconciliation.registry_persistence_result.status, 'blocked_missing_directory');
-  assert.equal(result.execution.mutation_count, 8);
+  assert.equal(result.execution.mutation_count, 11);
   assert.equal(result.execution.failure_count, 1);
   assert.equal(result.execution.rollback_status, 'compensating_action_required');
   assert.equal(fs.existsSync(missingRegistryDirectory), false);
@@ -1711,7 +1714,7 @@ test('runApprovedExecution for create-tenant-model migrates legacy registry reco
       getOrganizationMembership: async ({ username }) => ({
         exists: true,
         membership: {
-          role: username === 'legacy-approver' ? 'admin' : 'member',
+          role: 'admin',
           state: 'active',
         },
       }),
@@ -1740,7 +1743,7 @@ test('runApprovedExecution for create-tenant-model migrates legacy registry reco
       getOrganizationMembership: async ({ username }) => ({
         exists: true,
         membership: {
-          role: username === 'legacy-approver' ? 'admin' : 'member',
+          role: 'admin',
           state: 'active',
         },
       }),
@@ -1802,7 +1805,7 @@ test('runApprovedExecution for create-tenant-model migrates legacy registry reco
   assert.equal(secondRun.execution.mutation_count, 0);
   assert.equal(secondRun.execution.noop_count >= 3, true);
   assert.equal(state.teams.length, 4);
-  assert.equal(state.memberships.length, 1);
+  assert.equal(state.memberships.length, 4);
 });
 
 test('runApprovedExecution for create-tenant-model applies CICD capability via primary path when available', async () => {
@@ -1857,7 +1860,7 @@ test('runApprovedExecution for create-tenant-model applies CICD capability via p
       getOrganizationMembership: async ({ username }) => ({
         exists: true,
         membership: {
-          role: username === 'capability-approver' ? 'admin' : 'member',
+          role: 'admin',
           state: 'active',
         },
       }),
@@ -1886,7 +1889,7 @@ test('runApprovedExecution for create-tenant-model applies CICD capability via p
       getOrganizationMembership: async ({ username }) => ({
         exists: true,
         membership: {
-          role: username === 'capability-approver' ? 'admin' : 'member',
+          role: 'admin',
           state: 'active',
         },
       }),
@@ -1977,7 +1980,7 @@ test('runApprovedExecution for create-tenant-model reports unavailable CICD capa
       getOrganizationMembership: async ({ username }) => ({
         exists: true,
         membership: {
-          role: username === 'capability-approver' ? 'admin' : 'member',
+          role: 'admin',
           state: 'active',
         },
       }),
@@ -2006,7 +2009,7 @@ test('runApprovedExecution for create-tenant-model reports unavailable CICD capa
       getOrganizationMembership: async ({ username }) => ({
         exists: true,
         membership: {
-          role: username === 'capability-approver' ? 'admin' : 'member',
+          role: 'admin',
           state: 'active',
         },
       }),
@@ -2099,7 +2102,7 @@ test('T031: runApprovedExecution preserves dry-run semantics without CICD capabi
       getOrganizationMembership: async ({ username }) => ({
         exists: true,
         membership: {
-          role: username === 'dry-run-approver' ? 'admin' : 'member',
+          role: 'admin',
           state: 'active',
         },
       }),
@@ -2128,7 +2131,7 @@ test('T031: runApprovedExecution preserves dry-run semantics without CICD capabi
       getOrganizationMembership: async ({ username }) => ({
         exists: true,
         membership: {
-          role: username === 'dry-run-approver' ? 'admin' : 'member',
+          role: 'admin',
           state: 'active',
         },
       }),
@@ -2218,7 +2221,7 @@ test('T031: runApprovedExecution for create-tenant-model skips CICD capability o
       getOrganizationMembership: async ({ username }) => ({
         exists: true,
         membership: {
-          role: username === 'partial-failure-approver' ? 'admin' : 'member',
+          role: 'admin',
           state: 'active',
         },
       }),
@@ -2247,7 +2250,7 @@ test('T031: runApprovedExecution for create-tenant-model skips CICD capability o
       getOrganizationMembership: async ({ username }) => ({
         exists: true,
         membership: {
-          role: username === 'partial-failure-approver' ? 'admin' : 'member',
+          role: 'admin',
           state: 'active',
         },
       }),
@@ -2284,7 +2287,7 @@ test('T031: runApprovedExecution for create-tenant-model skips CICD capability o
   });
 
   // Should continue with team creation even if CICD capability unavailable
-  assert.equal(result.execution.mutation_count, 8);
+  assert.equal(result.execution.mutation_count, 11);
   assert.equal(result.execution.noop_count, 4);
   assert.equal(result.execution.cicd_capability_status, 'unavailable');
 });

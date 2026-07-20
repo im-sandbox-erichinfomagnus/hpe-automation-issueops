@@ -21,7 +21,29 @@ body:
       description: Human-readable tenant name used to derive deterministic team names.
       placeholder: Acme
     validations:
-      required: true
+      required: false
+
+  - type: textarea
+    id: tenant_csv
+    attributes:
+      label: Tenant CSV (spreadsheet input)
+      description: >-
+        Preferred input. Paste exactly one tenant row using the columns shown below.
+        The header is optional. When supplied, this row overrides the individual tenant fields.
+      placeholder: |
+        tenant_name,tenant_admin_login,tenant_type,cmdb_id,cost_center,business_unit,environment,primary_contact,secondary_contact,code_scanning_enabled,secret_scanning_enabled,dependabot_enabled
+        DemoCorp,user1,platform,CMDB-1001,CC-1001,Compute,nonprod,owner@example.com,backup@example.com,true,true,true
+    validations:
+      required: false
+
+  - type: input
+    id: tenant_admin_login
+    attributes:
+      label: Tenant admin GitHub login (single-item fallback)
+      description: Active organization member who becomes maintainer of the tenant root, admin, RepoAdmin, and CICDAdmin teams. Used when Tenant CSV is empty.
+      placeholder: user1
+    validations:
+      required: false
 
   - type: dropdown
     id: tenant_type
@@ -75,7 +97,7 @@ body:
       label: CMDB ID
       placeholder: CMDB-0001
     validations:
-      required: true
+      required: false
 
   - type: input
     id: cost_center
@@ -83,7 +105,7 @@ body:
       label: Cost center
       placeholder: CC-0001
     validations:
-      required: true
+      required: false
 
   - type: input
     id: business_unit
@@ -91,7 +113,7 @@ body:
       label: Business unit
       placeholder: platform
     validations:
-      required: true
+      required: false
 
   - type: dropdown
     id: environment
@@ -102,7 +124,7 @@ body:
         - prod
       default: 0
     validations:
-      required: true
+      required: false
 
   - type: input
     id: primary_contact
@@ -111,7 +133,7 @@ body:
       description: Required email contact for tenant ownership.
       placeholder: owner@example.com
     validations:
-      required: true
+      required: false
 
   - type: input
     id: secondary_contact
