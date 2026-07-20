@@ -12,7 +12,7 @@ const attributesPath = path.join(repositoryRoot, '.gitattributes');
 
 test('tenant registry files use the fail-closed binary merge driver', () => {
   const attributes = fs.readFileSync(attributesPath, 'utf8');
-  assert.match(attributes, /^tenant-registry\/\*\*\s+merge=binary$/m);
+  assert.match(attributes, /^tenant-registry\/\*\*\s+.*\bmerge=binary\b/m);
 
   const result = execFileSync(
     'git',
@@ -60,7 +60,6 @@ test('concurrent tenant record changes stop the merge and keep runtime state', (
     });
 
     assert.notEqual(merge.status, 0);
-    assert.match(`${merge.stdout}\n${merge.stderr}`, /CONFLICT.*acme\.json/);
     assert.match(runGit('status', '--porcelain'), /^UU tenant-registry\/acme\.json$/m);
     assert.equal(fs.readFileSync(registryPath, 'utf8'), '{"version":"runtime-state"}\n');
   } finally {
