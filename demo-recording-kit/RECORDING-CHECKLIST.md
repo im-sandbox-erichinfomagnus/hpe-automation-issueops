@@ -1,92 +1,92 @@
 # Seven-Video Recording Checklist
 
-Record against `im-sandbox-erichinfomagnus/tenant-issueops-demo` while signed in as `adamg-infomagnus`. Scenario 2 must run before scenarios 3 through 7. For IssueOps requests, wait for the validation comment to say approval-ready before commenting exactly `approved`.
+Record against [im-sandbox-erichinfomagnus/tenant-issueops-demo](https://github.com/im-sandbox-erichinfomagnus/tenant-issueops-demo) while signed in as `adamg-infomagnus`. Keep the [issue forms](https://github.com/im-sandbox-erichinfomagnus/tenant-issueops-demo/issues/new/choose) and [Actions runs](https://github.com/im-sandbox-erichinfomagnus/tenant-issueops-demo/actions) open. Scenario 2 must run before scenarios 3 through 7. For IssueOps requests, wait for the validation comment to say approval-ready before commenting exactly `approved`.
 
 ## Video 1: Organization Owner Operations
 
-Detailed guide: `scenario-01-org-owner-ops.md`
+Detailed guide: [scenario-01-org-owner-ops.md](scenario-01-org-owner-ops.md)
 
-1. Create the three `recording-owner-*` teams. Submit the Create organization teams form, attach `csv/scenario-01a-create-teams.csv` in a new issue comment, approve, and show all three live team pages.
-2. Add the two members. Submit Add team members, attach `csv/scenario-01b-add-members.csv`, approve, and show the Developers members page.
-3. Build the hierarchy. Submit Add child teams, attach `csv/scenario-01c-add-child-teams.csv`, approve, and show both children under the root team.
-4. Grant repository access. Submit Add team repository access, attach `csv/scenario-01d-team-repo-access.csv`, approve, and show write access to `tenant-issueops-demo`.
-5. Record rejection. Submit a second create-teams request with `csv/scenario-01-rejected-approval.csv`, designate `aeruvakalpanaa`, and show Adam's `approved` comment being rejected.
+1. Create the three `recording-owner-*` teams. Open [Create organization teams](https://github.com/im-sandbox-erichinfomagnus/tenant-issueops-demo/issues/new?template=create-org-teams.yml), attach [scenario-01a-create-teams.csv](csv/scenario-01a-create-teams.csv) in a new issue comment, approve, and show the [root](https://github.com/orgs/im-sandbox-erichinfomagnus/teams/recording-owner-root), [Developers](https://github.com/orgs/im-sandbox-erichinfomagnus/teams/recording-owner-developers), and [Release](https://github.com/orgs/im-sandbox-erichinfomagnus/teams/recording-owner-release) teams.
+2. Add the two members. Open [Add team members](https://github.com/im-sandbox-erichinfomagnus/tenant-issueops-demo/issues/new?template=add-team-members.yml), attach [scenario-01b-add-members.csv](csv/scenario-01b-add-members.csv), approve, and show the [Developers members page](https://github.com/orgs/im-sandbox-erichinfomagnus/teams/recording-owner-developers/members).
+3. Build the hierarchy. Open [Add child teams](https://github.com/im-sandbox-erichinfomagnus/tenant-issueops-demo/issues/new?template=add-child-teams.yml), attach [scenario-01c-add-child-teams.csv](csv/scenario-01c-add-child-teams.csv), approve, and show both children under the [root team](https://github.com/orgs/im-sandbox-erichinfomagnus/teams/recording-owner-root/teams).
+4. Grant repository access. Open [Add team repository access](https://github.com/im-sandbox-erichinfomagnus/tenant-issueops-demo/issues/new?template=add-team-repo-access.yml), attach [scenario-01d-team-repo-access.csv](csv/scenario-01d-team-repo-access.csv), approve, and show write access under the [Developers repositories tab](https://github.com/orgs/im-sandbox-erichinfomagnus/teams/recording-owner-developers/repositories).
+5. Record rejection. Submit a second [Create organization teams](https://github.com/im-sandbox-erichinfomagnus/tenant-issueops-demo/issues/new?template=create-org-teams.yml) request with [scenario-01-rejected-approval.csv](csv/scenario-01-rejected-approval.csv), designate `aeruvakalpanaa`, and show Adam's `approved` comment being rejected.
 
 Say: "This is the organization-owner path. The spreadsheet is attached by the requester, validated before approval, and each change is visible in GitHub. Approval from anyone except the designated owner fails closed."
 
 ## Video 2: Create Tenant
 
-Detailed guide: `scenario-02-create-tenant.md`
+Detailed guide: [scenario-02-create-tenant.md](scenario-02-create-tenant.md)
 
-1. Open Create tenant model and paste `csv/scenario-02-create-tenant.csv` into Tenant CSV.
+1. Open [Create tenant model](https://github.com/im-sandbox-erichinfomagnus/tenant-issueops-demo/issues/new?template=create-tenant-model.yml) and paste [scenario-02-create-tenant.csv](csv/scenario-02-create-tenant.csv) into Tenant CSV.
 2. Use Adam as designated approver, select live mode, submit, wait for approval-ready, and approve.
-3. Show `ericdemo-root`, `ericdemo-admin`, `ericdemo-repo-admin`, and `ericdemo-cicd-admin` with Adam as maintainer.
-4. Show `tenant-registry/ericdemo.json` in the demo repository.
-5. Record rejection with `csv/scenario-02-reject-nonmember-admin.csv` in dry-run mode. Stop after validation rejects the nonexistent tenant admin.
+3. Show [ericdemo-root](https://github.com/orgs/im-sandbox-erichinfomagnus/teams/ericdemo-root), [ericdemo-admin](https://github.com/orgs/im-sandbox-erichinfomagnus/teams/ericdemo-admin), [ericdemo-repo-admin](https://github.com/orgs/im-sandbox-erichinfomagnus/teams/ericdemo-repo-admin), and [ericdemo-cicd-admin](https://github.com/orgs/im-sandbox-erichinfomagnus/teams/ericdemo-cicd-admin) with Adam as maintainer.
+4. Show [tenant-registry/ericdemo.json](https://github.com/im-sandbox-erichinfomagnus/tenant-issueops-demo/blob/main/tenant-registry/ericdemo.json) in the demo repository.
+5. Record rejection with [scenario-02-reject-nonmember-admin.csv](csv/scenario-02-reject-nonmember-admin.csv) in dry-run mode. Stop after validation rejects the nonexistent tenant admin.
 
 Say: "One tenant row creates the canonical four-team topology, assigns the requested tenant admin as maintainer, and writes the tenant registry. A tenant admin who is not an active organization member is rejected before approval."
 
 ## Video 3: Native Team Membership
 
-Detailed guide: `scenario-03-native-team-membership.md`
+Detailed guide: [scenario-03-native-team-membership.md](scenario-03-native-team-membership.md)
 
-1. Open the `ericdemo-repo-admin` members page and show Adam as maintainer.
+1. Open the [ericdemo-repo-admin members page](https://github.com/orgs/im-sandbox-erichinfomagnus/teams/ericdemo-repo-admin/members) and show Adam as maintainer.
 2. Use GitHub's Add a member control to add `KalpanaReddyC`.
 3. Refresh and show the active member.
-4. Open `ericdemo-cicd-admin` and show Adam can manage that child team too.
+4. Open the [ericdemo-cicd-admin members page](https://github.com/orgs/im-sandbox-erichinfomagnus/teams/ericdemo-cicd-admin/members) and show Adam can manage that child team too.
 5. For the rejection, sign in as `KalpanaReddyC` and show that a non-maintainer does not receive team membership administration controls. Keep `aeruvakalpanaa` outside every EricDemo team.
 
 Say: "Team membership remains native GitHub administration. The tenant bootstrap grants maintainer authority, and GitHub itself blocks non-maintainers."
 
 ## Video 4: Create Tenant Repositories
 
-Detailed guide: `scenario-04-create-tenant-repos.md`
+Detailed guide: [scenario-04-create-tenant-repos.md](scenario-04-create-tenant-repos.md)
 
-1. Open Create tenant repositories, select `bulk_csv`, and paste `csv/scenario-04-create-repositories.csv`.
+1. Open [Create tenant repositories](https://github.com/im-sandbox-erichinfomagnus/tenant-issueops-demo/issues/new?template=create-tenant-repos.yml), select `bulk_csv`, and paste [scenario-04-create-repositories.csv](csv/scenario-04-create-repositories.csv).
 2. Submit live, wait for approval-ready, and approve.
-3. Show all three per-row results and open `ericdemo-api`, `ericdemo-web`, and `ericdemo-infra`.
-4. Show `ericdemo-repo-admin` with Admin access and the three owned repositories in `tenant-registry/ericdemo.json`.
+3. Show all three per-row results and open [ericdemo-api](https://github.com/im-sandbox-erichinfomagnus/ericdemo-api), [ericdemo-web](https://github.com/im-sandbox-erichinfomagnus/ericdemo-web), and [ericdemo-infra](https://github.com/im-sandbox-erichinfomagnus/ericdemo-infra).
+4. Show [ericdemo-repo-admin repository access](https://github.com/orgs/im-sandbox-erichinfomagnus/teams/ericdemo-repo-admin/repositories) and the three owned repositories in [tenant-registry/ericdemo.json](https://github.com/im-sandbox-erichinfomagnus/tenant-issueops-demo/blob/main/tenant-registry/ericdemo.json).
 5. Record the requester authorization rejection from `aeruvakalpanaa`. If that login is unavailable, use the nonexistent-tenant fallback identified in the detailed guide and say that it is the fallback.
 
 Say: "The RepoAdmin path creates a spreadsheet batch independently, grants the tenant RepoAdmin team Admin access, and records ownership. A requester outside the tenant boundary cannot create repositories."
 
 ## Video 5: Repository Rulesets
 
-Detailed guide: `scenario-05-repository-rulesets.md`
+Detailed guide: [scenario-05-repository-rulesets.md](scenario-05-repository-rulesets.md)
 
-1. Paste `csv/scenario-05-create-rulesets.csv` into Create repository ruleset, submit live, approve, and show both rulesets in repository settings.
-2. Paste `csv/scenario-05-delete-rulesets.csv` into Delete repository ruleset, submit live, approve, and show both rulesets removed.
+1. Paste [scenario-05-create-rulesets.csv](csv/scenario-05-create-rulesets.csv) into [Create repository ruleset](https://github.com/im-sandbox-erichinfomagnus/tenant-issueops-demo/issues/new?template=create-repository-ruleset.yml), submit live, approve, and show the rulesets under [ericdemo-api settings](https://github.com/im-sandbox-erichinfomagnus/ericdemo-api/settings/rules) and [ericdemo-web settings](https://github.com/im-sandbox-erichinfomagnus/ericdemo-web/settings/rules).
+2. Paste [scenario-05-delete-rulesets.csv](csv/scenario-05-delete-rulesets.csv) into [Delete repository ruleset](https://github.com/im-sandbox-erichinfomagnus/tenant-issueops-demo/issues/new?template=delete-repository-ruleset.yml), submit live, approve, and show both rulesets removed.
 3. Replay the delete request and show no-op convergence.
 4. Temporarily grant `aeruvakalpanaa` direct Admin access to `ericdemo-api` only. Do not add the account to an EricDemo team.
-5. From `aeruvakalpanaa`, submit `csv/scenario-05-mixed-authorization.csv` in dry-run mode. Have Adam approve and show the API row authorized while the Web row is rejected as unauthorized.
-6. Remove the temporary API repository access after recording. Use `csv/scenario-05-mixed-result.csv` only as the clearly identified missing-repository fallback.
+5. From `aeruvakalpanaa`, submit [scenario-05-mixed-authorization.csv](csv/scenario-05-mixed-authorization.csv) in dry-run mode. Have Adam approve and show the API row authorized while the Web row is rejected as unauthorized.
+6. Remove the temporary API repository access after recording. Use [scenario-05-mixed-result.csv](csv/scenario-05-mixed-result.csv) only as the clearly identified missing-repository fallback.
 
 Say: "Ruleset authorization and results are evaluated per repository row. One rejected row does not erase the valid row, and repeated deletes converge as no-ops."
 
 ## Video 6: Tenant Variables
 
-Detailed guide: `scenario-06-tenant-variables.md`
+Detailed guide: [scenario-06-tenant-variables.md](scenario-06-tenant-variables.md)
 
-1. Create variables from `csv/scenario-06-create-variables.csv` and show `ERICDEMO_API_BASE_URL` and `ERICDEMO_DEPLOY_ENV`.
-2. Update them from `csv/scenario-06-update-variables.csv` and show the changed values.
-3. From `aeruvakalpanaa`, submit a dry-run create request with `csv/scenario-06-create-variables.csv` and show the requester authorization failure.
-4. From Adam, submit the dry-run rejection with `csv/scenario-06-reject-cross-tenant.csv` and show the DemoCorp namespace guardrail.
-5. Delete the variables from `csv/scenario-06-delete-variables.csv` and show both absent.
+1. Open [Manage tenant variables](https://github.com/im-sandbox-erichinfomagnus/tenant-issueops-demo/issues/new?template=manage-tenant-variables.yml), create variables from [scenario-06-create-variables.csv](csv/scenario-06-create-variables.csv), and show `ERICDEMO_API_BASE_URL` and `ERICDEMO_DEPLOY_ENV` under [organization variables](https://github.com/organizations/im-sandbox-erichinfomagnus/settings/variables/actions).
+2. Update them from [scenario-06-update-variables.csv](csv/scenario-06-update-variables.csv) and show the changed values.
+3. From `aeruvakalpanaa`, submit a dry-run create request with [scenario-06-create-variables.csv](csv/scenario-06-create-variables.csv) and show the requester authorization failure.
+4. From Adam, submit the dry-run rejection with [scenario-06-reject-cross-tenant.csv](csv/scenario-06-reject-cross-tenant.csv) and show the DemoCorp namespace guardrail.
+5. Delete the variables from [scenario-06-delete-variables.csv](csv/scenario-06-delete-variables.csv) and show both absent.
 6. Replay delete and show no-op convergence.
 
 Say: "Variable names are forced into the tenant namespace. Create, update, and delete are spreadsheet-driven, and an EricDemo request cannot target the existing DemoCorp namespace."
 
 ## Video 7: Tenant Runner Lifecycle
 
-Detailed guide: `scenario-07-tenant-runners.md`
+Detailed guide: [scenario-07-tenant-runners.md](scenario-07-tenant-runners.md)
 
-1. Create `EricDemo_Builders` from `csv/scenario-07a-create-builders-group.csv`.
-2. Create `EricDemo_Release` from `csv/scenario-07b-create-release-group.csv`.
-3. Create `EricDemo_linux-build` from `csv/scenario-07c-create-runner.csv` and show it in Builders. The CSV uses live Ubuntu 24.04 image ID `2295` and size `4-core`.
+1. Open [Create tenant runner groups](https://github.com/im-sandbox-erichinfomagnus/tenant-issueops-demo/issues/new?template=create-tenant-runner-groups.yml) and create `EricDemo_Builders` from [scenario-07a-create-builders-group.csv](csv/scenario-07a-create-builders-group.csv).
+2. Create `EricDemo_Release` from [scenario-07b-create-release-group.csv](csv/scenario-07b-create-release-group.csv).
+3. Open [Create tenant GitHub-hosted runner](https://github.com/im-sandbox-erichinfomagnus/tenant-issueops-demo/issues/new?template=create-tenant-hosted-runner.yml), create `EricDemo_linux-build` from [scenario-07c-create-runner.csv](csv/scenario-07c-create-runner.csv), and show it in Builders on the [organization runners page](https://github.com/organizations/im-sandbox-erichinfomagnus/settings/actions/runners). The CSV uses live Ubuntu 24.04 image ID `2295` and size `4-core`.
 4. From `aeruvakalpanaa`, submit a dry-run Builders group request and show the requester authorization failure.
-5. From Adam, submit the dry-run cross-tenant move from `csv/scenario-07-reject-cross-tenant-move.csv` and show rejection.
-6. Move the runner to Release with `csv/scenario-07d-move-runner.csv` and show the new group.
-7. Delete it with `csv/scenario-07e-delete-runner.csv`, show it absent, and replay delete for the no-op.
+5. From Adam, open [Move tenant GitHub-hosted runner](https://github.com/im-sandbox-erichinfomagnus/tenant-issueops-demo/issues/new?template=move-tenant-hosted-runner.yml), submit the dry-run cross-tenant move from [scenario-07-reject-cross-tenant-move.csv](csv/scenario-07-reject-cross-tenant-move.csv), and show rejection.
+6. Move the runner to Release with [scenario-07d-move-runner.csv](csv/scenario-07d-move-runner.csv) and show the new group.
+7. Open [Delete tenant GitHub-hosted runner](https://github.com/im-sandbox-erichinfomagnus/tenant-issueops-demo/issues/new?template=delete-tenant-hosted-runner.yml), delete it with [scenario-07e-delete-runner.csv](csv/scenario-07e-delete-runner.csv), show it absent, and replay delete for the no-op.
 
 Say: "Runner groups and the hosted runner keep the tenant prefix through create, move, and delete. A move to another tenant namespace is rejected before mutation."
 
@@ -96,25 +96,25 @@ Do not say the hosted-runner lifecycle succeeded unless the runner appears on th
 
 | Video | CSV | How to submit |
 |---|---|---|
-| 1 | `scenario-01a-create-teams.csv` | Attach in requester issue comment |
-| 1 | `scenario-01b-add-members.csv` | Attach in requester issue comment |
-| 1 | `scenario-01c-add-child-teams.csv` | Attach in requester issue comment |
-| 1 | `scenario-01d-team-repo-access.csv` | Attach in requester issue comment |
-| 1 | `scenario-01-rejected-approval.csv` | Attach in requester issue comment |
-| 2 | `scenario-02-create-tenant.csv` | Paste into Tenant CSV |
-| 2 | `scenario-02-reject-nonmember-admin.csv` | Paste into Tenant CSV |
-| 4 | `scenario-04-create-repositories.csv` | Paste into Repositories CSV |
-| 5 | `scenario-05-create-rulesets.csv` | Paste into Rulesets CSV |
-| 5 | `scenario-05-delete-rulesets.csv` | Paste into Rulesets CSV |
-| 5 | `scenario-05-mixed-result.csv` | Paste into Rulesets CSV |
-| 5 | `scenario-05-mixed-authorization.csv` | Paste into Rulesets CSV from the partially authorized account |
-| 6 | `scenario-06-create-variables.csv` | Paste into Variables CSV |
-| 6 | `scenario-06-update-variables.csv` | Paste into Variables CSV |
-| 6 | `scenario-06-delete-variables.csv` | Paste into Variables CSV |
-| 6 | `scenario-06-reject-cross-tenant.csv` | Paste into Variables CSV |
-| 7 | `scenario-07a-create-builders-group.csv` | Paste into Runner groups CSV |
-| 7 | `scenario-07b-create-release-group.csv` | Paste into Runner groups CSV |
-| 7 | `scenario-07c-create-runner.csv` | Paste into Hosted runner CSV |
-| 7 | `scenario-07d-move-runner.csv` | Paste into Runner moves CSV |
-| 7 | `scenario-07e-delete-runner.csv` | Paste into Hosted runner CSV |
-| 7 | `scenario-07-reject-cross-tenant-move.csv` | Paste into Runner moves CSV |
+| 1 | [scenario-01a-create-teams.csv](csv/scenario-01a-create-teams.csv) | Attach in requester issue comment |
+| 1 | [scenario-01b-add-members.csv](csv/scenario-01b-add-members.csv) | Attach in requester issue comment |
+| 1 | [scenario-01c-add-child-teams.csv](csv/scenario-01c-add-child-teams.csv) | Attach in requester issue comment |
+| 1 | [scenario-01d-team-repo-access.csv](csv/scenario-01d-team-repo-access.csv) | Attach in requester issue comment |
+| 1 | [scenario-01-rejected-approval.csv](csv/scenario-01-rejected-approval.csv) | Attach in requester issue comment |
+| 2 | [scenario-02-create-tenant.csv](csv/scenario-02-create-tenant.csv) | Paste into Tenant CSV |
+| 2 | [scenario-02-reject-nonmember-admin.csv](csv/scenario-02-reject-nonmember-admin.csv) | Paste into Tenant CSV |
+| 4 | [scenario-04-create-repositories.csv](csv/scenario-04-create-repositories.csv) | Paste into Repositories CSV |
+| 5 | [scenario-05-create-rulesets.csv](csv/scenario-05-create-rulesets.csv) | Paste into Rulesets CSV |
+| 5 | [scenario-05-delete-rulesets.csv](csv/scenario-05-delete-rulesets.csv) | Paste into Rulesets CSV |
+| 5 | [scenario-05-mixed-result.csv](csv/scenario-05-mixed-result.csv) | Paste into Rulesets CSV |
+| 5 | [scenario-05-mixed-authorization.csv](csv/scenario-05-mixed-authorization.csv) | Paste into Rulesets CSV from the partially authorized account |
+| 6 | [scenario-06-create-variables.csv](csv/scenario-06-create-variables.csv) | Paste into Variables CSV |
+| 6 | [scenario-06-update-variables.csv](csv/scenario-06-update-variables.csv) | Paste into Variables CSV |
+| 6 | [scenario-06-delete-variables.csv](csv/scenario-06-delete-variables.csv) | Paste into Variables CSV |
+| 6 | [scenario-06-reject-cross-tenant.csv](csv/scenario-06-reject-cross-tenant.csv) | Paste into Variables CSV |
+| 7 | [scenario-07a-create-builders-group.csv](csv/scenario-07a-create-builders-group.csv) | Paste into Runner groups CSV |
+| 7 | [scenario-07b-create-release-group.csv](csv/scenario-07b-create-release-group.csv) | Paste into Runner groups CSV |
+| 7 | [scenario-07c-create-runner.csv](csv/scenario-07c-create-runner.csv) | Paste into Hosted runner CSV |
+| 7 | [scenario-07d-move-runner.csv](csv/scenario-07d-move-runner.csv) | Paste into Runner moves CSV |
+| 7 | [scenario-07e-delete-runner.csv](csv/scenario-07e-delete-runner.csv) | Paste into Hosted runner CSV |
+| 7 | [scenario-07-reject-cross-tenant-move.csv](csv/scenario-07-reject-cross-tenant-move.csv) | Paste into Runner moves CSV |
