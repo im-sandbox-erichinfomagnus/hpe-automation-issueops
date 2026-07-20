@@ -70,17 +70,29 @@ function normalizeVariableValue(value) {
 function parseVariablesCsv(rawValue) {
   const entries = [];
   const rawLines = String(rawValue || '').replace(/\r\n/g, '\n').split('\n');
+  let seenDataRow = false;
   for (const rawLine of rawLines) {
     const line = normalizeText(rawLine);
     if (!line) {
       continue;
     }
     const separatorIndex = line.indexOf(',');
-    if (separatorIndex === -1) {
-      entries.push({ name: normalizeVariableName(line), value: null });
+    const candidateName = normalizeVariableName(
+      separatorIndex === -1 ? line : line.slice(0, separatorIndex)
+    );
+    const candidateValue = separatorIndex === -1
+      ? ''
+      : normalizeText(line.slice(separatorIndex + 1)).toLowerCase();
+    if (!seenDataRow && candidateName === 'NAME' && candidateValue === 'value') {
+      seenDataRow = true;
       continue;
     }
-    const name = normalizeVariableName(line.slice(0, separatorIndex));
+    seenDataRow = true;
+    if (separatorIndex === -1) {
+      entries.push({ name: candidateName, value: null });
+      continue;
+    }
+    const name = candidateName;
     const value = normalizeVariableValue(line.slice(separatorIndex + 1));
     entries.push({ name, value });
   }

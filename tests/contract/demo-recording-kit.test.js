@@ -239,7 +239,7 @@ test('scenario 5 ruleset batches parse and validate mixed authorization independ
   assert.equal(byRepository['ericdemo-web'].failure_reason, 'unauthorized');
 });
 
-test('scenario 6 variable files omit headers and enforce the DemoCorp cross-tenant rejection', async () => {
+test('scenario 6 variable files accept headers and enforce the DemoCorp cross-tenant rejection', async () => {
   const registryDirectory = buildRegistry();
   const options = {
     registryDirectory,

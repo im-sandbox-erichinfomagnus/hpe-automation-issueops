@@ -12,7 +12,7 @@ For every request use:
 - Designated approver: `adamg-infomagnus`
 - Dry-run mode: `false`
 
-The variables field accepts `name,value` rows, not a header row. Paste each prepared file exactly as provided.
+The variables field accepts `name,value` rows with an optional header. Paste each prepared file exactly as provided.
 
 ## Create
 

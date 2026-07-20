@@ -98,13 +98,13 @@ test('parser merges single-field and CSV entries and drops delete values by omis
   ]);
 });
 
-test('parser reads name,value pairs from the CSV textarea', () => {
+test('parser reads name,value pairs with an optional CSV header', () => {
   const request = parseTenantVariablesRequest({
     parsedRequest: {
       organization: 'octo-org',
       tenant_name: 'ContosoUK',
       variable_operation: 'create',
-      variables_csv: 'API_BASE_URL,https://api.example.com\nFEATURE_FLAG,enabled',
+      variables_csv: 'name,value\nAPI_BASE_URL,https://api.example.com\nFEATURE_FLAG,enabled',
       designated_approver: 'org-owner-user',
       dry_run: 'false',
       justification: 'Batch create.',

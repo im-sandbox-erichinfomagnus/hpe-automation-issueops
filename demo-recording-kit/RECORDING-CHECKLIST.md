@@ -108,10 +108,10 @@ Do not say the hosted-runner lifecycle succeeded unless the runner appears on th
 | 5 | `scenario-05-delete-rulesets.csv` | Paste into Rulesets CSV |
 | 5 | `scenario-05-mixed-result.csv` | Paste into Rulesets CSV |
 | 5 | `scenario-05-mixed-authorization.csv` | Paste into Rulesets CSV from the partially authorized account |
-| 6 | `scenario-06-create-variables.csv` | Paste into Variables CSV, no header |
-| 6 | `scenario-06-update-variables.csv` | Paste into Variables CSV, no header |
-| 6 | `scenario-06-delete-variables.csv` | Paste into Variables CSV, no header |
-| 6 | `scenario-06-reject-cross-tenant.csv` | Paste into Variables CSV, no header |
+| 6 | `scenario-06-create-variables.csv` | Paste into Variables CSV |
+| 6 | `scenario-06-update-variables.csv` | Paste into Variables CSV |
+| 6 | `scenario-06-delete-variables.csv` | Paste into Variables CSV |
+| 6 | `scenario-06-reject-cross-tenant.csv` | Paste into Variables CSV |
 | 7 | `scenario-07a-create-builders-group.csv` | Paste into Runner groups CSV |
 | 7 | `scenario-07b-create-release-group.csv` | Paste into Runner groups CSV |
 | 7 | `scenario-07c-create-runner.csv` | Paste into Hosted runner CSV |

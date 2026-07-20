@@ -58,8 +58,9 @@ body:
     id: variables_csv
     attributes:
       label: Variables CSV (optional)
-      description: Batch input, one "name,value" per line. Omit the value for delete. Provide either this or the single variable name above.
+      description: Batch input, one "name,value" per line. An optional name,value header is allowed. Omit the value for delete. Provide either this or the single variable name above.
       placeholder: |
+        name,value
         API_BASE_URL,https://api.example.com
         FEATURE_FLAG,enabled
     validations:
