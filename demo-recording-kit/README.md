@@ -20,4 +20,4 @@ For every IssueOps recording, keep these browser tabs available:
 - The workflow run linked from the issue
 - The target team, repository, variable, ruleset, or runner settings page
 
-The rejection paths that require a second actor are marked clearly. Use `aeruvakalpanaa`, an active organization member who is not in the `EricDemo` tenant-admin teams, if that account is available during recording.
+The rejection paths that require a second actor are marked clearly. Keep `aeruvakalpanaa` outside every `EricDemo` team so that account can demonstrate the tenant authorization failures in scenarios 4 through 7. Use `KalpanaReddyC` for the native member added in scenario 3.

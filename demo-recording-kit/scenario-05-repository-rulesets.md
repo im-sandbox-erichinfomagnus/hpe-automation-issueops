@@ -23,8 +23,18 @@ Open the Delete repository ruleset form and paste `csv/scenario-05-delete-rulese
 
 Delete form: `https://github.com/im-sandbox-erichinfomagnus/tenant-issueops-demo/issues/new?template=delete-repository-ruleset.yml`
 
-## Mixed Result Clip
+## Required Mixed-Authorization Clip
+
+This clip needs the `aeruvakalpanaa` login.
+
+1. As Adam, grant `aeruvakalpanaa` direct Admin access to `ericdemo-api` only. Do not add that account to `ericdemo-repo-admin` and do not grant access to `ericdemo-web`.
+2. Sign in as `aeruvakalpanaa` and submit a dry-run create request using `csv/scenario-05-mixed-authorization.csv`. Use Adam as the designated approver.
+3. After the request becomes approval-ready, have Adam comment `approved`.
+4. Record that the `ericdemo-api` row is authorized while the `ericdemo-web` row is rejected as unauthorized. The valid dry-run row remains independently evaluated.
+5. After recording, remove the temporary direct Admin access from `ericdemo-api`.
+
+## Missing-Repository Fallback
 
 Submit a dry-run create request using `csv/scenario-05-mixed-result.csv`. Record that the valid `ericdemo-api` row remains independently evaluated while the nonexistent repository row is rejected.
 
-The exact unauthorized-row demonstration requires the issue to be authored by `aeruvakalpanaa`. Replace the nonexistent repository row with `ericdemo-web` when using that account. The actor must not have direct repository admin and must not be in `ericdemo-repo-admin`.
+Use this only when the second account is unavailable. Say clearly that it demonstrates per-row resource validation, not the required actor-authorization rejection.

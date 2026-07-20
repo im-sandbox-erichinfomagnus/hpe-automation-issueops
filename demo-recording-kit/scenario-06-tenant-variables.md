@@ -40,6 +40,10 @@ Approve and record that both variables are absent. Replay the delete request to 
 
 Organization variables: `https://github.com/organizations/im-sandbox-erichinfomagnus/settings/variables/actions`
 
-## Rejection Clip
+## Required Actor-Rejection Clip
+
+Sign in as `aeruvakalpanaa` and submit a dry-run create request using `csv/scenario-06-create-variables.csv`. Use Adam as designated approver. Record that the requester is rejected because the account is not in the EricDemo CI/CD admin team and is not a maintainer of the EricDemo top team. Do not approve the failed request.
+
+## Cross-Tenant Namespace Clip
 
 Submit a dry-run create request using `csv/scenario-06-reject-cross-tenant.csv`. `DEMOCORP_` is the namespace of the existing DemoCorp tenant. Record that the EricDemo request is rejected for targeting DemoCorp's namespace and that no organization variable is changed.

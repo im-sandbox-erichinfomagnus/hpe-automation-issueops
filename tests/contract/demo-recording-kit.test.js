@@ -19,6 +19,7 @@ const { parseTenantCreationRequest } = require('../../src/workflow-support/parse
 const { parseTenantRepoRequest } = require('../../src/workflow-support/parse-tenant-repo-request');
 const { parseTenantVariablesRequest } = require('../../src/workflow-support/parse-tenant-variables-request');
 const { validateTenantCreationRequest } = require('../../src/workflow-support/validate-tenant-creation-request');
+const { validateRepositoryRulesetRequest } = require('../../src/workflow-support/validate-repository-ruleset-request');
 const { validateTenantVariablesRequest } = require('../../src/workflow-support/validate-tenant-variables-request');
 
 const kitDirectory = path.join(__dirname, '..', '..', 'demo-recording-kit');
@@ -83,7 +84,7 @@ const issueContext = {
 test('every submission CSV is UTF-8 text with LF endings and at least one data row', () => {
   const filenames = fs.readdirSync(csvDirectory).filter((name) => name.endsWith('.csv')).sort();
 
-  assert.equal(filenames.length, 21);
+  assert.equal(filenames.length, 22);
   for (const filename of filenames) {
     const content = readCsv(filename);
     assert.equal(content.startsWith('\uFEFF'), false, `${filename} has a BOM`);
@@ -176,7 +177,7 @@ test('scenario 4 repository batch parses exactly three normalized repositories',
   );
 });
 
-test('scenario 5 ruleset batches parse create, delete, and mixed rows independently', () => {
+test('scenario 5 ruleset batches parse and validate mixed authorization independently', async () => {
   const create = parseRepositoryRulesetRequest({
     ...issueContext,
     rulesetOperation: 'create',
@@ -192,6 +193,11 @@ test('scenario 5 ruleset batches parse create, delete, and mixed rows independen
     rulesetOperation: 'create',
     parsedRequest: parsedRequest('rulesets_csv', 'scenario-05-mixed-result.csv'),
   });
+  const mixedAuthorization = parseRepositoryRulesetRequest({
+    ...issueContext,
+    rulesetOperation: 'create',
+    parsedRequest: parsedRequest('rulesets_csv', 'scenario-05-mixed-authorization.csv'),
+  });
 
   assert.equal(create.ruleset_entries.length, 2);
   assert.equal(create.ruleset_entries.every((entry) => entry.target === 'branch' && entry.enforcement === 'active'), true);
@@ -201,6 +207,36 @@ test('scenario 5 ruleset batches parse create, delete, and mixed rows independen
     'ericdemo-api',
     'repository-that-does-not-exist',
   ]);
+  assert.deepEqual(mixedAuthorization.ruleset_entries.map((entry) => entry.repository), [
+    'ericdemo-api',
+    'ericdemo-web',
+  ]);
+
+  mixedAuthorization.requester_login = 'aeruvakalpanaa';
+  mixedAuthorization.dry_run = true;
+  const validation = await validateRepositoryRulesetRequest(mixedAuthorization, {
+    registryDirectory: buildRegistry(),
+    registryRef: 'main',
+    getOrganization: async () => ({ exists: true }),
+    getRepository: async () => ({ exists: true, repository: {} }),
+    getRepositoryCollaboratorPermission: async ({ repo }) => ({
+      exists: true,
+      permission: repo === 'ericdemo-api' ? 'admin' : 'none',
+    }),
+    getMembershipForUser: async () => ({ state: 'absent', membership: null }),
+    getOrganizationMembership: async ({ username }) => ({
+      exists: true,
+      membership: { role: username === 'adamg-infomagnus' ? 'admin' : 'member', state: 'active' },
+    }),
+    listRepositoryRulesets: async () => [],
+  });
+  const byRepository = Object.fromEntries(validation.plan.entries.map((entry) => [entry.repository, entry]));
+
+  assert.equal(validation.is_valid, true, JSON.stringify(validation.errors));
+  assert.equal(byRepository['ericdemo-api'].row_status, 'valid');
+  assert.equal(byRepository['ericdemo-api'].authorization_path, 'repository_admin');
+  assert.equal(byRepository['ericdemo-web'].row_status, 'rejected');
+  assert.equal(byRepository['ericdemo-web'].failure_reason, 'unauthorized');
 });
 
 test('scenario 6 variable files omit headers and enforce the DemoCorp cross-tenant rejection', async () => {

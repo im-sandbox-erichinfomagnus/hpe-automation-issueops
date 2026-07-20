@@ -36,7 +36,11 @@ Form: `https://github.com/im-sandbox-erichinfomagnus/tenant-issueops-demo/issues
 
 Organization runners: `https://github.com/organizations/im-sandbox-erichinfomagnus/settings/actions/runners`
 
-## Rejection Clip
+## Required Actor-Rejection Clip
+
+Sign in as `aeruvakalpanaa` and submit a dry-run Create tenant runner group request using `csv/scenario-07a-create-builders-group.csv`. Use Adam as designated approver. Record that the requester is rejected because the account is outside the EricDemo CI/CD admin and tenant-admin authorization paths. Do not approve the failed request.
+
+## Cross-Tenant Move Clip
 
 Before deleting the runner, submit a dry-run move request using `csv/scenario-07-reject-cross-tenant-move.csv`. Record that the cross-tenant runner group target is rejected and the runner remains in its current EricDemo group.
 

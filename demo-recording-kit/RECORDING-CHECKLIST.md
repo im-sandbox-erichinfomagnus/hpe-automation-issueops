@@ -31,10 +31,10 @@ Say: "One tenant row creates the canonical four-team topology, assigns the reque
 Detailed guide: `scenario-03-native-team-membership.md`
 
 1. Open the `ericdemo-repo-admin` members page and show Adam as maintainer.
-2. Use GitHub's Add a member control to add `aeruvakalpanaa`.
+2. Use GitHub's Add a member control to add `KalpanaReddyC`.
 3. Refresh and show the active member.
 4. Open `ericdemo-cicd-admin` and show Adam can manage that child team too.
-5. For the rejection, sign in as `aeruvakalpanaa` and show that a non-maintainer does not receive team membership administration controls.
+5. For the rejection, sign in as `KalpanaReddyC` and show that a non-maintainer does not receive team membership administration controls. Keep `aeruvakalpanaa` outside every EricDemo team.
 
 Say: "Team membership remains native GitHub administration. The tenant bootstrap grants maintainer authority, and GitHub itself blocks non-maintainers."
 
@@ -57,8 +57,9 @@ Detailed guide: `scenario-05-repository-rulesets.md`
 1. Paste `csv/scenario-05-create-rulesets.csv` into Create repository ruleset, submit live, approve, and show both rulesets in repository settings.
 2. Paste `csv/scenario-05-delete-rulesets.csv` into Delete repository ruleset, submit live, approve, and show both rulesets removed.
 3. Replay the delete request and show no-op convergence.
-4. Submit a dry-run create request with `csv/scenario-05-mixed-result.csv` and show one valid row plus one rejected nonexistent-repository row.
-5. If the second account is available, record the exact unauthorized-row case described in the detailed guide.
+4. Temporarily grant `aeruvakalpanaa` direct Admin access to `ericdemo-api` only. Do not add the account to an EricDemo team.
+5. From `aeruvakalpanaa`, submit `csv/scenario-05-mixed-authorization.csv` in dry-run mode. Have Adam approve and show the API row authorized while the Web row is rejected as unauthorized.
+6. Remove the temporary API repository access after recording. Use `csv/scenario-05-mixed-result.csv` only as the clearly identified missing-repository fallback.
 
 Say: "Ruleset authorization and results are evaluated per repository row. One rejected row does not erase the valid row, and repeated deletes converge as no-ops."
 
@@ -68,9 +69,10 @@ Detailed guide: `scenario-06-tenant-variables.md`
 
 1. Create variables from `csv/scenario-06-create-variables.csv` and show `ERICDEMO_API_BASE_URL` and `ERICDEMO_DEPLOY_ENV`.
 2. Update them from `csv/scenario-06-update-variables.csv` and show the changed values.
-3. Submit the dry-run rejection with `csv/scenario-06-reject-cross-tenant.csv` and show the DemoCorp namespace guardrail.
-4. Delete the variables from `csv/scenario-06-delete-variables.csv` and show both absent.
-5. Replay delete and show no-op convergence.
+3. From `aeruvakalpanaa`, submit a dry-run create request with `csv/scenario-06-create-variables.csv` and show the requester authorization failure.
+4. From Adam, submit the dry-run rejection with `csv/scenario-06-reject-cross-tenant.csv` and show the DemoCorp namespace guardrail.
+5. Delete the variables from `csv/scenario-06-delete-variables.csv` and show both absent.
+6. Replay delete and show no-op convergence.
 
 Say: "Variable names are forced into the tenant namespace. Create, update, and delete are spreadsheet-driven, and an EricDemo request cannot target the existing DemoCorp namespace."
 
@@ -81,9 +83,10 @@ Detailed guide: `scenario-07-tenant-runners.md`
 1. Create `EricDemo_Builders` from `csv/scenario-07a-create-builders-group.csv`.
 2. Create `EricDemo_Release` from `csv/scenario-07b-create-release-group.csv`.
 3. Create `EricDemo_linux-build` from `csv/scenario-07c-create-runner.csv` and show it in Builders. The CSV uses live Ubuntu 24.04 image ID `2295` and size `4-core`.
-4. Submit the dry-run cross-tenant move from `csv/scenario-07-reject-cross-tenant-move.csv` and show rejection.
-5. Move the runner to Release with `csv/scenario-07d-move-runner.csv` and show the new group.
-6. Delete it with `csv/scenario-07e-delete-runner.csv`, show it absent, and replay delete for the no-op.
+4. From `aeruvakalpanaa`, submit a dry-run Builders group request and show the requester authorization failure.
+5. From Adam, submit the dry-run cross-tenant move from `csv/scenario-07-reject-cross-tenant-move.csv` and show rejection.
+6. Move the runner to Release with `csv/scenario-07d-move-runner.csv` and show the new group.
+7. Delete it with `csv/scenario-07e-delete-runner.csv`, show it absent, and replay delete for the no-op.
 
 Say: "Runner groups and the hosted runner keep the tenant prefix through create, move, and delete. A move to another tenant namespace is rejected before mutation."
 
@@ -104,6 +107,7 @@ Do not say the hosted-runner lifecycle succeeded unless the runner appears on th
 | 5 | `scenario-05-create-rulesets.csv` | Paste into Rulesets CSV |
 | 5 | `scenario-05-delete-rulesets.csv` | Paste into Rulesets CSV |
 | 5 | `scenario-05-mixed-result.csv` | Paste into Rulesets CSV |
+| 5 | `scenario-05-mixed-authorization.csv` | Paste into Rulesets CSV from the partially authorized account |
 | 6 | `scenario-06-create-variables.csv` | Paste into Variables CSV, no header |
 | 6 | `scenario-06-update-variables.csv` | Paste into Variables CSV, no header |
 | 6 | `scenario-06-delete-variables.csv` | Paste into Variables CSV, no header |
