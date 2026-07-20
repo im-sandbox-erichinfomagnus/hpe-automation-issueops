@@ -12,6 +12,6 @@ Provide traceable acceptance evidence for every scenario in Eric Hill's tenant I
 - The designated tenant admin is an active organization member and becomes maintainer of the root, admin, RepoAdmin, and CICDAdmin teams.
 - Repository, ruleset, variable, and runner operations preserve tenant-boundary authorization and fail closed when the actor is unauthorized.
 - Native GitHub team membership management is shown separately from IssueOps automation.
-- Seven separate video files are delivered, one per scenario.
+- Seven separate live GitHub recordings are made, one per scenario.
 - Every video shows a successful path and a quick unauthorized rejection.
-- The matrix in `docs/tenant-issueops-requirements-matrix.md` maps each scenario to its implementation, automated tests, manual test data, and video.
+- The matrix in `docs/tenant-issueops-requirements-matrix.md` maps each scenario to its implementation, automated tests, CSV files, and recording guide.

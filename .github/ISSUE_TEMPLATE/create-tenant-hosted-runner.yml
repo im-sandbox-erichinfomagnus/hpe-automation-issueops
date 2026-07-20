@@ -52,9 +52,9 @@ body:
       label: Runner image id
       description: Image for the hosted runner, from the organization's GitHub-owned image list.
       options:
-        - "ubuntu-24.04"
-        - "ubuntu-22.04"
-        - "windows-2022"
+        - "2295"
+        - "2294"
+        - "2298"
       default: 0
     validations:
       required: false

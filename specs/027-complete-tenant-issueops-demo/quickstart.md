@@ -1,7 +1,7 @@
 # Quickstart: Complete Demo
 
 1. Use the samples under `sample-input-csvs/` for the spreadsheet input shown in each scenario.
-2. Run `npm test` and confirm the contract and integration suites pass.
-3. Run `node scripts/demo/record-tenant-issueops-scenarios.js` from the repository root.
-4. Review all seven MP4 files in the sibling `demo-videos/` folder.
-5. Confirm each clip includes the successful path, rejection path, and implementation evidence listed in the requirements matrix.
+2. Run `node --test tests/contract/*.test.js tests/integration/*.test.js` and confirm the contract and integration suites pass.
+3. Open `demo-recording-kit/README.md` and record the scenarios in order against the live demo repository.
+4. Use only the prepared CSV file named by each scenario guide.
+5. Confirm each clip includes the issue form, approval comment, Actions result, resulting GitHub state, and rejection path listed in the requirements matrix.

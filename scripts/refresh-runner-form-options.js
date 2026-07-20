@@ -39,8 +39,17 @@ function replaceOptions(text, fieldId, optionsBlock) {
   const imagesResp = await api(`/orgs/${ORG}/actions/hosted-runners/images/github-owned`);
   const sizesResp = await api(`/orgs/${ORG}/actions/hosted-runners/machine-sizes`);
 
-  const images = [...new Set((imagesResp.images || []).map((i) => i.display_name).filter(Boolean))]
-    .sort((a, b) => Number(b.toLowerCase().includes('ubuntu')) - Number(a.toLowerCase().includes('ubuntu')));
+  const images = [...new Map(
+    (imagesResp.images || [])
+      .filter((image) => image && image.id != null)
+      .map((image) => [String(image.id), image])
+  ).values()]
+    .sort((a, b) => {
+      const aUbuntu = String(a.display_name || '').toLowerCase().includes('ubuntu');
+      const bUbuntu = String(b.display_name || '').toLowerCase().includes('ubuntu');
+      return Number(bUbuntu) - Number(aUbuntu) || String(a.display_name || '').localeCompare(String(b.display_name || ''));
+    })
+    .map((image) => String(image.id));
   const sizes = [...new Set((sizesResp.machine_specs || []).map((s) => s.id).filter(Boolean))];
 
   if (images.length === 0 || sizes.length === 0) {
