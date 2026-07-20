@@ -1,0 +1,2 @@
+# Tenant records are runtime state. Require manual resolution if an update also changes one.
+tenant-registry/** merge=binary
