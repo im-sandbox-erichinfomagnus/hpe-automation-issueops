@@ -16,6 +16,7 @@ function buildTenantValidationEnv(artifactPath, overrides = {}) {
     REQUESTER_LOGIN: 'requester-user',
     PARSED_ORGANIZATION: 'octo-org',
     PARSED_TENANT_NAME: 'Acme Platform',
+    PARSED_TENANT_ADMIN_LOGIN: 'tenant-admin-user',
     PARSED_TENANT_TYPE: 'application',
     PARSED_PRIMARY_CONTACT: 'owner@example.com',
     PARSED_SECONDARY_CONTACT: 'secondary@example.com',
@@ -54,6 +55,7 @@ test('runRequestValidation for create-tenant-model dry-run emits reconciliation 
       REQUESTER_LOGIN: 'requester-user',
       PARSED_ORGANIZATION: 'octo-org',
       PARSED_TENANT_NAME: 'Acme Platform',
+      PARSED_TENANT_ADMIN_LOGIN: 'tenant-admin-user',
       PARSED_TENANT_TYPE: 'application',
       PARSED_PRIMARY_CONTACT: 'owner@example.com',
       PARSED_SECONDARY_CONTACT: 'secondary@example.com',
@@ -82,7 +84,7 @@ test('runRequestValidation for create-tenant-model dry-run emits reconciliation 
 
         return {
           exists: true,
-          membership: { role: 'member', state: 'active' },
+          membership: { role: 'admin', state: 'active' },
         };
       },
       listOrgTeams: async () => [],
@@ -120,7 +122,7 @@ test('runApprovalGate approves tenant request when designated active owner comme
 
         return {
           exists: true,
-          membership: { role: 'member', state: 'active' },
+          membership: { role: 'admin', state: 'active' },
         };
       },
       listOrgTeams: async () => [],
@@ -171,7 +173,7 @@ test('runApprovalGate denies tenant approval from non-designated commenter', asy
       getOrganization: async () => ({ exists: true }),
       getOrganizationMembership: async ({ username }) => ({
         exists: true,
-        membership: { role: username === 'requester-user' ? 'member' : 'admin', state: 'active' },
+        membership: { role: 'admin', state: 'active' },
       }),
       listOrgTeams: async () => [],
     },
@@ -271,7 +273,7 @@ test('runApprovalGate keeps central assignment routing-only when no approval com
 
         return {
           exists: true,
-          membership: { role: 'member', state: 'active' },
+          membership: { role: 'admin', state: 'active' },
         };
       },
       listOrgTeams: async () => [],
@@ -342,7 +344,7 @@ test('runRequestValidation keeps tenant model operation when parsed repository n
 
         return {
           exists: true,
-          membership: { role: 'member', state: 'active' },
+          membership: { role: 'admin', state: 'active' },
         };
       },
       listOrgTeams: async () => [],

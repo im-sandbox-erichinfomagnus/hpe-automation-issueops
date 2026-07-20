@@ -5,6 +5,13 @@ const {
   normalizeBoolean,
   normalizeTenantName,
 } = require('./parse-hosted-runner-request');
+const { parseSingleCsvRow } = require('./parse-single-csv-row');
+
+const HOSTED_RUNNER_MOVE_CSV_COLUMNS = [
+  'runner_name',
+  'hosted_runner_id',
+  'target_runner_group_name',
+];
 
 function normalizeText(value) {
   return String(value || '').trim();
@@ -51,19 +58,24 @@ function parseHostedRunnerMoveRequest(input = {}) {
 
   const repository = input.repository || runContext.repository || process.env.GITHUB_REPOSITORY || '';
   const issueNumber = input.issueNumber || issue.number || runContext.issue_number || process.env.ISSUE_NUMBER;
+  const runnerCsv = parseSingleCsvRow(
+    readField(parsed, ['runner_moves_csv', 'parsed_runner_moves_csv']) || input.runner_moves_csv || input.runnerMovesCsv,
+    HOSTED_RUNNER_MOVE_CSV_COLUMNS
+  );
+  const csvRow = runnerCsv.row || {};
   const requesterLogin = normalizeLogin(input.requesterLogin || issue.user && issue.user.login || '');
   const organization = normalizeLogin(readField(parsed, ['organization', 'parsed_organization']) || input.organization);
   const tenantNameInput = normalizeText(
     readField(parsed, ['tenant_name', 'parsed_tenant_name', 'tenant_display_name']) || input.tenantName
   );
   const runnerBaseNameInput = normalizeText(
-    readField(parsed, ['runner_name', 'parsed_runner_name']) || input.runnerName
+    csvRow.runner_name || readField(parsed, ['runner_name', 'parsed_runner_name']) || input.runnerName
   );
   const hostedRunnerId = normalizeOptionalId(
-    readField(parsed, ['hosted_runner_id', 'parsed_hosted_runner_id']) || input.hostedRunnerId
+    csvRow.hosted_runner_id || readField(parsed, ['hosted_runner_id', 'parsed_hosted_runner_id']) || input.hostedRunnerId
   );
   const targetRunnerGroupNameInput = normalizeText(
-    readField(parsed, ['target_runner_group_name', 'parsed_target_runner_group_name']) ||
+    csvRow.target_runner_group_name || readField(parsed, ['target_runner_group_name', 'parsed_target_runner_group_name']) ||
       input.targetRunnerGroupName
   );
   const designatedApproverLogin = normalizeLogin(
@@ -103,12 +115,16 @@ function parseHostedRunnerMoveRequest(input = {}) {
     dry_run: dryRun,
     business_justification: justification,
     submitted_at: input.submittedAt || new Date().toISOString(),
-    intake_mode: 'manual',
+    intake_mode: runnerCsv.provided ? 'csv' : 'manual',
+    csv_input_provided: runnerCsv.provided,
+    csv_row_count: runnerCsv.row_count,
+    csv_input_errors: runnerCsv.errors,
     request_status: 'submitted',
   };
 }
 
 module.exports = {
+  HOSTED_RUNNER_MOVE_CSV_COLUMNS,
   normalizeOptionalId,
   parseHostedRunnerMoveRequest,
 };

@@ -23,6 +23,17 @@ body:
     validations:
       required: true
 
+  - type: textarea
+    id: runner_csv
+    attributes:
+      label: Hosted runner CSV (spreadsheet input)
+      description: Preferred input. Paste exactly one runner_name row. The header is optional and overrides the individual runner field.
+      placeholder: |
+        runner_name
+        linux-build
+    validations:
+      required: false
+
   - type: input
     id: runner_name
     attributes:
@@ -30,7 +41,7 @@ body:
       description: Name of the runner to delete. Accepts the full tenant-prefixed name (ContosoUK_ubuntu-build) or the base name (ubuntu-build); the tenant prefix is derived either way.
       placeholder: ubuntu-build
     validations:
-      required: true
+      required: false
 
   - type: input
     id: designated_approver

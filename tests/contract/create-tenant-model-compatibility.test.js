@@ -60,6 +60,7 @@ function buildValidParsedRequest(overrides = {}) {
   return {
     organization: 'octo-org',
     tenant_name: 'Acme Platform',
+    tenant_admin_login: 'tenant-admin-user',
     tenant_type: 'application',
     governance_code_scanning_enabled: 'true',
     governance_secret_scanning_enabled: 'true',
@@ -90,7 +91,7 @@ function baseValidationOptions(overrides = {}) {
 
       return {
         exists: true,
-        membership: { role: 'member', state: 'active' },
+        membership: { role: 'admin', state: 'active' },
       };
     },
     listTeams: async () => [],
@@ -182,7 +183,7 @@ test('T031C: parseTenantCreationRequest preserves baseline request_id field unch
   assert.match(request.request_id, /octo-org\/issueops-speckit#5006/);
 });
 
-test('T031C: validateTenantCreationRequest preserves requester-eligibility checks unchanged', async () => {
+test('T031C: validateTenantCreationRequest requires the requester to be an active organization owner', async () => {
   const request = parseTenantCreationRequest({
     parsedRequest: buildValidParsedRequest(),
     issue: { number: 5007, user: { login: 'non-member-user' } },
@@ -213,7 +214,7 @@ test('T031C: validateTenantCreationRequest preserves requester-eligibility check
   });
 
   assert.equal(validation.is_valid, false);
-  assert.match(validation.errors.join('\n'), /not an active member/i);
+  assert.match(validation.errors.join('\n'), /must be an active owner/i);
 });
 
 test('T031C: validateTenantCreationRequest does not break governance flag validation with CICD team', async () => {

@@ -102,6 +102,7 @@ jobs:
           PARSED_REQUEST_JSON: ${{ steps.parse_request.outputs.json }}
           PARSED_ORGANIZATION: ${{ steps.parse_request.outputs.parsed_organization }}
           PARSED_TENANT_NAME: ${{ steps.parse_request.outputs.parsed_tenant_name }}
+          PARSED_RUNNER_GROUPS_CSV: ${{ steps.parse_request.outputs.parsed_runner_groups_csv }}
           PARSED_RUNNER_GROUP_NAME: ${{ steps.parse_request.outputs.parsed_runner_group_name }}
           PARSED_RUNNER_GROUP_VISIBILITY: ${{ steps.parse_request.outputs.parsed_runner_group_visibility }}
           PARSED_ALLOWS_PUBLIC_REPOSITORIES: ${{ steps.parse_request.outputs.parsed_allows_public_repositories }}

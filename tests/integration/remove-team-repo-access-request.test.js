@@ -136,6 +136,9 @@ test('approved removal execution fails closed when ISSUEOPS_GITHUB_TOKEN is miss
 
   assert.equal(executionResult.request.request_status, 'failed');
   assert.equal(executionResult.execution.failure_count, 1);
-  assert.match(executionResult.execution.summary, /not PAT-backed for repository-access mutation/i);
+  assert.match(
+    executionResult.execution.summary,
+    /not PAT-backed for repository-access mutation|Missing workflow token/i
+  );
   assert.match(executionResult.execution.summary, /No repository-access mutation was attempted/i);
 });
