@@ -1,0 +1,87 @@
+name: Remove team repository access
+description: Request removing one existing GitHub team from one or more existing repositories in a target GitHub organization.
+title: "[remove-team-repo-access] <org>: <team>"
+labels:
+  - issueops
+  - remove-team-repo-access
+body:
+  - type: input
+    id: organization
+    attributes:
+      label: Target organization
+      description: GitHub organization where repository access should be removed.
+      placeholder: octo-org
+    validations:
+      required: true
+
+  - type: input
+    id: team
+    attributes:
+      label: Target team
+      description: Existing team whose repository access should be removed.
+      placeholder: platform-engineering
+    validations:
+      required: true
+
+  - type: input
+    id: designated_approver
+    attributes:
+      label: Designated repository-access approver
+      description: GitHub login of the single target organization owner who must approve this request batch. Multiple approvers in one batch are rejected and must be split into separate requests.
+      placeholder: octocat
+    validations:
+      required: true
+
+  - type: dropdown
+    id: intake_mode
+    attributes:
+      label: Intake mode
+      description: Choose exactly one intake mode. Use manual for line-by-line repository input, or csv_attachment to upload repository CSV via a requester-authored issue comment attachment.
+      options:
+        - manual
+        - csv_attachment
+      default: 0
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        **csv_attachment guidance**
+        - Set `intake_mode` to `csv_attachment` and leave **Requested repositories** empty.
+        - After submitting the issue, the requester must add an issue comment with exactly one `.csv` attachment link.
+        - CSV must include the required `repository` header.
+        - If validation fails, post a newer requester-authored corrected CSV comment; the workflow picks the newest eligible candidate after the latest failed attempt.
+
+  - type: textarea
+    id: requested_repositories
+    attributes:
+      label: Requested repositories
+      description: Manual input path for one existing repository per line. Populate this field only when intake_mode is manual and leave it blank when intake_mode is csv_attachment. Duplicate repositories and mixed-organization requests are rejected.
+      placeholder: |
+        service-catalog
+        developer-portal
+      render: text
+    validations:
+      required: false
+
+  - type: textarea
+    id: business_justification
+    attributes:
+      label: Business justification
+      description: Explain why this repository-access removal is required.
+      placeholder: Team ownership has moved and access should be removed.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: dry_run
+    attributes:
+      label: Dry-run mode
+      description: Validation runs without repository-access mutation when dry-run is enabled.
+      options:
+        - "true"
+        - "false"
+      default: 0
+    validations:
+      required: true

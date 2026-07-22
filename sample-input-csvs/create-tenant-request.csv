@@ -1,0 +1,2 @@
+tenant_name,tenant_admin_login,tenant_type,cmdb_id,cost_center,business_unit,environment,primary_contact,secondary_contact,code_scanning_enabled,secret_scanning_enabled,dependabot_enabled
+DemoCorp,user1,platform,CMDB-1001,CC-1001,Compute,nonprod,owner@example.com,backup@example.com,true,true,true

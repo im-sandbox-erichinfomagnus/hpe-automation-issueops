@@ -126,6 +126,32 @@ test('approval policy remains pending when no approval signal exists', async () 
   assert.match(decision.decision_note, new RegExp(APPROVAL_COMMAND));
 });
 
+test('approval policy keeps waiting-for-attachment requests out of the approval-ready state', async () => {
+  const fixture = loadFixture().approved;
+  const decision = await evaluateApprovalGate(
+    {
+      organization: 'im-sandbox-himanshu',
+      intendedOwnerLogin: 'himanshu-im',
+      approvalMode: 'team_creation',
+      intakeMode: 'csv_attachment',
+      issueComments: fixture.comments,
+    },
+    {
+      resolveRole: ({ organization, approverLogin }) =>
+        resolveTeamCreationApprover(
+          { organization, approverLogin, intendedOwnerLogin: 'himanshu-im' },
+          {
+            getOrganizationMembership: async ({ username }) => fixture.memberships[username] || { exists: false },
+          }
+        ),
+      isValidationBlocked: true,
+    }
+  );
+
+  assert.equal(decision.approval_status, 'approved');
+  assert.equal(decision.approver_login, 'himanshu-im');
+});
+
 test('team creation policy requires approver and intended owner to match', () => {
   assert.equal(
     isEligibleTeamCreationApprover({ approver_login: 'octocat', intended_owner_login: 'octocat' }),

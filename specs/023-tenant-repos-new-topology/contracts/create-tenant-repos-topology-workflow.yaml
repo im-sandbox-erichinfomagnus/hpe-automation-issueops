@@ -1,0 +1,85 @@
+name: create-tenant-repos-topology-workflow-contract
+version: 1
+purpose: >-
+  Contract for enhancing create-tenant-repos to use spec-022 canonical tenant topology,
+  persist owned repository entries in topology.repositories.owned, enforce duplicate-name
+  validation against owned entries, and preserve legacy compatibility.
+
+implementation_status: in_progress
+last_validated: 2026-06-10
+validated_against:
+  - issue_form: .github/ISSUE_TEMPLATE/create-tenant-repos.yml
+  - workflow: .github/workflows/create-tenant-repos.yml
+  - scripts:
+      - src/scripts/run-request-validation.js
+      - src/scripts/run-approval-gate.js
+      - src/scripts/run-approved-execution.js
+  - modules:
+      - src/workflow-support/parse-tenant-repo-request.js
+      - src/workflow-support/resolve-tenant-context-from-registry.js
+      - src/workflow-support/validate-tenant-repo-request.js
+      - src/workflow-support/reconcile-tenant-repo-creation.js
+      - src/workflow-support/build-audit-artifact.js
+
+topology_read_model:
+  canonical_precedence: true
+  canonical_fields:
+    - tenantId
+    - topology.organization.orgName
+    - topology.teams.tenantRootTeam
+    - topology.teams.structure
+    - topology.accessModel.enforcement
+    - topology.accessModel.roles
+    - topology.repositories.owned
+  legacy_fallback: true
+
+owned_repository_persistence:
+  path: topology.repositories.owned
+  append_policy: append_one_entry_per_successful_request
+  initialize_if_absent: []
+  required_fields:
+    - repoName
+    - tenantId
+    - visibility
+    - repoType
+    - lifecycle
+    - migrationWave
+    - source
+    - adminTeam
+  field_sources:
+    repoName: normalized repository_name request value
+    tenantId: resolved tenant context
+    visibility: issue form value (required, no default)
+    repoType: issue form value or default
+    lifecycle: issue form value or default
+    migrationWave: issue form value or default
+    source: issue form value or default
+    adminTeam: resolved repo-admin team from tenant topology
+  defaults_non_visibility:
+    repoType: service
+    lifecycle: active
+    migrationWave: wave-1
+    source: ghec
+
+validation_rules:
+  - Canonical topology mode must treat topology.repositories.owned as array or fail closed.
+  - Requested repository name must be checked against owned entries using case-insensitive normalized comparison.
+  - Duplicate owned-name conflicts must block approval readiness with explicit conflict error.
+
+idempotency:
+  rerun_owned_entry_rule: >-
+    If an owned entry already exists for matching normalized repoName + tenantId,
+    topology persistence is noop and no new owned entry is appended.
+  duplicate_prevention: >-
+    Concurrent conflict detected before persistence must block append and return
+    deterministic duplicate conflict result.
+
+observability:
+  summary_requirements:
+    - indicate canonical vs legacy topology path used
+    - report duplicate-name check result
+    - report owned-entry append/noop result
+  audit_requirements:
+    - include owned entry object appended or matched noop object
+    - include defaults_applied metadata for non-visibility defaulted fields
+    - include conflict normalized name on duplicate validation failure

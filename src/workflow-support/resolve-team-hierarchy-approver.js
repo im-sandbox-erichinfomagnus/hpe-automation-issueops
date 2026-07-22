@@ -1,5 +1,54 @@
 'use strict';
 
+function normalizeTeamSlug(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function canonicalizeTeamSlug(value) {
+  return normalizeTeamSlug(value).replace(/[-_]+/g, '-');
+}
+
+function buildTeamSlugVariants(teamSlug) {
+  const normalized = normalizeTeamSlug(teamSlug);
+  if (!normalized) {
+    return [];
+  }
+
+  const canonical = canonicalizeTeamSlug(normalized);
+  const variants = [normalized];
+
+  const alternate = canonical === normalized
+    ? normalized.replace(/-/g, '_')
+    : normalized.replace(/_/g, '-');
+
+  if (alternate !== normalized) {
+    variants.push(alternate);
+  }
+
+  return variants;
+}
+
+async function resolveTeamMembership(teamSlug, username, organization, getTeamMembership) {
+  if (typeof getTeamMembership !== 'function') {
+    return null;
+  }
+
+  const variants = buildTeamSlugVariants(teamSlug);
+  for (const variant of variants) {
+    const membership = await getTeamMembership({
+      organization,
+      teamSlug: variant,
+      username,
+    });
+
+    if (membership && membership.membership) {
+      return membership;
+    }
+  }
+
+  return null;
+}
+
 async function resolveTeamHierarchyApprover(input = {}, options = {}) {
   const getTeamMembership =
     options.getTeamMembership ||
@@ -38,12 +87,7 @@ async function resolveTeamHierarchyApprover(input = {}, options = {}) {
     .filter(Boolean);
 
   for (const teamSlug of teamSlugs) {
-    const membership = await getTeamMembership({
-      organization: input.organization,
-      teamSlug,
-      username: approverLogin,
-    });
-
+    const membership = await resolveTeamMembership(teamSlug, approverLogin, input.organization, getTeamMembership);
     const role = membership && membership.membership ? membership.membership.role || 'member' : 'absent';
     const state = membership && membership.membership ? membership.membership.state || 'active' : 'absent';
     if (role !== 'maintainer' || state !== 'active') {

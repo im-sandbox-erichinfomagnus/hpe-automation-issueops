@@ -25,6 +25,12 @@ function writeAuditArtifact(directory, overrides = {}) {
       parent_team_slug: 'platform-engineering',
       parent_team_name: 'Platform Engineering',
       designated_approver_login: 'himanshu-im',
+      intake_mode: 'manual',
+      requested_child_teams_input: 'Application Platform',
+      bulk_csv_input: '',
+      bulk_csv_submission: null,
+      csv_row_findings: [],
+      csv_row_numbering_convention: null,
       requested_child_links: [
         {
           requested_name: 'Application Platform',
@@ -133,8 +139,11 @@ test('runApprovalGate approves a validated hierarchy request when the designated
   assert.equal(result.approval.approval_status, 'approved');
   assert.equal(result.approval.approver_login, 'himanshu-im');
   assert.equal(result.request.request_status, 'approved');
+  assert.equal(result.request.intake_mode, 'manual');
+  assert.equal(result.request.accepted_attachment_submission, null);
   assert.equal(result.assignment.assigned_login, 'central-owner');
   assert.match(result.assignment.assignment_note, /team hierarchy mutation/i);
+  assert.match(fs.readFileSync(summaryPath, 'utf8'), /Intake mode: manual/);
   assert.match(fs.readFileSync(summaryPath, 'utf8'), /Approval: approved/);
   assert.match(fs.readFileSync(outputPath, 'utf8'), /approval-status=approved/);
 });
@@ -222,4 +231,167 @@ test('runApprovalGate invalidates approval when the designated approver loses au
 
   assert.equal(result.approval.approval_status, 'denied');
   assert.match(result.approval.decision_note, /does not authorize team hierarchy mutation/i);
+});
+
+test('runApprovalGate supports routing and approval checks with GITHUB_TOKEN when PAT mutation is not being executed', async () => {
+  const fixture = loadFixture().pending;
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'add-child-teams-github-token-'));
+  const artifactPath = writeAuditArtifact(workspace);
+
+  const result = await runApprovalGate({
+    env: {
+      GITHUB_TOKEN: 'github-token',
+      AUDIT_ARTIFACT_PATH: artifactPath,
+    },
+    api: {
+      listIssueComments: async () => fixture.comments,
+      getMembershipForUser: async () => ({ membership: null }),
+      addIssueAssignees: async () => ({ status: 'assigned', assignees: fixture.assignees }),
+      getAssignableOwners: async () => fixture.assignees,
+    },
+  });
+
+  assert.equal(result.approval.approval_status, 'pending');
+  assert.equal(result.request.request_status, 'awaiting_approval');
+  assert.equal(result.assignment.assignment_status, 'assigned');
+  assert.match(result.assignment.assignment_note, /queue ownership only and does not authorize team hierarchy mutation/i);
+});
+
+test('runApprovalGate keeps csv_attachment hierarchy requests blocked while waiting_for_attachment even if an approval comment exists', async () => {
+  const fixture = loadFixture().approved;
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'add-child-teams-waiting-approval-'));
+  const artifactPath = writeAuditArtifact(workspace);
+  const waitingArtifact = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
+  waitingArtifact.request.intake_mode = 'csv_attachment';
+  waitingArtifact.request.request_status = 'waiting_for_attachment';
+  waitingArtifact.request.requested_child_links = [];
+  waitingArtifact.request.accepted_attachment_submission = {
+    comment_id: null,
+    comment_created_at: null,
+    uploader_login: null,
+    attachment_url: null,
+    filename: null,
+    extension: null,
+    content_hash: null,
+    downloaded_at: null,
+    byte_size: 0,
+    acceptance_status: 'waiting',
+    rejection_reason: null,
+  };
+  fs.writeFileSync(artifactPath, JSON.stringify(waitingArtifact, null, 2));
+
+  const result = await runApprovalGate({
+    env: {
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      AUDIT_ARTIFACT_PATH: artifactPath,
+    },
+    api: {
+      listIssueComments: async () => fixture.comments,
+      getMembershipForUser: async ({ teamSlug, username }) =>
+        fixture.memberships[teamSlug] && fixture.memberships[teamSlug][username]
+          ? fixture.memberships[teamSlug][username]
+          : { membership: null },
+      addIssueAssignees: async () => ({ status: 'assigned', assignees: fixture.assignees }),
+      getAssignableOwners: async () => fixture.assignees,
+    },
+  });
+
+  assert.equal(result.approval.approval_status, 'not_requested');
+  assert.equal(result.request.request_status, 'waiting_for_attachment');
+  assert.match(result.approval.decision_note, /waiting for a requester-authored CSV attachment comment/i);
+});
+
+test('runApprovalGate does not treat central queue assignment as authorization for hierarchy approval', async () => {
+  const fixture = {
+    comments: [
+      {
+        id: 999001,
+        body: 'approved',
+        created_at: '2026-05-25T12:00:00Z',
+        user: { login: 'central-owner' },
+      },
+    ],
+    assignees: ['central-owner', 'himanshu-im'],
+    memberships: {
+      'platform-engineering': {
+        'central-owner': { membership: { role: 'maintainer', state: 'active' } },
+      },
+      'application-platform': {
+        'central-owner': { membership: { role: 'maintainer', state: 'active' } },
+      },
+    },
+  };
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'add-child-teams-central-routing-'));
+  const artifactPath = writeAuditArtifact(workspace);
+
+  const result = await runApprovalGate({
+    env: {
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      AUDIT_ARTIFACT_PATH: artifactPath,
+    },
+    api: {
+      listIssueComments: async () => fixture.comments,
+      getMembershipForUser: async ({ teamSlug, username }) =>
+        fixture.memberships[teamSlug] && fixture.memberships[teamSlug][username]
+          ? fixture.memberships[teamSlug][username]
+          : { membership: null },
+      addIssueAssignees: async () => ({ status: 'assigned', assignees: fixture.assignees }),
+      getAssignableOwners: async () => fixture.assignees,
+    },
+    setProcessExitCode: false,
+  });
+
+  assert.equal(result.assignment.assigned_login, 'central-owner');
+  assert.equal(result.approval.approval_status, 'denied');
+  assert.equal(result.approval.approver_login, 'central-owner');
+  assert.equal(result.request.request_status, 'awaiting_approval');
+  assert.match(result.assignment.assignment_note, /queue ownership only and does not authorize team hierarchy mutation/i);
+  assert.match(result.approval.decision_note, /does not authorize team hierarchy mutation/i);
+});
+
+test('runApprovalGate ignores later attachment comments after an executed csv_attachment hierarchy request reaches terminal state', async () => {
+  const fixture = loadFixture().approved;
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'add-child-teams-terminal-approval-'));
+  const artifactPath = writeAuditArtifact(workspace);
+  let commentsFetched = false;
+  const terminalArtifact = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
+  terminalArtifact.request.intake_mode = 'csv_attachment';
+  terminalArtifact.request.request_status = 'executed';
+  terminalArtifact.request.accepted_attachment_submission = {
+    comment_id: 70101,
+    comment_created_at: '2026-05-25T10:00:00Z',
+    uploader_login: 'himanshu-im',
+    attachment_url: 'https://github.com/user-attachments/files/70101/child-teams.csv',
+    filename: 'child-teams.csv',
+    extension: '.csv',
+    content_hash: 'hash-70101',
+    downloaded_at: '2026-05-25T10:00:02Z',
+    byte_size: 64,
+    acceptance_status: 'accepted',
+    rejection_reason: null,
+  };
+  fs.writeFileSync(artifactPath, JSON.stringify(terminalArtifact, null, 2));
+
+  const result = await runApprovalGate({
+    env: {
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      AUDIT_ARTIFACT_PATH: artifactPath,
+    },
+    api: {
+      listIssueComments: async () => {
+        commentsFetched = true;
+        return fixture.comments;
+      },
+      getMembershipForUser: async ({ teamSlug, username }) =>
+        fixture.memberships[teamSlug] && fixture.memberships[teamSlug][username]
+          ? fixture.memberships[teamSlug][username]
+          : { membership: null },
+      addIssueAssignees: async () => ({ status: 'assigned', assignees: fixture.assignees }),
+      getAssignableOwners: async () => fixture.assignees,
+    },
+  });
+
+  assert.equal(result.request.request_status, 'executed');
+  assert.equal(result.approval.approval_status, 'pending');
+  assert.equal(commentsFetched, false);
 });

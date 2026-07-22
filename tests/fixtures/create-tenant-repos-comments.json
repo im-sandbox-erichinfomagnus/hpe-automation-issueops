@@ -1,0 +1,10 @@
+[
+  {
+    "id": 1101,
+    "body": "approved",
+    "user": {
+      "login": "org-owner-user"
+    },
+    "created_at": "2026-05-29T10:00:00Z"
+  }
+]

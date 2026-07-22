@@ -147,5 +147,86 @@ test('runRequestValidation rejects ambiguous create-org-teams requests when neit
   assert.equal(result.validation.request.intake_mode, null);
   assert.match(result.validation.errors.join('\n'), /Exactly one intake source must be populated/i);
   assert.match(result.validation.errors.join('\n'), /At least one valid requested team name is required/i);
+  assert.match(fs.readFileSync(summaryPath, 'utf8'), /Create Organization Teams Workflow Summary/);
   assert.match(fs.readFileSync(summaryPath, 'utf8'), /Validation errors: .*Exactly one intake source must be populated/i);
+});
+
+test('runRequestValidation produces Create Organization Teams summary header for waiting-for-attachment requests', async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'create-org-teams-waiting-header-'));
+  const auditPath = path.join(workspace, 'audit.json');
+  const summaryPath = path.join(workspace, 'summary.md');
+
+  await runRequestValidation({
+    env: {
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      GITHUB_REPOSITORY: 'octo-org/issueops-speckit',
+      ISSUE_NUMBER: '405',
+      REQUESTER_LOGIN: 'requester',
+      PARSED_REQUEST_JSON: JSON.stringify({
+        organization: 'octo-org',
+        intended_owner: 'octocat',
+        intake_mode: 'csv_attachment',
+        requested_team_names: '',
+        business_justification: 'Need empty teams',
+        dry_run: true,
+      }),
+      AUDIT_ARTIFACT_PATH: auditPath,
+      GITHUB_STEP_SUMMARY: summaryPath,
+      GITHUB_RUN_ID: 'run-405',
+      GITHUB_RUN_ATTEMPT: '1',
+    },
+    api: {
+      getOrganization: async () => ({ exists: true }),
+      getOrganizationMembership: async () => ({ exists: true, membership: { state: 'active', role: 'member' } }),
+      listOrgTeams: async () => [],
+      listIssueComments: async () => [],
+    },
+  });
+
+  const summary = fs.readFileSync(summaryPath, 'utf8');
+  assert.match(summary, /Create Organization Teams Workflow Summary/);
+  assert.doesNotMatch(summary, /Add Team Members Workflow Summary/);
+  assert.match(summary, /Attachment status: waiting for requester CSV attachment comment/i);
+  assert.match(summary, /Intake mode: csv_attachment/i);
+  assert.match(summary, /execution remains blocked until the requester posts a qualifying CSV attachment comment/i);
+});
+
+test('runRequestValidation keeps empty-manual-input attachment requests in scope and waiting for a requester CSV attachment', async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'create-org-teams-attachment-scope-'));
+  const auditPath = path.join(workspace, 'audit.json');
+  const summaryPath = path.join(workspace, 'summary.md');
+
+  const result = await runRequestValidation({
+    env: {
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      GITHUB_REPOSITORY: 'octo-org/issueops-speckit',
+      ISSUE_NUMBER: '404',
+      REQUESTER_LOGIN: 'requester',
+      PARSED_REQUEST_JSON: JSON.stringify({
+        organization: 'octo-org',
+        intended_owner: 'octocat',
+        intake_mode: 'csv_attachment',
+        requested_team_names: '',
+        business_justification: 'Need empty teams',
+        dry_run: true,
+      }),
+      AUDIT_ARTIFACT_PATH: auditPath,
+      GITHUB_STEP_SUMMARY: summaryPath,
+      GITHUB_RUN_ID: 'run-404',
+      GITHUB_RUN_ATTEMPT: '1',
+    },
+    api: {
+      getOrganization: async () => ({ exists: true }),
+      getOrganizationMembership: async () => ({ exists: true, membership: { state: 'active', role: 'member' } }),
+      listOrgTeams: async () => [],
+      listIssueComments: async () => [],
+    },
+  });
+
+  assert.equal(result.validation.request.intake_mode, 'csv_attachment');
+  assert.equal(result.validation.request_status, 'waiting_for_attachment');
+  assert.equal(result.validation.is_valid, false);
+  assert.deepEqual(result.validation.errors, []);
+  assert.match(result.validation.warnings.join('\n'), /waiting for a requester-authored CSV attachment comment/i);
+  assert.match(fs.readFileSync(summaryPath, 'utf8'), /Attachment status: waiting for requester CSV attachment comment/i);
 });

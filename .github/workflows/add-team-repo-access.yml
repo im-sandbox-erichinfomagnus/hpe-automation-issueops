@@ -40,7 +40,7 @@ jobs:
       AUDIT_ARTIFACT_PATH: artifacts/add-team-repo-access-validation-${{ github.event.issue.number || inputs.issue-number || 'manual' }}.json
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v5
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -61,6 +61,7 @@ jobs:
           if [ "$EVENT_NAME" = "issues" ] || [ "$EVENT_NAME" = "issue_comment" ]; then
             issue_body=$(jq -r '.issue.body // ""' "$GITHUB_EVENT_PATH")
             requester_login=$(jq -r '.issue.user.login // ""' "$GITHUB_EVENT_PATH")
+            issue_labels_json=$(jq -c '.issue.labels // []' "$GITHUB_EVENT_PATH")
           else
             if [ -z "$ISSUE_NUMBER" ]; then
               echo "workflow_dispatch requires an issue number to replay" >&2
@@ -75,10 +76,12 @@ jobs:
 
             issue_body=$(printf '%s' "$issue_json" | jq -r '.body // ""')
             requester_login=$(printf '%s' "$issue_json" | jq -r '.user.login // ""')
+            issue_labels_json=$(printf '%s' "$issue_json" | jq -c '.labels // []')
           fi
 
-          echo "requester_login=$requester_login" >> "$GITHUB_OUTPUT"
           {
+            echo "requester_login=$requester_login"
+            echo "issue_labels_json=$issue_labels_json"
             echo 'issue_body<<EOF'
             printf '%s\n' "$issue_body"
             echo EOF
@@ -96,13 +99,12 @@ jobs:
         env:
           PARSED_TARGET_TEAM: ${{ steps.parse_request.outputs.parsed_target_team }}
           PARSED_DESIGNATED_APPROVER: ${{ steps.parse_request.outputs.parsed_designated_approver }}
-          PARSED_REQUESTED_REPOSITORIES: ${{ steps.parse_request.outputs.parsed_requested_repositories }}
           PARSED_PERMISSION_LEVEL: ${{ steps.parse_request.outputs.parsed_permission_level }}
         run: |
           set -euo pipefail
 
           matches_request=false
-          if [ -n "${PARSED_TARGET_TEAM:-}" ] && [ -n "${PARSED_DESIGNATED_APPROVER:-}" ] && [ -n "${PARSED_REQUESTED_REPOSITORIES:-}" ] && [ -n "${PARSED_PERMISSION_LEVEL:-}" ]; then
+          if [ -n "${PARSED_TARGET_TEAM:-}" ] && [ -n "${PARSED_DESIGNATED_APPROVER:-}" ] && [ -n "${PARSED_PERMISSION_LEVEL:-}" ]; then
             matches_request=true
           fi
 
@@ -126,6 +128,7 @@ jobs:
           PARSED_TARGET_TEAM: ${{ steps.parse_request.outputs.parsed_target_team }}
           PARSED_DESIGNATED_APPROVER: ${{ steps.parse_request.outputs.parsed_designated_approver }}
           PARSED_REQUESTED_REPOSITORIES: ${{ steps.parse_request.outputs.parsed_requested_repositories }}
+          PARSED_BULK_CSV_REQUESTED_REPOSITORIES: ${{ steps.parse_request.outputs.parsed_bulk_csv_requested_repositories }}
           PARSED_PERMISSION_LEVEL: ${{ steps.parse_request.outputs.parsed_permission_level }}
           PARSED_BUSINESS_JUSTIFICATION: ${{ steps.parse_request.outputs.parsed_business_justification }}
           PARSED_DRY_RUN: ${{ steps.parse_request.outputs.parsed_dry_run }}
@@ -144,7 +147,7 @@ jobs:
 
       - name: Execute approved repository-access reconciliation
         id: execute_request
-        if: ${{ always() && steps.request_scope.outputs.matches-request == 'true' && steps.approval_gate.outputs.approval-status == 'approved' }}
+        if: ${{ always() && steps.request_scope.outputs.matches-request == 'true' && steps.approval_gate.outputs['approval-status'] == 'approved' }}
         env:
           ISSUEOPS_GITHUB_TOKEN: ${{ secrets.ISSUEOPS_GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ github.token }}

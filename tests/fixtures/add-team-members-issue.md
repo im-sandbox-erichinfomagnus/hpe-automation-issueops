@@ -6,6 +6,10 @@ octo-org
 
 platform-engineering
 
+### Intake mode
+
+manual
+
 ### Requested people
 
 octocat

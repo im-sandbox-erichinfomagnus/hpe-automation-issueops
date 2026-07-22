@@ -1,0 +1,387 @@
+name: create-tenant-hosted-runner-workflow-contract
+version: 1
+purpose: >-
+  Contract for the tenant-scoped GitHub-hosted runner creation IssueOps
+  workflow that resolves canonical tenant context from tenant-registry plus
+  live governance state, authorizes the requester through active membership in
+  the canonical tenant topology admin team, derives the tenant-prefixed runner
+  name, resolves the target runner group, creates one GitHub-hosted runner in
+  the target organization after designated active-org-owner approval, and
+  emits durable audit evidence.
+
+implementation_status: complete
+last_validated: 2026-06-05
+validated_against:
+  - issue_form: .github/ISSUE_TEMPLATE/create-tenant-hosted-runner.yml
+  - workflow: .github/workflows/create-tenant-hosted-runner.yml
+  - scripts:
+      - src/scripts/run-request-validation.js
+      - src/scripts/run-approval-gate.js
+      - src/scripts/run-approved-execution.js
+  - modules:
+      - src/workflow-support/parse-hosted-runner-request.js
+      - src/workflow-support/resolve-tenant-cicd-context-from-registry.js
+      - src/workflow-support/validate-hosted-runner-request.js
+      - src/workflow-support/reconcile-hosted-runner-creation.js
+      - src/workflow-support/resolve-hosted-runner-approver.js
+      - src/workflow-support/approval-gate.js
+      - src/workflow-support/build-audit-artifact.js
+      - src/workflow-support/build-execution-outcome.js
+      - src/workflow-support/github-runner-api.js
+      - src/actions/hosted-runner-policy/index.js
+
+issue_form:
+  path: .github/ISSUE_TEMPLATE/create-tenant-hosted-runner.yml
+  required_fields:
+    - id: organization
+      type: input
+      parsed_env_key: PARSED_ORGANIZATION
+    - id: tenant_name
+      type: input
+      parsed_env_key: PARSED_TENANT_NAME
+      note: >-
+        Human-readable tenant name exactly as stored in tenant_display_name in
+        the tenant-registry record for the target organization.
+    - id: runner_name
+      type: input
+      parsed_env_key: PARSED_RUNNER_NAME
+      note: >-
+        Runner base name. The workflow derives the full runner name as
+        TenantName_RunnerBaseName; a base name already carrying the exact
+        tenant prefix is used as-is.
+    - id: runner_image_id
+      type: input
+      parsed_env_key: PARSED_RUNNER_IMAGE_ID
+    - id: runner_image_source
+      type: dropdown
+      default: github
+      parsed_env_key: PARSED_RUNNER_IMAGE_SOURCE
+    - id: runner_size
+      type: input
+      parsed_env_key: PARSED_RUNNER_SIZE
+    - id: runner_group_name
+      type: input
+      required: false
+      parsed_env_key: PARSED_RUNNER_GROUP_NAME
+      note: >-
+        Optional tenant runner group (TenantName_ prefix required). When
+        omitted, the organization default runner group is targeted.
+    - id: maximum_runners
+      type: input
+      required: false
+      parsed_env_key: PARSED_MAXIMUM_RUNNERS
+    - id: designated_approver
+      type: input
+      parsed_env_key: PARSED_DESIGNATED_APPROVER
+    - id: dry_run
+      type: dropdown
+      default: "true"
+      parsed_env_key: PARSED_DRY_RUN
+    - id: justification
+      type: textarea
+      parsed_env_key: PARSED_JUSTIFICATION
+
+parser:
+  action: issue-ops/parser@v5
+  outputs:
+    - json
+    - parsed_organization
+    - parsed_tenant_name
+    - parsed_runner_name
+    - parsed_runner_image_id
+    - parsed_runner_image_source
+    - parsed_runner_size
+    - parsed_runner_group_name
+    - parsed_maximum_runners
+    - parsed_designated_approver
+    - parsed_dry_run
+    - parsed_justification
+
+request_normalization:
+  tenant_name_input: raw value from parsed_tenant_name (trimmed)
+  tenant_name_normalized: >-
+    lowercase, leading/trailing whitespace stripped, internal runs of
+    whitespace collapsed to a single space; used for case-insensitive registry
+    matching
+  runner_base_name_normalized: >-
+    trimmed, internal whitespace converted to underscores, characters outside
+    [A-Za-z0-9._-] removed
+  runner_name_derived: >-
+    tenant display name with whitespace converted to underscores, plus '_',
+    plus runner_base_name_normalized; base names already carrying the exact
+    tenant prefix are used as-is; must satisfy GitHub hosted-runner naming
+    (1-64 chars, [A-Za-z0-9._-])
+  maximum_runners: positive integer when provided; otherwise platform default
+
+workflow_entry_assumptions:
+  create_tenant_hosted_runner_workflow:
+    events:
+      issues:
+        - opened
+        - edited
+        - reopened
+        - labeled
+      issue_comment:
+        - created
+        - edited
+        - deleted
+    concurrency:
+      group: create-tenant-hosted-runner-{issue_number}
+      cancel_in_progress: false
+    applicability_gate:
+      required_parser_outputs:
+        - parsed_organization
+        - parsed_tenant_name
+        - parsed_runner_name
+        - parsed_runner_image_id
+        - parsed_runner_size
+        - parsed_designated_approver
+    execution_gate:
+      approval_output_key: approval-status
+      required_expression: steps.approval_gate.outputs['approval-status'] == 'approved'
+    workflow_permissions:
+      actions: read
+      contents: read
+      issues: write
+      note: >-
+        Hosted-runner mutation uses ISSUEOPS_GITHUB_TOKEN. issues:write is
+        required for terminal-state label application on the workflow's own
+        GitHub token (github.token).
+    terminal_state_labels:
+      prefix: "issueops:create-tenant-hosted-runner:"
+      values:
+        - issueops:create-tenant-hosted-runner:executed
+        - issueops:create-tenant-hosted-runner:failed
+        - issueops:create-tenant-hosted-runner:partially_executed
+      ensure_step: >-
+        Labels are idempotently created via 'gh label create --force' before
+        the approved-execution step runs, guarded by the same approval-status
+        condition.
+      applied_on: approved execution completion (terminal request_status)
+
+authorization:
+  requester_identity: github.event.issue.user.login
+  approver_model: designated currently authorized target-organization approver
+  requester_tenant_requirements:
+    - requester tenant name must resolve to exactly one registry record for the target organization
+    - the tenant topology admin team (type "admin", <tenant-slug>-admin) must exist in the target organization
+    - requester must be an active member (member or maintainer) of the tenant topology admin team
+  central_assignment_semantics: >-
+    routing only; central assignment never authorizes hosted-runner mutation
+  execution_identity:
+    credential: ISSUEOPS_GITHUB_TOKEN
+    token_kind: pat
+    least_privilege: true
+    required_scope: manage_runners:org (classic) or equivalent fine-grained organization hosted-runner administration permission
+    fail_closed: >-
+      execution is blocked if ISSUEOPS_GITHUB_TOKEN is missing or if the token
+      fails the PAT-backed check in assertHostedRunnerMutationAllowed
+
+tenant_resolution:
+  authoritative_registry_source: tenant-registry/ on repository main branch
+  registry_ref_env_key: TENANT_REGISTRY_REF
+  registry_dir_env_key: TENANT_REGISTRY_DIR
+  required_inputs:
+    - requester identity
+    - target organization
+    - tenant_name_normalized
+    - registry record
+    - live team existence for the tenant root team and the tenant topology admin team
+    - live requester membership on the tenant topology admin team
+  resolution_algorithm: >-
+    1. Load all .json records from tenant-registry/ whose organization matches
+       the target organization.
+    2. Filter to records whose tenant_display_name normalizes to the requested
+       tenant name.
+    3. Read the canonical tenant topology (spec 022-enhance-tenant-topology):
+       resolve the tenant root team (structure type "root") and the tenant
+       admin team (structure type "admin", carrying the tenant-admin role).
+       Legacy flat records are projected to the same <tenant-slug>-root /
+       <tenant-slug>-admin / <tenant-slug>-repo-admin naming. Verify both teams
+       exist and the requester holds active membership on the admin team.
+    4. Resolution outcome is 'resolved' (exactly 1 authorized), 'ambiguous'
+       (>1 authorized), or 'no_match' (0 authorized).
+  fail_closed_conditions:
+    - no tenant match (no_match)
+    - ambiguous tenant match (ambiguous)
+    - missing registry record
+    - malformed registry record
+    - missing tenant team in live state
+    - missing tenant topology admin team
+    - requester not an active member of the tenant topology admin team
+    - tenant_name_input field missing or empty
+
+context_marker:
+  format: "tenant-runner-context:{16-char-sha256-hex}"
+  inputs:
+    - operation (literal 'hosted_runner_creation')
+    - organization (normalized)
+    - runner_name_derived (normalized)
+    - designated_approver_login (normalized)
+    - tenant_key (normalized)
+    - cicd_admin_team_slug (normalized)
+    - registry_ref
+  purpose: >-
+    Binds approval to a specific validated request state. If any input changes
+    the marker changes and a prior approval is invalidated.
+
+approval:
+  mode: context_bound
+  binding: approved_context_marker must equal latest_context_marker at execution time
+  invalidation_condition: latest context marker differs from approved context marker
+  stale_approval_outcome: approval_status set to 'invalidated'; request reverts to awaiting_approval
+  authorized_approver_role: target_org_owner (active admin of the target organization)
+  designated_approver_check: commenter login must match designated_approver_login from request
+  denied_roles:
+    - central_assignment (queue owner)
+    - other (any non-designated commenter)
+  denial_note_pattern: "does not authorize tenant hosted-runner mutation"
+
+validation_rules:
+  - tenant_name_input is required; validation fails immediately if absent or empty.
+  - Runner base name must derive deterministically into a valid hosted-runner name (1-64 chars, [A-Za-z0-9._-], tenant prefix).
+  - Canonical tenant CI/CD context must resolve to exactly one authorized match from registry and live org state.
+  - Requester must be an active member of the tenant topology admin team (type "admin").
+  - Runner image id, image source, and machine size are required inputs.
+  - Explicit runner group names must carry the tenant prefix and resolve to an existing organization runner group.
+  - When no runner group is provided, the organization default runner group must resolve.
+  - Designated approver must be currently authorized (active admin) for the target organization.
+  - Validation must produce a context marker used to bind approval to latest validated state.
+  - Dry-run requests pass validation and produce mutation intent but must not execute any mutation.
+
+reconciliation:
+  current_state_reads:
+    - organization visibility
+    - authoritative tenant-registry record from main branch
+    - live tenant root team and tenant topology admin team existence
+    - requester membership on the tenant topology admin team
+    - organization hosted-runner listing (derived-name existence check)
+    - organization runner-group listing (target group resolution)
+  mutation_rule:
+    - create hosted runner only when no runner with the derived name exists (creation_action = create_hosted_runner)
+  no_op_rule:
+    - existing runner with derived name: creation_action = noop; executed status with noop outcome
+  blocked_rule:
+    - boundary_mismatch: requester authorization or governance state changed between validation and execution
+    - missing_tenant_context: resolved context is absent at execution time
+    - unresolved_runner_group: target runner group cannot be resolved at execution time
+  stale_state_rule: recompute current state and boundary context before mutation
+  rerun_rule: idempotent; no duplicate runner creation
+  dry_run_rule: emit tenant resolution and mutation intent with no mutation
+
+execution:
+  policy_guards:
+    - assertHostedRunnerMutationAllowed: checks approval_status=approved, approver_role=target_org_owner, authorization_state=authorized, PAT-backed token
+  mutation_order:
+    - 1. createHostedRunner via POST /orgs/{org}/actions/hosted-runners with name, image {id, source}, size, runner_group_id, optional maximum_runners
+  api_endpoints:
+    - GET /orgs/{org}/actions/hosted-runners
+    - POST /orgs/{org}/actions/hosted-runners
+    - GET /orgs/{org}/actions/runner-groups
+  partial_failure_handling: >-
+    If the platform accepts creation but the returned runner enters a failed
+    provisioning state, request_status becomes 'partially_executed' with
+    rollback_status 'manual_remediation_required' and the runner id surfaced
+    for operator follow-up.
+  audit_persistence:
+    result_field: audit_persistence_result
+    values: [persisted, failed, pending]
+    failure_handling: non-fatal; logged as warning; execution status may degrade
+
+observability:
+  persistence_model: retained workflow artifact plus github step summary
+  outputs:
+    - github_step_summary
+    - json_audit_artifact
+  artifact_requirements:
+    upload_on:
+      - validation
+      - approval
+      - approved_execution
+    retention_policy_source: AUDIT_ARTIFACT_RETENTION_DAYS env variable (default 30 days)
+    artifact_name_pattern: "create-tenant-hosted-runner-execution-{issue_number}-{run_attempt}"
+  audit_artifact_fields:
+    request:
+      - request_id
+      - issue_number
+      - repository
+      - requester_login
+      - organization
+      - tenant_name_input
+      - tenant_name_normalized
+      - runner_base_name_input
+      - runner_name_derived
+      - runner_image_id
+      - runner_image_source
+      - runner_size
+      - runner_group_name_input
+      - maximum_runners
+      - designated_approver_login
+      - dry_run
+      - intake_mode (always 'manual' for this workflow)
+      - request_status
+      - context_marker
+      - tenant_key
+      - cicd_admin_team_slug
+    validation:
+      - is_valid
+      - validation_status
+      - errors
+      - warnings
+      - tenant_resolution (status, match_count, candidates)
+      - requester_cicd_membership_state
+      - designated_approver_authorization
+      - runner_exists
+      - runner_group_resolution
+    approval:
+      - approval_status
+      - approver_login
+      - approver_role
+      - approver_authorization_state
+      - approved_context_marker
+      - latest_context_marker
+      - decision_note
+    reconciliation:
+      - creation_action
+      - boundary_revalidation_status
+      - blocked_reason
+      - runner_group_resolution
+    execution:
+      - runner_creation_result
+      - created_runner_id
+      - created_runner_status
+      - audit_persistence_result
+      - mutation_count
+      - noop_count
+      - failure_count
+      - rollback_status
+      - summary
+  lifecycle_states:
+    - submitted
+    - awaiting_approval
+    - approved
+    - validation_failed
+    - executed
+    - failed
+    - partially_executed
+    - blocked
+
+rate_limit_handling:
+  strategy: bounded_exponential_backoff
+  inspect_headers:
+    - x-ratelimit-remaining
+    - x-ratelimit-reset
+    - retry-after
+  retryable_conditions:
+    - transient 5xx responses
+    - secondary rate limit responses (429 with retry-after)
+    - explicit retry-after guidance
+  non_retryable_conditions:
+    - ambiguous tenant resolution
+    - unauthorized approver
+    - invalid runner-name derivation
+    - missing tenant topology admin team
+    - requester not an active tenant topology admin team member
+    - unresolved runner group
+    - missing or insufficient credential for boundary-critical reads
+    - boundary mismatch at execution time

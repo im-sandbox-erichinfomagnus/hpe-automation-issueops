@@ -51,10 +51,10 @@ test('issue form exposes exactly-one-mode create-org-teams intake fields', () =>
   const template = fs.readFileSync(templatePath, 'utf8');
 
   assert.match(template, /id:\s+requested_team_names/);
-  assert.match(template, /id:\s+bulk_csv_requested_team_names/);
-  assert.match(template, /validation enforces exactly one populated intake mode/i);
+  assert.match(template, /id:\s+intake_mode/);
+  assert.match(template, /csv_attachment/);
   assert.match(template, /requested_team_names[\s\S]*required:\s+false/i);
-  assert.match(template, /bulk_csv_requested_team_names[\s\S]*required:\s+false/i);
+  assert.match(template, /intake_mode[\s\S]*required:\s+true/i);
 });
 
 test('parses a valid create-org-teams bulk CSV fixture into a normalized request', () => {

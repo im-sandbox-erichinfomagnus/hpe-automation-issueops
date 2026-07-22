@@ -103,6 +103,80 @@ test('approval policy remains pending when no approval signal exists', async () 
   assert.match(decision.decision_note, new RegExp(APPROVAL_COMMAND));
 });
 
+test('approval policy keeps the same designated-approver rule for manual and csv-compatible repo-access requests', async () => {
+  const fixture = loadFixture().approved;
+
+  for (const intakeMode of ['manual', 'csv_attachment']) {
+    const decision = await evaluateApprovalGate(
+      {
+        organization: 'octo-org',
+        designatedApproverLogin: 'octocat',
+        approvalMode: 'team_repo_access',
+        intake_mode: intakeMode,
+        issueComments: fixture.comments,
+      },
+      {
+        resolveRole: ({ organization, approverLogin, designatedApproverLogin }) =>
+          resolveTeamRepoAccessApprover(
+            { organization, approverLogin, designatedApproverLogin },
+            {
+              getOrganizationMembership: async ({ username }) =>
+                fixture.membership[username] || { exists: false, membership: null },
+            }
+          ),
+      }
+    );
+
+    assert.equal(decision.approval_status, 'approved');
+    assert.equal(decision.approver_role, 'target_org_owner');
+  }
+});
+
+test('approval policy does not evaluate approval while csv_attachment request is waiting_for_attachment', async () => {
+  const fixture = loadFixture().approved;
+  const decision = await evaluateApprovalGate(
+    {
+      organization: 'octo-org',
+      designatedApproverLogin: 'octocat',
+      approvalMode: 'team_repo_access',
+      intake_mode: 'csv_attachment',
+      request_status: 'waiting_for_attachment',
+      issueComments: fixture.comments,
+    },
+    {
+      resolveRole: async () => ({ approver_role: 'target_org_owner' }),
+    }
+  );
+
+  assert.equal(decision.approval_status, 'not_requested');
+  assert.match(decision.decision_note, /waiting for a requester-authored CSV attachment comment/i);
+});
+
+test('approval policy guardrail: non-approval comments never grant approval even with designated routing context', async () => {
+  const decision = await evaluateApprovalGate(
+    {
+      organization: 'octo-org',
+      designatedApproverLogin: 'octocat',
+      approvalMode: 'team_repo_access',
+      intake_mode: 'manual',
+      request_status: 'awaiting_approval',
+      issueComments: [
+        {
+          id: 1001,
+          body: 'assigned to central owner for queue processing',
+          created_at: '2026-01-01T10:00:00Z',
+          user: { login: 'central-owner' },
+        },
+      ],
+    },
+    {
+      resolveRole: async () => ({ approver_role: 'target_org_owner' }),
+    }
+  );
+
+  assert.equal(decision.approval_status, 'pending');
+});
+
 test('team repo access policy requires approver, designated approver, and authorized owner state to match', () => {
   assert.equal(
     isEligibleTeamRepoAccessApprover({

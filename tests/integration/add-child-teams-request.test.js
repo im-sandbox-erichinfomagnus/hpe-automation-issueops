@@ -58,6 +58,10 @@ test('runRequestValidation records an approval-ready add-child-teams request wit
 
   assert.equal(result.validation.is_valid, true);
   assert.equal(result.validation.request_status, 'awaiting_approval');
+  assert.equal(result.validation.request.intake_mode, 'manual');
+  assert.equal(result.auditArtifact.request.intake_mode, 'manual');
+  assert.equal(result.auditArtifact.request.bulk_csv_submission, null);
+  assert.deepEqual(result.auditArtifact.request.csv_row_findings, []);
   assert.equal(result.auditArtifact.metadata.operation, 'team_hierarchy');
   assert.deepEqual(
     result.auditArtifact.reconciliation.child_links_to_apply.map((entry) => entry.child_team_slug),
@@ -67,8 +71,36 @@ test('runRequestValidation records an approval-ready add-child-teams request wit
     result.auditArtifact.reconciliation.child_links_already_present.map((entry) => entry.child_team_slug),
     ['release-engineering']
   );
+  assert.match(fs.readFileSync(summaryPath, 'utf8'), /Intake mode: manual/);
+  assert.match(fs.readFileSync(summaryPath, 'utf8'), /No child-team mutation was attempted/i);
   assert.match(fs.readFileSync(summaryPath, 'utf8'), /Add Child Teams Workflow Summary/);
   assert.match(fs.readFileSync(outputPath, 'utf8'), /validation-status=awaiting_approval/);
+});
+
+test('manual workflow guardrail keeps add-child-teams request applicability independent of attachment comment context', () => {
+  const workflowPath = path.join(__dirname, '..', '..', '.github', 'workflows', 'add-child-teams.yml');
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
+  const requestScopeBlock = workflow.match(/- name: Check request applicability[\s\S]*?echo "matches-request=\$matches_request" >> "\$GITHUB_OUTPUT"/);
+
+  assert.ok(requestScopeBlock);
+  assert.match(requestScopeBlock[0], /PARSED_REQUEST_JSON/);
+  assert.match(requestScopeBlock[0], /json_parent_team/);
+  assert.match(requestScopeBlock[0], /json_designated_approver/);
+  assert.match(requestScopeBlock[0], /json_requested_child_teams/);
+  assert.match(requestScopeBlock[0], /json_intake_mode/);
+  assert.match(requestScopeBlock[0], /json_has_hierarchy_signals/);
+  assert.match(requestScopeBlock[0], /ISSUE_LABELS_JSON/);
+  assert.match(requestScopeBlock[0], /has_add_child_teams_label/);
+  assert.doesNotMatch(requestScopeBlock[0], /ISSUE_TITLE/);
+  assert.match(requestScopeBlock[0], /PARSED_PARENT_TEAM/);
+  assert.match(requestScopeBlock[0], /PARSED_DESIGNATED_HIERARCHY_APPROVER/);
+  assert.match(requestScopeBlock[0], /PARSED_DESIGNATED_APPROVER/);
+  assert.match(requestScopeBlock[0], /\.parent_team \/\/ \.parent_team_slug \/\/ \.parent_team_name \/\/ ""/);
+  assert.match(requestScopeBlock[0], /\.designated_hierarchy_approver \/\/ \.designated_approver \/\/ ""/);
+  assert.match(requestScopeBlock[0], /"add-child-teams"/);
+  assert.doesNotMatch(requestScopeBlock[0], /\. == "issueops"/);
+  assert.doesNotMatch(requestScopeBlock[0], /COMMENT_ID/);
+  assert.doesNotMatch(requestScopeBlock[0], /COMMENT_AUTHOR_LOGIN/);
 });
 
 test('runRequestValidation fails when the target organization is not visible', async () => {
@@ -128,6 +160,11 @@ test('runRequestValidation fails when a requested child team is missing', async 
 
   assert.equal(result.validation.is_valid, false);
   assert.match(result.validation.errors.join('\n'), /child teams do not exist/i);
+  assert.equal(result.validation.designated_approver_authorization.state, 'authorized');
+  assert.doesNotMatch(
+    result.validation.errors.join('\n'),
+    /not a current maintainer of the requested parent team/i
+  );
 });
 
 test('runRequestValidation fails duplicate child-team requests instead of silently deduplicating them', async () => {
@@ -157,6 +194,84 @@ test('runRequestValidation fails duplicate child-team requests instead of silent
 
   assert.equal(result.validation.is_valid, false);
   assert.match(result.validation.errors.join('\n'), /duplicate child teams/i);
+});
+
+test('runRequestValidation rejects requests that leave both manual and CSV intake fields empty', async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'add-child-teams-empty-intake-'));
+  const auditPath = path.join(workspace, 'audit.json');
+  const summaryPath = path.join(workspace, 'summary.md');
+  const validationFixture = loadJsonFixture('team-hierarchy-validation.json').visible_org;
+
+  const result = await runRequestValidation({
+    env: {
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      GITHUB_REPOSITORY: 'octo-org/issueops-speckit',
+      ISSUE_NUMBER: '6041',
+      REQUESTER_LOGIN: 'requester',
+      PARSED_REQUEST_JSON: JSON.stringify({
+        organization: 'octo-org',
+        parent_team: 'Platform Engineering',
+        designated_approver: 'octocat',
+        requested_child_teams: '',
+        bulk_csv_requested_child_teams: '',
+        business_justification: 'Need hierarchy updates',
+        dry_run: true,
+      }),
+      AUDIT_ARTIFACT_PATH: auditPath,
+      GITHUB_STEP_SUMMARY: summaryPath,
+      GITHUB_RUN_ID: 'run-6041',
+      GITHUB_RUN_ATTEMPT: '1',
+    },
+    api: createHierarchyApi(validationFixture),
+    setProcessExitCode: false,
+  });
+
+  assert.equal(result.validation.is_valid, false);
+  assert.equal(result.validation.request_status, 'validation_failed');
+  assert.equal(result.validation.request.intake_mode, null);
+  assert.match(result.validation.errors.join('\n'), /Exactly one supported intake mode must be selected/i);
+  assert.match(fs.readFileSync(summaryPath, 'utf8'), /Validation errors: .*Exactly one supported intake mode must be selected/i);
+});
+
+test('runRequestValidation keeps csv_attachment hierarchy requests in waiting_for_attachment until requester attachment arrives', async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'add-child-teams-waiting-'));
+  const auditPath = path.join(workspace, 'audit.json');
+  const summaryPath = path.join(workspace, 'summary.md');
+  const validationFixture = loadJsonFixture('team-hierarchy-validation.json').visible_org;
+
+  const result = await runRequestValidation({
+    env: {
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      GITHUB_REPOSITORY: 'octo-org/issueops-speckit',
+      ISSUE_NUMBER: '6042',
+      REQUESTER_LOGIN: 'requester',
+      PARSED_REQUEST_JSON: JSON.stringify({
+        organization: 'octo-org',
+        parent_team: 'Platform Engineering',
+        designated_hierarchy_approver: 'octocat',
+        intake_mode: 'csv_attachment',
+        requested_child_teams: '',
+        business_justification: 'Need hierarchy updates',
+        dry_run: true,
+      }),
+      AUDIT_ARTIFACT_PATH: auditPath,
+      GITHUB_STEP_SUMMARY: summaryPath,
+      GITHUB_RUN_ID: 'run-6042',
+      GITHUB_RUN_ATTEMPT: '1',
+    },
+    api: createHierarchyApi(validationFixture),
+    setProcessExitCode: false,
+  });
+
+  assert.equal(result.validation.is_valid, false);
+  assert.equal(result.validation.request_status, 'waiting_for_attachment');
+  assert.equal(result.auditArtifact.request.request_status, 'waiting_for_attachment');
+  assert.equal(result.auditArtifact.request.intake_mode, 'csv_attachment');
+  assert.equal(result.auditArtifact.approval.approval_status, 'not_requested');
+  assert.equal(result.auditArtifact.request.requested_child_links.length, 0);
+  assert.match(fs.readFileSync(summaryPath, 'utf8'), /Add Child Teams Workflow Summary/);
+  assert.match(fs.readFileSync(summaryPath, 'utf8'), /Parent team: platform-engineering/i);
+  assert.match(fs.readFileSync(summaryPath, 'utf8'), /Attachment status: waiting for requester CSV attachment comment/i);
 });
 
 test('runRequestValidation rejects re-parenting and cycle-creating requests', async () => {

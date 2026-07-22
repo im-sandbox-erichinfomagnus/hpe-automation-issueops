@@ -1,0 +1,36 @@
+name: refresh-runner-form-options
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Refresh form dropdown options from GitHub
+        env:
+          ISSUEOPS_GITHUB_TOKEN: ${{ secrets.ISSUEOPS_GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+          RUNNER_ORG: ${{ github.repository_owner }}
+        run: node scripts/refresh-runner-form-options.js
+      - name: Commit changes if any
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo "No catalog changes."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add .github/ISSUE_TEMPLATE/create-tenant-hosted-runner.yml
+            git commit -m "refresh runner form image and machine-size options from GitHub catalog"
+            git push
+          fi

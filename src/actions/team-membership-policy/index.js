@@ -53,9 +53,21 @@ function buildPermissionGuard(context = {}, options = {}) {
   };
 }
 
+function assertTenantBootstrapMembershipAllowed(context = {}, options = {}) {
+  const decision = assertMutationAllowed(context, {
+    ...options,
+    allowedApproverRoles: options.allowedApproverRoles || ['org_owner', 'target_org_owner'],
+  });
+  if (!context.requester_login) {
+    throw new Error('Tenant membership bootstrap blocked because requester login is missing');
+  }
+  return decision;
+}
+
 module.exports = {
   DEFAULT_ALLOWED_APPROVER_ROLES,
   assertMutationAllowed,
+  assertTenantBootstrapMembershipAllowed,
   buildPermissionGuard,
   isEligibleApproverRole,
 };

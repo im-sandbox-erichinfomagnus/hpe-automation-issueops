@@ -1,0 +1,4 @@
+test_id,user_story,scenario,preconditions,form_inputs,expected_result,case_type
+DR-01,specs/022-delete-tenant-hosted-runner/spec.md,Validate deletion of an existing tenant runner,"Authorized CICD admin; runner exists","org, tenant, runner_csv, approver, dry_run=true","Status awaiting_approval; plan shows the runner to delete; no mutation",happy
+DR-02,specs/022-delete-tenant-hosted-runner/spec.md,Deleting an already-absent runner is a no-op,"Authorized; runner does not exist","valid fields, dry_run=true","No-op; reported as already absent, no error",idempotent
+DR-03,specs/022-delete-tenant-hosted-runner/spec.md,Reject unauthorized requester,"Requester not on <tenant>-cicd-admin team","valid runner_csv","Rejected: not an active member of the tenant CI/CD admin team",guardrail

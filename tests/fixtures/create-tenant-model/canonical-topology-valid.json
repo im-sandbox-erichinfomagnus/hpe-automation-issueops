@@ -1,0 +1,55 @@
+{
+  "organization": "octo-org",
+  "tenantName": "Acme Platform",
+  "tenantType": "platform",
+  "topology": {
+    "organization": {
+      "orgName": "octo-org"
+    },
+    "teams": {
+      "tenantRootTeam": "acme-platform-root",
+      "structure": [
+        {
+          "team": "acme-platform-root",
+          "parent": null,
+          "type": "root"
+        },
+        {
+          "team": "acme-platform-admin",
+          "parent": "acme-platform-root",
+          "type": "admin"
+        },
+        {
+          "team": "acme-platform-repo-admin",
+          "parent": "acme-platform-root",
+          "type": "repo-admin"
+        }
+      ]
+    },
+    "repositories": {
+      "owned": []
+    },
+    "runnerTopology": {
+      "runnerGroups": []
+    },
+    "accessModel": {
+      "enforcement": "tenant-boundary",
+      "roles": [
+        "tenant-admin",
+        "repo-admin",
+        "developer",
+        "viewer"
+      ]
+    }
+  },
+  "externalMappings": {
+    "cmdbId": "CMDB-900",
+    "costCenter": "CC-900",
+    "businessUnit": "platform",
+    "environment": "prod"
+  },
+  "metadata": {
+    "primaryContact": "owner@example.com",
+    "secondaryContact": "secondary@example.com"
+  }
+}

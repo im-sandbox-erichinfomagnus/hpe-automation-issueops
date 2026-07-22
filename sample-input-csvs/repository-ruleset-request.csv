@@ -1,0 +1,4 @@
+repository,ruleset_name,target,ref_name_pattern,enforcement,require_pull_request,block_force_pushes,require_linear_history,restrict_deletions
+acme-service-api,acme-main-protection,branch,~DEFAULT_BRANCH,active,true,true,false,true
+acme-web,acme-main-protection,branch,~DEFAULT_BRANCH,active,true,false,false,false
+acme-web,acme-tag-protection,tag,~ALL,evaluate,false,true,false,true

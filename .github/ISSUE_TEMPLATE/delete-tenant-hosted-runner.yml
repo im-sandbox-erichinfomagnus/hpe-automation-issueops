@@ -1,0 +1,74 @@
+name: Delete tenant GitHub-hosted runner
+description: Request deletion of a tenant-scoped GitHub-hosted runner at organization level, authorized by tenant CI/CD admin membership.
+title: "[delete-tenant-hosted-runner] <org>/<runner>: <summary>"
+labels:
+  - issueops
+  - delete-tenant-hosted-runner
+body:
+  - type: input
+    id: organization
+    attributes:
+      label: Target organization
+      description: GitHub organization where the hosted runner should be deleted.
+      placeholder: octo-org
+    validations:
+      required: true
+
+  - type: input
+    id: tenant_name
+    attributes:
+      label: Tenant name
+      description: Human-readable tenant name exactly as defined in tenant-registry for the target organization.
+      placeholder: ContosoUK
+    validations:
+      required: true
+
+  - type: textarea
+    id: runner_csv
+    attributes:
+      label: Hosted runner CSV (spreadsheet input)
+      description: Preferred input. Paste exactly one runner_name row. The header is optional and overrides the individual runner field.
+      placeholder: |
+        runner_name
+        linux-build
+    validations:
+      required: false
+
+  - type: input
+    id: runner_name
+    attributes:
+      label: Runner name
+      description: Name of the runner to delete. Accepts the full tenant-prefixed name (ContosoUK_ubuntu-build) or the base name (ubuntu-build); the tenant prefix is derived either way.
+      placeholder: ubuntu-build
+    validations:
+      required: false
+
+  - type: input
+    id: designated_approver
+    attributes:
+      label: Designated approver
+      description: GitHub login for the authorized approver who will post the approval comment (must be an active organization owner).
+      placeholder: org-owner-user
+    validations:
+      required: true
+
+  - type: dropdown
+    id: dry_run
+    attributes:
+      label: Dry-run mode
+      description: Dry-run validates tenant context and planned mutation without deleting the runner.
+      options:
+        - "true"
+        - "false"
+      default: 0
+    validations:
+      required: true
+
+  - type: textarea
+    id: justification
+    attributes:
+      label: Business justification
+      description: Explain why this hosted runner should be deleted.
+      placeholder: Decommissioning unused tenant CI capacity.
+    validations:
+      required: true

@@ -1,0 +1,197 @@
+name: add-child-teams-bulk-csv-workflow-contract
+version: 1
+purpose: >-
+  Contract for the IssueOps workflow enhancement that preserves the existing
+  add-child-teams manual request path and adds an optional bulk CSV textarea
+  for higher-volume child-team hierarchy requests.
+
+issue_form:
+  path: .github/ISSUE_TEMPLATE/add-child-teams.yml
+  required_fields:
+    - id: organization
+      type: input
+      description: Target GitHub organization slug.
+    - id: parent_team
+      type: input
+      description: Existing parent team to receive the requested child teams.
+    - id: designated_approver
+      type: input
+      description: GitHub login of the single hierarchy approver who must approve the full request batch.
+    - id: business_justification
+      type: textarea
+      description: Reason for changing the requested team hierarchy.
+    - id: dry_run
+      type: dropdown
+      description: Whether to execute validation only or allow hierarchy mutation after approval.
+  conditional_fields:
+    - id: requested_child_teams
+      type: textarea
+      description: Existing manual input path for one or more requested child teams.
+      rules:
+        - May be populated only when bulk_csv_requested_child_teams is empty.
+        - Accepts one child-team name per line for backward compatibility.
+    - id: bulk_csv_requested_child_teams
+      type: textarea
+      description: Optional bulk CSV textarea containing a UTF-8 CSV payload with a header row.
+      rules:
+        - May be populated only when requested_child_teams is empty.
+        - Must contain a header row with the required column `child_team`.
+        - Must not include row-level organization, parent-team, approver, membership, or repository columns.
+
+parser:
+  action: issue-ops/parser@v5
+  inputs:
+    body: ${{ github.event.issue.body }}
+    issue-form-template: add-child-teams.yml
+  outputs:
+    json: Parsed request payload as JSON string.
+    parsed_organization: Normalized organization field.
+    parsed_parent_team: Parsed parent-team field.
+    parsed_designated_approver: Parsed designated approver field.
+    parsed_requested_child_teams: Parsed manual child-team field before downstream normalization.
+    parsed_bulk_csv_requested_child_teams: Parsed bulk CSV textarea before downstream normalization.
+    parsed_dry_run: Parsed dry-run selection.
+
+workflow_inputs:
+  validation:
+    - name: organization
+      required: true
+    - name: parent_team
+      required: true
+    - name: designated_approver
+      required: true
+    - name: intake_mode
+      required: true
+      allowed:
+        - manual
+        - bulk_csv
+    - name: requested_child_teams
+      required: false
+    - name: bulk_csv_requested_child_teams
+      required: false
+    - name: requester_login
+      required: true
+    - name: dry_run
+      required: true
+  approval_gate:
+    - name: approver_login
+      required: true
+    - name: designated_approver
+      required: true
+  reconciliation:
+    - name: execution_token_source
+      required: true
+      description: PAT-backed workflow token source.
+    - name: audit_artifact_path
+      required: true
+      description: Persisted validation and approval artifact used by the execution runner.
+    - name: approval_status
+      required: true
+      description: Approval gate outcome that must be `approved` before hierarchy mutation.
+  workflow_env:
+    - name: ISSUEOPS_GITHUB_TOKEN
+      required: true
+      description: PAT-backed organization secret used for validation, approval verification, and hierarchy mutation.
+    - name: GITHUB_TOKEN
+      required: true
+      description: Default GitHub Actions repository token used for standard workflow context operations.
+
+authorization:
+  requester_identity: github.event.issue.user.login
+  allowed_approvers:
+    - single designated hierarchy approver for the full request batch
+  execution_identity:
+    model: personal access token supplied to the workflow from ISSUEOPS_GITHUB_TOKEN
+    bootstrap: repository or organization Actions secret injection
+    required_permissions:
+      members: write
+      metadata: read
+      issues: write
+
+validation_rules:
+  - Exactly one intake source must be populated: `requested_child_teams` or `bulk_csv_requested_child_teams`.
+  - A request that populates neither intake source must fail validation before approval or mutation.
+  - Manual-mode behavior must remain equivalent to the baseline add-child-teams workflow.
+  - Bulk CSV submissions must provide a header row containing `child_team`.
+  - Properly quoted `child_team` values are valid CSV input and must normalize the same as equivalent unquoted team names.
+  - CSV row findings must use 1-based data-row numbers that exclude the header row.
+  - Child-team names from CSV are normalized into the same slug derivation and conflict rules used by the manual path.
+  - Duplicate CSV child-team rows are rejected for hierarchy requests rather than silently deduplicated.
+  - Fully blank CSV rows are ignored for approval-readiness purposes but remain visible in row findings.
+  - Unsupported CSV columns are rejected because the enhancement remains within one organization, one parent team, one designated approver, and hierarchy-only scope.
+  - Row-level organization, parent-team, approver, membership, repository, or multi-organization data must be rejected.
+  - The target organization must exist and be visible to the executing identity.
+  - The requested parent team must exist in the target organization.
+  - Each requested child team must exist in the same target organization.
+  - The designated approver must be a current maintainer of the requested parent team and every requested child team.
+  - Requests that would create hierarchy cycles or require re-parenting must be rejected before mutation.
+  - Approval must be present as an issue comment containing exactly `approved` and must be granted by the designated approver.
+
+reconciliation:
+  current_state_reads:
+    - target organization visibility lookup
+    - requested parent team lookup
+    - requested child team lookups
+    - current parent linkage for each requested child team
+    - current child-team listing for the requested parent team
+    - latest full organization team listing before approved execution
+  mutation_rule: Attach only missing child teams to the requested parent team after intake normalization produces one validated requested-child-link list.
+  no_op_rule: Report already-linked child teams without rewriting them.
+  partial_success_rule: Persist per-link success or failure and surface required follow-up.
+  idempotency_rule: Re-running an already-satisfied approved request must not create duplicate hierarchy mutations.
+
+rate_limit_handling:
+  inspect_headers:
+    - x-ratelimit-remaining
+    - x-ratelimit-reset
+    - retry-after
+  retry_policy:
+    strategy: bounded exponential backoff
+    retryable_conditions:
+      - transient secondary rate limit
+      - explicit retry-after guidance
+    non_retryable_conditions:
+      - invalid approval
+      - missing parent or child team
+      - re-parenting conflict
+      - cycle-creating hierarchy request
+      - malformed or ambiguous CSV intake
+
+observability:
+  outputs:
+    - GitHub step summary
+    - JSON audit artifact
+    - requester-facing workflow summary in the Actions run
+  required_fields:
+    - issue_number
+    - run_id
+    - requester_login
+    - approver_login
+    - approval_status
+    - assignment_status
+    - organization
+    - parent_team
+    - designated_approver
+    - intake_mode
+    - requested_child_teams
+    - requested_child_links.source_row_number
+    - duplicate_row_count
+    - invalid_row_count
+    - csv_row_findings
+    - csv_row_numbering_convention
+    - execution.created_teams.source_row_number
+    - execution.noop_teams.source_row_number
+    - execution.failed_teams.source_row_number
+    - execution.created_teams
+    - execution.noop_teams
+    - execution.failed_teams
+    - rollback_status
+    - reconciliation.intake_mode
+    - reconciliation.child_links_to_apply.source_row_number
+    - reconciliation.child_links_already_present.source_row_number
+    - reconciliation.child_links_to_apply
+    - reconciliation.child_links_already_present
+  operator_notes:
+    - Central assignment is queue ownership only and does not authorize team hierarchy mutation.
+    - Requests that would create hierarchy cycles or require re-parenting are rejected rather than auto-healed in this feature version.
+    - Approved reruns against already-satisfied hierarchy state must report no-op outcomes instead of repeating mutations.

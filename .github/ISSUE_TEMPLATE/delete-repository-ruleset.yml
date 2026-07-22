@@ -1,0 +1,87 @@
+name: Delete repository ruleset
+description: Request deletion of a repository-level ruleset on a tenant repository, authorized by active tenant repo-admin team membership.
+title: "[delete-repository-ruleset] <org>/<repository>: <ruleset-name>"
+labels:
+  - issueops
+  - delete-repository-ruleset
+body:
+  - type: input
+    id: organization
+    attributes:
+      label: Target organization
+      description: GitHub organization that owns the tenant repository.
+      placeholder: octo-org
+    validations:
+      required: true
+
+  - type: input
+    id: tenant_name
+    attributes:
+      label: Tenant name (optional)
+      description: Human-readable tenant name as defined in tenant-registry, if the repository belongs to a tenant. Leave blank for imported repositories that are not in the tenant model.
+      placeholder: Acme Platform
+    validations:
+      required: false
+
+  - type: textarea
+    id: rulesets_csv
+    attributes:
+      label: Rulesets CSV (spreadsheet batch)
+      description: >-
+        Primary input. Paste one row per ruleset in the column order repository,ruleset_name.
+        One issue can carry many rows across many repositories. An optional header row is allowed.
+        The single-item fields below are used only when this is empty.
+      placeholder: |
+        repository,ruleset_name
+        acme-service-api,acme-main-protection
+        acme-web,acme-main-protection
+    validations:
+      required: false
+
+  - type: input
+    id: repository
+    attributes:
+      label: Target repository (optional, single-item path)
+      description: Repository name in the target organization. Used only when the CSV batch is empty. Authorization is by admin permission on this repository.
+      placeholder: acme-service-api
+    validations:
+      required: false
+
+  - type: input
+    id: ruleset_name
+    attributes:
+      label: Ruleset name (optional, single-item path)
+      description: Name of the repository ruleset to delete. Deletion is a no-op when the named ruleset is absent. Used only when the CSV batch is empty.
+      placeholder: acme-default-branch-protection
+    validations:
+      required: false
+
+  - type: input
+    id: designated_approver
+    attributes:
+      label: Designated approver
+      description: GitHub login for the authorized approver who will post the approval comment (must be an active organization owner).
+      placeholder: org-owner-user
+    validations:
+      required: true
+
+  - type: dropdown
+    id: dry_run
+    attributes:
+      label: Dry-run mode
+      description: Dry-run validates tenant context and planned mutation without changing any repository ruleset.
+      options:
+        - "true"
+        - "false"
+      default: 0
+    validations:
+      required: true
+
+  - type: textarea
+    id: justification
+    attributes:
+      label: Business justification
+      description: Explain why this repository ruleset should be removed.
+      placeholder: Retire the deprecated branch protection ruleset for the tenant repository.
+    validations:
+      required: true

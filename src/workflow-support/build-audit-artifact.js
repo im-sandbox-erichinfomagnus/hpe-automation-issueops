@@ -1,17 +1,87 @@
 'use strict';
 
+const { unwrapCodeFence } = require('./normalize-requested-repositories');
+
 function hasNonEmptyArray(value) {
   return Array.isArray(value) && value.length > 0;
 }
 
 function hasPopulatedString(value) {
-  return typeof value === 'string' && value.trim() !== '';
+  return typeof value === 'string' && unwrapCodeFence(value).trim() !== '';
+}
+
+function hasManualNormalizedEntries(value) {
+  if (!Array.isArray(value) || value.length === 0) {
+    return false;
+  }
+
+  return value.some((entry) => (
+    entry != null && (
+      typeof entry !== 'object' ||
+    (entry.source_row_number == null && entry.source_comment_id == null)
+    )
+  ));
 }
 
 function determineOperation(request = {}, runContext = {}) {
   const explicitOperation = runContext.operation || request.operation;
   if (explicitOperation) {
     return explicitOperation;
+  }
+
+  const isTenantRepoCreation = Boolean(
+    request.repository_name_input ||
+      request.repository_name_normalized
+  );
+
+  if (isTenantRepoCreation) {
+    return 'tenant_repo_creation';
+  }
+
+  const isHostedRunnerCreation = Boolean(
+    request.runner_image_id ||
+      request.runner_size
+  );
+
+  if (isHostedRunnerCreation) {
+    return 'hosted_runner_creation';
+  }
+
+  const isHostedRunnerMove = Boolean(
+    request.runner_move_scope ||
+      request.target_runner_group_name_input
+  );
+
+  if (isHostedRunnerMove) {
+    return 'hosted_runner_move';
+  }
+
+  const isHostedRunnerDeletion = Boolean(
+    request.runner_deletion_scope ||
+      ((request.runner_name_derived || request.runner_base_name_input) && !request.runner_image_id)
+  );
+
+  if (isHostedRunnerDeletion) {
+    return 'hosted_runner_deletion';
+  }
+
+  const isRunnerGroupCreation = Boolean(
+    request.runner_group_name_derived ||
+      request.runner_group_base_name_input
+  );
+
+  if (isRunnerGroupCreation) {
+    return 'runner_group_creation';
+  }
+
+  const isTenantCreation = Boolean(
+    request.tenant_key ||
+      request.tenant_display_name ||
+      (request.tenant_team_slug && request.repo_admin_team_slug)
+  );
+
+  if (isTenantCreation) {
+    return 'tenant_creation';
   }
 
   const isTeamHierarchy = Boolean(
@@ -27,10 +97,17 @@ function determineOperation(request = {}, runContext = {}) {
     return 'team_hierarchy';
   }
 
+  const isTeamRepoAccessRemoval = Boolean(
+    hasNonEmptyArray(request.requested_repository_removals)
+  );
+
+  if (isTeamRepoAccessRemoval) {
+    return 'team_repo_access_removal';
+  }
+
   const isTeamRepoAccess = Boolean(
     request.requested_permission_api_value ||
       request.requested_permission_label ||
-      (request.team_slug && request.designated_approver_login) ||
       hasNonEmptyArray(request.requested_repository_grants) ||
       hasNonEmptyArray(request.duplicate_repositories) ||
       hasNonEmptyArray(request.conflicting_repositories) ||
@@ -58,34 +135,97 @@ function determineOperation(request = {}, runContext = {}) {
 }
 
 function inferRequestIntakeMode(request = {}, operation = determineOperation(request)) {
-  if (request.intake_mode) {
-    return request.intake_mode;
+  if (Object.prototype.hasOwnProperty.call(request, 'intake_mode')) {
+    return request.intake_mode ?? null;
   }
 
-  if (
+  if (request.accepted_attachment_submission && request.accepted_attachment_submission.attachment_url) {
+    return 'csv_attachment';
+  }
+
+  const hasBulkCsvSignals = (
     hasPopulatedString(request.bulk_csv_input) ||
     hasNonEmptyArray(request.csv_row_findings) ||
     (request.bulk_csv_submission && request.bulk_csv_submission.schema_status && request.bulk_csv_submission.schema_status !== 'not_provided')
-  ) {
+  );
+  // hasManualInputSignals checks raw input strings only (not derived arrays), to detect
+  // genuinely ambiguous cases where both manual and CSV input strings are populated.
+  const hasManualInputSignals = (
+    operation === 'team_creation' && hasPopulatedString(request.requested_team_names_input)
+  ) || (
+    operation === 'team_membership' && hasPopulatedString(request.requested_people_input)
+  ) || (
+    operation === 'team_hierarchy' && hasPopulatedString(request.requested_child_teams_input)
+  ) || (
+    operation === 'team_repo_access' && hasPopulatedString(request.requested_repositories_input)
+  );
+  // hasManualArraySignals covers legacy artifacts where input strings may not be stored but
+  // derived arrays are populated (e.g. artifacts created before intake_mode was introduced).
+  const hasManualArraySignals = (
+    operation === 'team_creation' && (
+      hasPopulatedString(request.requested_team_names_input) ||
+      hasManualNormalizedEntries(request.requested_teams) ||
+      hasManualNormalizedEntries(request.requested_team_detail)
+    )
+  ) || (
+    operation === 'team_membership' && (
+      hasPopulatedString(request.requested_people_input) ||
+      hasManualNormalizedEntries(request.requested_people_detail) ||
+      hasManualNormalizedEntries(request.requested_people)
+    )
+  ) || (
+    operation === 'team_hierarchy' && (
+      hasPopulatedString(request.requested_child_teams_input) ||
+      hasManualNormalizedEntries(request.requested_child_links) ||
+      hasManualNormalizedEntries(request.requested_child_link_detail)
+    )
+  ) || (
+    operation === 'team_repo_access_removal' && (
+      hasPopulatedString(request.requested_repositories_input) ||
+      hasNonEmptyArray(request.requested_repository_removals)
+    )
+  ) || (
+    operation === 'team_repo_access' && (
+      hasPopulatedString(request.requested_repositories_input) ||
+      hasManualNormalizedEntries(request.requested_repository_grants) ||
+      (
+        Boolean(request.requested_permission_api_value) &&
+        !hasBulkCsvSignals
+      )
+    )
+  );
+
+  if (hasBulkCsvSignals && hasManualInputSignals) {
+    return null;
+  }
+
+  if (hasBulkCsvSignals) {
     return 'bulk_csv';
   }
 
-  if (operation === 'team_creation' && (
-    hasPopulatedString(request.requested_team_names_input) ||
-    hasNonEmptyArray(request.requested_teams) ||
-    hasNonEmptyArray(request.requested_team_detail)
-  )) {
-    return 'manual';
-  }
-
-  if (operation === 'team_membership' && (
-    hasPopulatedString(request.requested_people_input) ||
-    hasNonEmptyArray(request.requested_people)
-  )) {
+  if (hasManualInputSignals || hasManualArraySignals) {
     return 'manual';
   }
 
   return null;
+}
+
+function buildDefaultRepoAccessBulkCsvSubmission(rawInput = '') {
+  return {
+    encoding: 'utf-8',
+    header_columns: [],
+    required_columns: ['repository'],
+    unsupported_columns: [],
+    row_count: 0,
+    valid_row_count: 0,
+    invalid_row_count: 0,
+    duplicate_row_count: 0,
+    schema_status: 'not_provided',
+    schema_errors: [],
+    raw_input: rawInput,
+    csv_row_findings: [],
+    csv_row_numbering_convention: '1-based data-row numbers that exclude the header row',
+  };
 }
 
 function buildAuditArtifact(input = {}) {
@@ -106,23 +246,80 @@ function buildAuditArtifact(input = {}) {
       repository: request.repository,
       requester_login: request.requester_login,
       organization: request.organization,
+      tenant_name_input: request.tenant_name_input || '',
+      tenant_name_normalized: request.tenant_name_normalized || '',
+      repository_name_input: request.repository_name_input || '',
+      repository_name_normalized: request.repository_name_normalized || '',
+      repository_visibility: request.repository_visibility || '',
+      repository_visibility_source: request.repository_visibility_source || 'not_provided',
+      context_marker: request.context_marker || '',
+      tenant_display_name: request.tenant_display_name,
+      tenant_key: request.tenant_key,
+      tenant_type: request.tenant_type || null,
+      primary_contact: request.primary_contact ?? null,
+      primary_contact_type: request.primary_contact_type || 'absent',
+      secondary_contact: request.secondary_contact || null,
+      secondary_contact_type: request.secondary_contact_type || 'absent',
+      external_mappings: request.external_mappings || null,
+      governance: request.governance || null,
+      topology: request.topology || null,
+      compatibility: request.compatibility || null,
+      tenant_team_name: request.tenant_team_name,
+      tenant_team_slug: request.tenant_team_slug,
+      repo_admin_team_name: request.repo_admin_team_name,
+      repo_admin_team_slug: request.repo_admin_team_slug,
+      cicd_admin_team_name: request.cicd_admin_team_name || null,
+      cicd_admin_team_slug: request.cicd_admin_team_slug || null,
+      cicd_capability_intent: request.cicd_capability_intent || null,
+      runner_base_name_input: request.runner_base_name_input || '',
+      runner_name_derivation: request.runner_name_derivation || null,
+      runner_name_derived: request.runner_name_derived || '',
+      runner_image_id: request.runner_image_id || '',
+      runner_image_source: request.runner_image_source || '',
+      runner_size: request.runner_size || '',
+      runner_group_name_input: request.runner_group_name_input || '',
+      maximum_runners: request.maximum_runners ?? null,
+      runner_deletion_scope: request.runner_deletion_scope || '',
+      hosted_runner_id_input: request.hosted_runner_id_input ?? null,
+      target_runner_group_name_input: request.target_runner_group_name_input || '',
+      runner_move_scope: request.runner_move_scope || '',
+      runner_group_base_name_input: request.runner_group_base_name_input || '',
+      runner_group_name_derivation: request.runner_group_name_derivation || null,
+      runner_group_name_derived: request.runner_group_name_derived || '',
+      runner_group_visibility: request.runner_group_visibility || '',
+      runner_group_visibility_source: request.runner_group_visibility_source || '',
+      allows_public_repositories: request.allows_public_repositories ?? null,
+      variable_operation: request.variable_operation || null,
+      variable_prefix: request.variable_prefix || '',
+      variable_entries: request.variable_entries || [],
+      ruleset_operation: request.ruleset_operation || null,
+      ruleset_entries: request.ruleset_entries || [],
+      repository_entries: request.repository_entries || [],
       team_slug: request.team_slug,
       intake_mode: intakeMode,
+      requested_repositories_input: request.requested_repositories_input || '',
       requested_people_input: request.requested_people_input || '',
       requested_team_names_input: request.requested_team_names_input || '',
       bulk_csv_input: request.bulk_csv_input || '',
-      bulk_csv_submission: request.bulk_csv_submission || null,
+      accepted_attachment_submission: request.accepted_attachment_submission || null,
+      attachment_validation_attempt: request.attachment_validation_attempt || null,
+      bulk_csv_submission: request.bulk_csv_submission || validation.bulk_csv_submission || (
+        operation === 'team_repo_access' ? buildDefaultRepoAccessBulkCsvSubmission(request.bulk_csv_input || '') : null
+      ),
       team_name: request.team_name,
       parent_team_slug: request.parent_team_slug,
       parent_team_name: request.parent_team_name,
+      requested_child_teams_input: request.requested_child_teams_input || '',
       requested_people: request.requested_people,
-      csv_row_findings: request.csv_row_findings || [],
-      csv_row_numbering_convention: request.csv_row_numbering_convention || null,
+      requested_people_detail: request.requested_people_detail || [],
+      csv_row_findings: request.csv_row_findings || validation.csv_row_findings || [],
+      csv_row_numbering_convention: request.csv_row_numbering_convention || validation.csv_row_numbering_convention || null,
       intended_owner_login: request.intended_owner_login,
       designated_approver_login: request.designated_approver_login,
       requested_permission_label: request.requested_permission_label,
       requested_permission_api_value: request.requested_permission_api_value,
       requested_repository_grants: request.requested_repository_grants || [],
+      requested_repository_removals: request.requested_repository_removals || [],
       requested_teams: request.requested_teams || [],
       requested_child_links: request.requested_child_links || [],
       request_status: request.request_status,
@@ -144,6 +341,9 @@ function buildAuditArtifact(input = {}) {
       is_valid: validation.is_valid,
       errors: validation.errors || [],
       warnings: validation.warnings || [],
+      accepted_attachment_submission: validation.accepted_attachment_submission || null,
+      attachment_validation_attempt: validation.attachment_validation_attempt || null,
+      attachment_rate_limit_snapshot: validation.attachment_rate_limit_snapshot || null,
       team_exists: validation.team_exists,
       team_sync_blocked: validation.team_sync_blocked,
       bulk_csv_submission: validation.bulk_csv_submission || null,
@@ -152,7 +352,41 @@ function buildAuditArtifact(input = {}) {
       requested_people: validation.requested_people || [],
       organization_visible: validation.organization_visible,
       designated_approver_authorization: validation.designated_approver_authorization || null,
+      canonical_tenant_context: validation.canonical_tenant_context || null,
+      tenant_resolution: validation.tenant_resolution || null,
+      topology_mode: validation.validation_findings && validation.validation_findings.topology_mode || null,
+      owned_repositories_status: validation.validation_findings && validation.validation_findings.owned_repositories_status || null,
+      duplicate_owned_repository_status: validation.validation_findings && validation.validation_findings.duplicate_owned_repository_status || null,
+      duplicate_owned_repository_conflict: validation.validation_findings && validation.validation_findings.duplicate_owned_repository_conflict || null,
+      repository_exists: validation.repository_exists,
+      current_repo_admin_permission: validation.current_repo_admin_permission || null,
+      requester_eligibility: validation.requester_eligibility || null,
+      runner_exists: validation.runner_exists,
+      existing_runner_id: validation.existing_runner_id ?? null,
+      existing_runner_status: validation.existing_runner_status || null,
+      current_runner_group_id: validation.current_runner_group_id ?? null,
+      runner_resolution_status: validation.runner_resolution_status || null,
+      target_runner_group_resolution: validation.target_runner_group_resolution || null,
+      runner_already_in_target_group: validation.runner_already_in_target_group,
+      runner_group_resolution: validation.runner_group_resolution || null,
+      runner_group_exists: validation.runner_group_exists,
+      existing_runner_group_id: validation.existing_runner_group_id ?? null,
+      validation_findings: validation.validation_findings || null,
+      cicd_policy_scope_validation: validation.validation_findings && validation.validation_findings.cicd_policy_scope_validation || null,
+      policy_enforcement_status: {
+        governance_mandatory_validation: validation.validation_findings && validation.validation_findings.governance_mandatory_validation || 'unknown',
+        access_model_validation: validation.validation_findings && validation.validation_findings.access_model_validation || 'unknown',
+      },
+      canonical_topology_validation_context: {
+        has_topology: Boolean(request.topology),
+        compatibility_mode: request.compatibility && request.compatibility.mode ? request.compatibility.mode : 'canonical',
+      },
+      no_mutation_planned:
+        Boolean(request.dry_run) ||
+        ['submitted', 'awaiting_approval', 'validation_failed', 'waiting_for_attachment'].includes(String(request.request_status || '')),
       requested_repository_grants: validation.requested_repository_grants || [],
+      requested_repository_removals: validation.requested_repository_removals || [],
+      already_absent_repository_removals: validation.already_absent_repository_removals || [],
       already_satisfied_repository_grants: validation.already_satisfied_repository_grants || [],
       intended_owner_membership: validation.intended_owner_membership || null,
       requested_teams: validation.requested_teams || [],
@@ -173,6 +407,8 @@ function buildAuditArtifact(input = {}) {
       approver_role: approval.approver_role || 'other',
       approver_membership_state: approval.approver_membership_state || 'unknown',
       approver_authorization_state: approval.approver_authorization_state || 'unknown',
+      approved_context_marker: approval.approved_context_marker || null,
+      latest_context_marker: approval.latest_context_marker || null,
       approved_at: approval.approved_at || null,
       decision_source: approval.decision_source || '',
       decision_note: approval.decision_note || '',
@@ -180,15 +416,61 @@ function buildAuditArtifact(input = {}) {
     reconciliation: {
       team_exists: reconciliationPlan.team_exists,
       team_sync_blocked: reconciliationPlan.team_sync_blocked,
+      accepted_attachment_submission: reconciliationPlan.accepted_attachment_submission || null,
+      attachment_validation_attempt: reconciliationPlan.attachment_validation_attempt || null,
       current_members: reconciliationPlan.current_members || [],
       people_to_add: reconciliationPlan.people_to_add || [],
       people_already_present: reconciliationPlan.people_already_present || [],
       people_rejected: reconciliationPlan.people_rejected || [],
       organization_exists: reconciliationPlan.organization_exists,
+      organization_visible: reconciliationPlan.organization_visible,
+      repository_exists: reconciliationPlan.repository_exists,
+      repository_full_name: reconciliationPlan.repository_full_name || '',
+      current_repo_admin_permission: reconciliationPlan.current_repo_admin_permission || null,
+      desired_repo_admin_permission: reconciliationPlan.desired_repo_admin_permission || null,
+      requested_visibility: reconciliationPlan.requested_visibility || request.repository_visibility || null,
+      existing_visibility: reconciliationPlan.existing_visibility || null,
+      visibility_conflict: reconciliationPlan.visibility_conflict || false,
+      desired_repository_visibility: reconciliationPlan.desired_repository_visibility || request.repository_visibility || null,
+      actual_visibility: reconciliationPlan.actual_visibility || reconciliationPlan.existing_visibility || null,
+      creation_action: reconciliationPlan.creation_action || null,
+      permission_action: reconciliationPlan.permission_action || null,
+      custom_properties_action: reconciliationPlan.custom_properties_action || null,
+      desired_repository_custom_properties: reconciliationPlan.desired_repository_custom_properties || [],
+      direct_admin_avoidance: reconciliationPlan.direct_admin_avoidance || null,
+      blocked_reason: reconciliationPlan.blocked_reason || null,
+      boundary_revalidation_status: reconciliationPlan.boundary_revalidation_status || null,
+      topology_mode: reconciliationPlan.topology_mode || null,
+      owned_repositories_status: reconciliationPlan.owned_repositories_status || null,
+      owned_entry_candidate: reconciliationPlan.owned_entry_candidate || null,
+      owned_entry_match: reconciliationPlan.owned_entry_match || null,
+      defaults_applied: reconciliationPlan.defaults_applied || null,
+      owned_topology_action: reconciliationPlan.owned_topology_action || null,
+      topology_persistence_action: reconciliationPlan.topology_persistence_action || null,
+      topology_persistence_result: reconciliationPlan.topology_persistence_result || null,
+      deletion_action: reconciliationPlan.deletion_action || null,
+      move_action: reconciliationPlan.move_action || null,
+      runner_exists: reconciliationPlan.runner_exists,
+      existing_runner_id: reconciliationPlan.existing_runner_id ?? null,
+      runner_name_derived: reconciliationPlan.runner_name_derived || '',
+      current_runner_group_id: reconciliationPlan.current_runner_group_id ?? null,
+      target_runner_group_resolution: reconciliationPlan.target_runner_group_resolution || null,
+      target_runner_group_id: reconciliationPlan.target_runner_group_id ?? null,
+      target_runner_group_name: reconciliationPlan.target_runner_group_name || '',
+      runner_already_in_target_group: reconciliationPlan.runner_already_in_target_group,
+      runner_group_resolution: reconciliationPlan.runner_group_resolution || null,
+      runner_group_exists: reconciliationPlan.runner_group_exists,
+      existing_runner_group_id: reconciliationPlan.existing_runner_group_id ?? null,
+      runner_group_name_derived: reconciliationPlan.runner_group_name_derived || '',
+      runner_group_visibility: reconciliationPlan.runner_group_visibility || null,
+      allows_public_repositories: reconciliationPlan.allows_public_repositories ?? null,
       team_exists: reconciliationPlan.team_exists,
       repositories_to_grant: reconciliationPlan.repositories_to_grant || [],
       repositories_already_satisfied: reconciliationPlan.repositories_already_satisfied || [],
       repositories_rejected: reconciliationPlan.repositories_rejected || [],
+      removals_to_apply: reconciliationPlan.removals_to_apply || [],
+      already_absent_noops: reconciliationPlan.already_absent_noops || [],
+      rejected_items: reconciliationPlan.rejected_items || [],
       permission_strength_ladder: reconciliationPlan.permission_strength_ladder || [],
       parent_team_exists: reconciliationPlan.parent_team_exists,
       teams_to_create: reconciliationPlan.teams_to_create || [],
@@ -198,16 +480,69 @@ function buildAuditArtifact(input = {}) {
       child_links_to_apply: reconciliationPlan.child_links_to_apply || [],
       child_links_already_present: reconciliationPlan.child_links_already_present || [],
       child_links_rejected: reconciliationPlan.child_links_rejected || [],
+      organization_roles_to_create: reconciliationPlan.organization_roles_to_create || [],
+      organization_roles_already_present: reconciliationPlan.organization_roles_already_present || [],
+      organization_roles_failed: reconciliationPlan.organization_roles_failed || [],
+      organization_roles_skipped: reconciliationPlan.organization_roles_skipped || [],
+      requester_bootstrap_action: reconciliationPlan.requester_bootstrap_action || null,
+      cicd_admin_team_requested: reconciliationPlan.cicd_admin_team_requested || false,
+      cicd_admin_team_create_planned: reconciliationPlan.cicd_admin_team_create_planned || false,
+      cicd_admin_team_already_present: reconciliationPlan.cicd_admin_team_already_present || false,
+      cicd_capability_decision: reconciliationPlan.cicd_capability_decision || null,
+      cicd_capability_action: reconciliationPlan.cicd_capability_action || null,
+      cicd_topology_update_action: reconciliationPlan.cicd_topology_update_action || null,
+      cicd_topology_update_result: reconciliationPlan.cicd_topology_update_result || null,
+      registry_persistence_action: reconciliationPlan.registry_persistence_action || null,
+      registry_persistence_result: reconciliationPlan.registry_persistence_result || null,
+      registry_commit_result: reconciliationPlan.registry_commit_result || null,
+      canonical_topology_draft: reconciliationPlan.canonical_topology_draft || null,
+      canonical_topology_markers: reconciliationPlan.canonical_topology_markers || null,
+      compatibility_mode: reconciliationPlan.compatibility_mode || (request.compatibility && request.compatibility.mode) || 'canonical',
+      policy_reporting: {
+        access_model_enforcement: request.topology && request.topology.accessModel && request.topology.accessModel.enforcement || null,
+        access_model_roles: request.topology && request.topology.accessModel && request.topology.accessModel.roles || [],
+        access_model_role_specifications: request.topology && request.topology.accessModel && request.topology.accessModel.organizationRoleSpecifications || [],
+        governance_mandatory_flags: {
+          code_scanning: request.governance && request.governance.code_scanning && request.governance.code_scanning.mandatory,
+          secret_scanning: request.governance && request.governance.secret_scanning && request.governance.secret_scanning.mandatory,
+        },
+      },
+      rate_limit_retry_evidence: {
+        strategy: 'bounded_exponential_backoff',
+        snapshot_present: Boolean(reconciliationPlan.rate_limit_snapshot),
+      },
       dry_run: reconciliationPlan.dry_run,
       rate_limit_snapshot: reconciliationPlan.rate_limit_snapshot || null,
       state: reconciliationPlan.state || '',
     },
-    execution: executionOutcome,
+    execution: {
+      ...executionOutcome,
+      structured_logging: {
+        validation_status: validation.is_valid === false ? 'failed' : 'passed',
+        reconciliation_state: reconciliationPlan.state || null,
+        compatibility_mode: reconciliationPlan.compatibility_mode || (request.compatibility && request.compatibility.mode) || 'canonical',
+      },
+      mutated_repositories: executionOutcome.mutated_repositories || [],
+      noop_repositories: executionOutcome.noop_repositories || [],
+      rejected_repositories: executionOutcome.rejected_repositories || [],
+      failed_repositories: executionOutcome.failed_repositories || [],
+      owned_topology_action: executionOutcome.owned_topology_action || null,
+      cicd_capability_selected_path: executionOutcome.cicd_capability_selected_path || null,
+      cicd_capability_status: executionOutcome.cicd_capability_status || null,
+      cicd_capability_reason_code: executionOutcome.cicd_capability_reason_code || null,
+      cicd_capability_reason_message: executionOutcome.cicd_capability_reason_message || null,
+      cicd_topology_update_outcome: executionOutcome.cicd_topology_update_outcome || null,
+      removed_count: executionOutcome.removed_count ?? executionOutcome.mutation_count ?? 0,
+    },
     metadata: {
       run_id: runContext.run_id || process.env.GITHUB_RUN_ID || null,
       run_attempt: runContext.run_attempt || process.env.GITHUB_RUN_ATTEMPT || null,
       generated_at: new Date().toISOString(),
       operation,
+      artifact_name: runContext.artifact_name || process.env.AUDIT_ARTIFACT_NAME || null,
+      artifact_retention_days: Number.isFinite(Number(runContext.artifact_retention_days || process.env.AUDIT_ARTIFACT_RETENTION_DAYS))
+        ? Number(runContext.artifact_retention_days || process.env.AUDIT_ARTIFACT_RETENTION_DAYS)
+        : null,
     },
   };
 }
