@@ -6,6 +6,10 @@ octo-org
 
 octocat
 
+### Intake mode
+
+manual
+
 ### Requested team names
 
 Platform Engineering

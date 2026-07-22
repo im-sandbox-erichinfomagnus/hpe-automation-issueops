@@ -45,65 +45,106 @@ function toLines(value) {
   return unwrapCodeFence(value).split(/\r?\n/);
 }
 
+function createChildTeamNormalizationState() {
+  return {
+    duplicateChildTeams: [],
+    conflictingChildSlugs: [],
+    invalidChildTeams: [],
+    seenNames: new Set(),
+    slugToName: new Map(),
+  };
+}
+
+function classifyRequestedChildTeam(value, state = createChildTeamNormalizationState()) {
+  const requestedName = normalizeTeamName(value);
+  if (!requestedName) {
+    return null;
+  }
+
+  const normalizedKey = requestedName.toLowerCase();
+  const childTeamSlug = slugifyTeamName(requestedName);
+  let validationStatus = 'valid';
+
+  if (!childTeamSlug) {
+    state.invalidChildTeams.push(requestedName);
+    validationStatus = 'invalid';
+  } else if (state.seenNames.has(normalizedKey)) {
+    state.duplicateChildTeams.push(requestedName);
+    validationStatus = 'duplicate';
+  } else if (state.slugToName.has(childTeamSlug) && state.slugToName.get(childTeamSlug) !== normalizedKey) {
+    state.conflictingChildSlugs.push({
+      slug: childTeamSlug,
+      names: [state.slugToName.get(childTeamSlug), normalizedKey],
+    });
+    validationStatus = 'conflicting';
+  }
+
+  if (validationStatus === 'valid') {
+    state.seenNames.add(normalizedKey);
+    state.slugToName.set(childTeamSlug, normalizedKey);
+  }
+
+  return {
+    requested_name: requestedName,
+    normalized_slug: childTeamSlug,
+    child_team_slug: childTeamSlug,
+    validation_status: validationStatus,
+  };
+}
+
+function buildNormalizedChildTeamLink(normalizedChildTeam, options = {}) {
+  if (!normalizedChildTeam || normalizedChildTeam.validation_status !== 'valid') {
+    return null;
+  }
+
+  const link = {
+    requested_name: normalizedChildTeam.requested_name,
+    child_team_slug: normalizedChildTeam.child_team_slug,
+  };
+
+  if (options.source_row_number != null) {
+    link.source_row_number = options.source_row_number;
+  }
+
+  return link;
+}
+
 function normalizeRequestedChildTeams(input) {
   const normalizedChildTeams = [];
   const requestedChildTeamDetail = [];
-  const duplicateChildTeams = [];
-  const conflictingChildSlugs = [];
-  const invalidChildTeams = [];
-  const seenNames = new Set();
-  const slugToName = new Map();
+  const state = createChildTeamNormalizationState();
 
   for (const rawValue of toLines(input)) {
-    const childTeamName = normalizeTeamName(rawValue);
-    if (!childTeamName) {
+    const normalizedChildTeam = classifyRequestedChildTeam(rawValue, state);
+    if (!normalizedChildTeam) {
       continue;
     }
 
-    const normalizedKey = childTeamName.toLowerCase();
-    const childTeamSlug = slugifyTeamName(childTeamName);
-    let status = 'valid';
-
-    if (!childTeamSlug) {
-      invalidChildTeams.push(childTeamName);
-      status = 'invalid';
-    } else if (seenNames.has(normalizedKey)) {
-      duplicateChildTeams.push(childTeamName);
-      status = 'duplicate';
-    } else if (slugToName.has(childTeamSlug) && slugToName.get(childTeamSlug) !== normalizedKey) {
-      conflictingChildSlugs.push({
-        slug: childTeamSlug,
-        names: [slugToName.get(childTeamSlug), normalizedKey],
-      });
-      status = 'conflicting';
-    }
-
     requestedChildTeamDetail.push({
-      requested_name: childTeamName,
-      normalized_slug: childTeamSlug,
-      validation_status: status,
+      requested_name: normalizedChildTeam.requested_name,
+      normalized_slug: normalizedChildTeam.normalized_slug,
+      validation_status: normalizedChildTeam.validation_status,
     });
 
-    if (status === 'valid') {
-      seenNames.add(normalizedKey);
-      slugToName.set(childTeamSlug, normalizedKey);
-      normalizedChildTeams.push({
-        requested_name: childTeamName,
-        child_team_slug: childTeamSlug,
-      });
+    const normalizedChildTeamLink = buildNormalizedChildTeamLink(normalizedChildTeam);
+    if (normalizedChildTeamLink) {
+      normalizedChildTeams.push(normalizedChildTeamLink);
     }
   }
 
   return {
     normalizedChildTeams,
     requestedChildTeamDetail,
-    duplicateChildTeams,
-    conflictingChildSlugs,
-    invalidChildTeams,
+    duplicateChildTeams: state.duplicateChildTeams,
+    conflictingChildSlugs: state.conflictingChildSlugs,
+    invalidChildTeams: state.invalidChildTeams,
   };
 }
 
 module.exports = {
+  buildNormalizedChildTeamLink,
+  classifyRequestedChildTeam,
+  createChildTeamNormalizationState,
   normalizeLogin,
   normalizeRequestedChildTeams,
   normalizeTeamName,

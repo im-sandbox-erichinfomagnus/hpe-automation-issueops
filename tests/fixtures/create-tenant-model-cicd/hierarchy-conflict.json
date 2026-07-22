@@ -1,0 +1,20 @@
+{
+  "name": "hierarchy_conflict",
+  "request": {
+    "organization": "octo-org",
+    "tenant_name": "Acme",
+    "designated_approver": "org-owner-user",
+    "dry_run": false,
+    "justification": "Validate hierarchy conflict handling"
+  },
+  "current_state": {
+    "tenant_parent_slug": "acme_tenant",
+    "cicd_admin_slug": "acme_tenant_cicdadmin",
+    "cicd_admin_current_parent_slug": "different_parent"
+  },
+  "expected": {
+    "validation_status": "reparent_blocked",
+    "mutation_allowed": false,
+    "reason_code": "hierarchy_conflict"
+  }
+}

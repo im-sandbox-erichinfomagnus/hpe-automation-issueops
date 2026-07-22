@@ -1,0 +1,182 @@
+name: create-tenant-model-topology-enhancement
+version: 1
+purpose: >-
+  Contract for enhancing create-tenant-model workflow to persist a topology-first
+  canonical tenant record with governance, external mappings, metadata, and
+  compatibility handling for legacy tenant records.
+
+issue_form:
+  path: .github/ISSUE_TEMPLATE/create-tenant-model.yml
+  required_fields:
+    - id: organization
+      type: input
+    - id: tenant_name
+      type: input
+    - id: tenant_type
+      type: dropdown
+      options:
+        - application
+        - platform
+        - shared-services
+    - id: governance_code_scanning_enabled
+      type: dropdown
+      options: ["true", "false"]
+    - id: governance_secret_scanning_enabled
+      type: dropdown
+      options: ["true", "false"]
+    - id: governance_dependabot_enabled
+      type: dropdown
+      options: ["true", "false"]
+    - id: cmdb_id
+      type: input
+    - id: cost_center
+      type: input
+    - id: business_unit
+      type: input
+    - id: environment
+      type: dropdown
+      options: [prod, nonprod]
+      default: nonprod
+    - id: primary_contact
+      type: input
+    - id: designated_approver
+      type: input
+    - id: dry_run
+      type: dropdown
+    - id: justification
+      type: textarea
+  optional_fields:
+    - id: secondary_contact
+      type: input
+
+parser:
+  action: issue-ops/parser@v5
+  outputs:
+    - parsed_organization
+    - parsed_tenant_name
+    - parsed_tenant_type
+    - parsed_governance_code_scanning_enabled
+    - parsed_governance_secret_scanning_enabled
+    - parsed_governance_dependabot_enabled
+    - parsed_cmdb_id
+    - parsed_cost_center
+    - parsed_business_unit
+    - parsed_environment
+    - parsed_primary_contact
+    - parsed_secondary_contact
+    - parsed_designated_approver
+    - parsed_dry_run
+    - parsed_justification
+
+authorization:
+  requester_identity: github.event.issue.user.login
+  approver_model: designated active target organization owner
+  execution_identity:
+    credential: ISSUEOPS_GITHUB_TOKEN
+    least_privilege: true
+
+validation_rules:
+  - tenant_type must be one of application, platform, shared-services.
+  - environment must be one of prod, nonprod with nonprod default behavior.
+  - governance enabled values must parse to booleans.
+  - primary_contact is required and must match email format.
+  - secondary_contact is optional and must match email format when provided.
+  - topology team names must derive deterministically from tenant_name.
+  - topology root/admin/repo-admin structure must be valid and non-conflicting.
+  - target organization must be visible and eligible for mutation.
+  - authorization and policy preconditions must fail closed when unmet.
+  - code_scanning.mandatory and secret_scanning.mandatory must remain true.
+  - topology.accessModel.enforcement must be tenant-boundary with canonical role ordering.
+  - topology.accessModel.organizationRoleSpecifications must define deterministic role_name and permission_intent entries for each canonical role.
+
+reconciliation:
+  current_state_reads:
+    - organization visibility
+    - existing teams and parent-child relationships
+    - existing tenant registry record by tenantId
+  desired_state:
+    - topology.organization.orgName from request organization
+    - topology.teams root/admin/repo-admin with deterministic parent linkage
+    - topology.repositories.owned initialized to []
+    - topology.runnerTopology.runnerGroups initialized to []
+    - topology.accessModel.enforcement set to tenant-boundary
+    - topology.accessModel.roles set to tenant-admin, repo-admin, developer, viewer
+    - topology.accessModel.organizationRoleSpecifications set to deterministic tenant-scoped role names
+    - topology.governance policies mapped from request booleans
+    - externalMappings and metadata persisted
+    - missing organization roles are created during approved execution when org-role APIs are available
+  idempotency:
+    - no duplicate team creation on rerun
+    - no duplicate hierarchy linkage on rerun
+    - already-satisfied state reported as no-op
+
+compatibility:
+  strategy: dual-read canonical-write
+  legacy_read_fields:
+    - tenant_key
+    - tenant_display_name
+    - organization
+    - tenant_team_name
+    - tenant_team_slug
+    - repo_admin_team_name
+    - repo_admin_team_slug
+    - requester_login
+    - approver_login
+    - lifecycle_status
+    - source_issue_number
+    - source_run_id
+  canonical_write_behavior:
+    - successful writes persist canonical topology-first schema
+    - provenance fields retained in canonical metadata/audit structure
+    - lifecycleStatus persisted using legacy-equivalent mapping semantics
+  lifecycle_equivalence:
+    - legacy active maps to canonical lifecycleStatus active
+    - unrecognized legacy lifecycle values fail back to active for compatibility safety
+
+execution_context_inputs:
+  optional_env:
+    - PARSED_LEGACY_TENANT_RECORD_JSON
+  behavior:
+    - when supplied, legacy record projection is used as a dual-read fallback for tenant identity and topology provenance
+    - approved execution writes canonical schema and records migration status in reconciliation metadata
+
+scaffold_references:
+  fixtures:
+    - tests/fixtures/create-tenant-model/baseline-request.json
+    - tests/fixtures/create-tenant-model/topology-defaults.json
+  contract_tests:
+    - tests/contract/create-tenant-model-parser.test.js
+    - tests/contract/create-tenant-model-validation.test.js
+
+observability:
+  outputs:
+    - github_step_summary
+    - json_audit_artifact
+  required_fields:
+    - issue_number
+    - run_id
+    - requester_login
+    - approver_login
+    - organization
+    - tenantId
+    - tenantName
+    - tenantType
+    - topology_summary
+    - governance_policy_summary
+    - compatibility_mode
+    - compatibility_provenance
+    - lifecycle_status_equivalent
+    - registry_migration_status
+    - reconciliation_outcome
+    - final_request_status
+
+rate_limit_handling:
+  strategy: bounded_exponential_backoff
+  retryable_conditions:
+    - transient 5xx responses
+    - secondary rate limit responses
+  non_retryable_conditions:
+    - invalid tenant_type/environment values
+    - invalid contact formats
+    - authorization failures
+    - topology conflict violations

@@ -1,0 +1,3 @@
+repository,ruleset_name,target,ref_name_pattern,enforcement,require_pull_request,block_force_pushes,require_linear_history,restrict_deletions
+ericdemo-api,ericdemo-recording-valid,branch,~DEFAULT_BRANCH,active,true,true,false,true
+repository-that-does-not-exist,ericdemo-recording-rejected,branch,~DEFAULT_BRANCH,active,true,true,false,true

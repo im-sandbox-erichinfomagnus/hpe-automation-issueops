@@ -153,7 +153,7 @@ test('approved bulk CSV requests execute through the existing membership flow an
   );
 });
 
-test('bulk CSV parse-to-execute flow preserves source row provenance into the final reconciliation artifact', async () => {
+test('bulk CSV textarea requests are rejected before reconciliation begins', async () => {
   const parsedRequest = parseTeamMembershipRequest({
     parsedRequest: {
       organization: 'octo-org',
@@ -171,36 +171,9 @@ test('bulk CSV parse-to-execute flow preserves source row provenance into the fi
     getTeam: async () => ({ exists: true, team_sync_blocked: false }),
     resolveUser: async () => ({ exists: true }),
   });
-  const artifactPath = writeArtifact(buildAuditArtifact({
-    request: validation.request,
-    validation,
-    approval: {
-      approval_status: 'approved',
-      approver_login: 'org-owner-user',
-      approver_role: 'org_owner',
-      approved_at: '2026-05-19T10:20:00Z',
-      decision_source: 'comment',
-      decision_note: 'The approval comment approved was added by an organization owner.',
-    },
-  }));
 
-  await runApprovedExecution({
-    env: { AUDIT_ARTIFACT_PATH: artifactPath },
-    tokenInfo: { token: 'test-token' },
-    createApi: () => ({
-      listTeamMembers: async () => [{ login: 'octocat', state: 'active' }],
-      addOrUpdateTeamMembership: async ({ username }) => ({ username, state: 'active', role: 'member' }),
-    }),
-  });
-
-  const persisted = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
-
-  assert.deepEqual(
-    persisted.reconciliation.people_already_present.map((entry) => entry.source_row_number),
-    [1]
-  );
-  assert.deepEqual(
-    persisted.reconciliation.people_to_add.map((entry) => entry.source_row_number),
-    [2]
-  );
+  assert.equal(validation.is_valid, false);
+  assert.equal(validation.request_status, 'validation_failed');
+  assert.deepEqual(validation.requested_people, []);
+  assert.match(validation.errors.join('\n'), /bulk csv textarea intake is no longer supported/i);
 });

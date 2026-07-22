@@ -5,13 +5,6 @@ labels:
   - issueops
   - add-team-repo-access
 body:
-  - type: markdown
-    attributes:
-      value: |
-        Use this request to validate and, after approval in a later phase,
-        grant one existing GitHub team access to one or more existing
-        repositories in a target GitHub organization.
-
   - type: input
     id: organization
     attributes:
@@ -43,11 +36,23 @@ body:
     id: requested_repositories
     attributes:
       label: Requested repositories
-      description: One existing repository per line. Duplicate repositories, mixed-organization requests, repository creation, permission removal, and permission downgrade requests are rejected.
+      description: Manual input path for one existing repository per line. Populate this only when intake mode is manual. Duplicate repositories, mixed-organization requests, repository creation, permission removal, and permission downgrade requests are rejected.
       placeholder: |
         service-catalog
         developer-portal
       render: text
+    validations:
+      required: false
+
+  - type: dropdown
+    id: intake_mode
+    attributes:
+      label: Intake mode
+      description: Choose manual for line-by-line repository input or csv_attachment to upload repository CSV via a requester-authored issue comment attachment.
+      options:
+        - manual
+        - csv_attachment
+      default: 0
     validations:
       required: true
 

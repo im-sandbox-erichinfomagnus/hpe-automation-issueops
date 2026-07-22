@@ -1,0 +1,16 @@
+{
+  "tenant_key": "legacy-corp",
+  "tenant_display_name": "Legacy Corp",
+  "organization": "im-sandbox-himanshu",
+  "tenant_team_name": "Legacy_Corp_Tenant",
+  "tenant_team_slug": "legacy_corp_tenant",
+  "repo_admin_team_name": "Legacy_Corp_RepoAdmins",
+  "repo_admin_team_slug": "legacy_corp_repoadmins",
+  "requester_login": "legacy-requester",
+  "approver_login": "legacy-approver",
+  "lifecycle_status": "active",
+  "source_issue_number": 199,
+  "source_run_id": "run-199",
+  "created_at": "2026-05-01T00:00:00.000Z",
+  "updated_at": "2026-05-01T00:00:00.000Z"
+}

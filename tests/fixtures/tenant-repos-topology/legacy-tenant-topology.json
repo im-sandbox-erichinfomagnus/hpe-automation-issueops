@@ -1,0 +1,12 @@
+{
+  "tenant_key": "acme-platform",
+  "tenant_display_name": "Acme Platform",
+  "organization": "im-sandbox-himanshu",
+  "tenant_team_name": "Acme Tenant",
+  "tenant_team_slug": "acme_tenant",
+  "repo_admin_team_name": "Acme RepoAdmin",
+  "repo_admin_team_slug": "acme_repoadmin",
+  "lifecycle_status": "active",
+  "source_issue_number": 311,
+  "source_run_id": "27260000000"
+}

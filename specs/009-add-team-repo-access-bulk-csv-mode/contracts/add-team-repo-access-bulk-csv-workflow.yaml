@@ -1,0 +1,219 @@
+name: add-team-repo-access-bulk-csv-workflow-contract
+version: 1
+purpose: >-
+  Contract for the IssueOps workflow enhancement that preserves the existing
+  add-team-repo-access manual request path and adds an optional bulk CSV
+  textarea for higher-volume repository-access requests.
+
+issue_form:
+  path: .github/ISSUE_TEMPLATE/add-team-repo-access.yml
+  required_fields:
+    - id: organization
+      type: input
+      description: Target GitHub organization slug.
+    - id: target_team
+      type: input
+      description: Existing team to receive the requested repository access.
+    - id: designated_approver
+      type: input
+      description: GitHub login of the single repository-access approver who must approve the full request batch.
+    - id: permission_level
+      type: dropdown
+      description: Built-in repository permission level to grant for the full request batch.
+    - id: business_justification
+      type: textarea
+      description: Reason for granting the requested repository access.
+    - id: dry_run
+      type: dropdown
+      description: Whether to execute validation only or allow repository-access mutation after approval.
+  conditional_fields:
+    - id: requested_repositories
+      type: textarea
+      description: Existing manual input path for one or more requested repositories.
+      rules:
+        - May be populated only when bulk_csv_requested_repositories is empty.
+        - Accepts one repository per line for backward compatibility.
+    - id: bulk_csv_requested_repositories
+      type: textarea
+      description: Optional bulk CSV textarea containing a UTF-8 CSV payload with a header row.
+      rules:
+        - May be populated only when requested_repositories is empty.
+        - Must contain a header row with the required column `repository`.
+        - Must not include row-level organization, team, permission, approver, or broader repository-administration columns.
+
+parser:
+  action: issue-ops/parser@v5
+  inputs:
+    body: ${{ github.event.issue.body }}
+    issue-form-template: add-team-repo-access.yml
+  outputs:
+    json: Parsed request payload as JSON string.
+    parsed_organization: Normalized organization field.
+    parsed_target_team: Parsed target-team field.
+    parsed_designated_approver: Parsed designated approver field.
+    parsed_requested_repositories: Parsed manual repositories field before downstream normalization.
+    parsed_bulk_csv_requested_repositories: Parsed bulk CSV textarea before downstream normalization.
+    parsed_permission_level: Parsed requested permission level.
+    parsed_dry_run: Parsed dry-run selection.
+
+workflow_inputs:
+  validation:
+    - name: organization
+      required: true
+    - name: target_team
+      required: true
+    - name: designated_approver
+      required: true
+    - name: permission_level
+      required: true
+    - name: intake_mode
+      required: true
+      allowed:
+        - manual
+        - bulk_csv
+    - name: requested_repositories
+      required: false
+    - name: bulk_csv_requested_repositories
+      required: false
+    - name: requester_login
+      required: true
+    - name: dry_run
+      required: true
+  approval_gate:
+    - name: approver_login
+      required: true
+    - name: designated_approver
+      required: true
+  reconciliation:
+    - name: execution_token_source
+      required: true
+      description: PAT-backed workflow token source.
+    - name: audit_artifact_path
+      required: true
+      description: Persisted validation and approval artifact used by the execution runner.
+    - name: approval_status
+      required: true
+      description: Approval gate outcome that must be `approved` before repository-access mutation.
+  workflow_env:
+    - name: ISSUEOPS_GITHUB_TOKEN
+      required: true
+      description: PAT-backed organization secret used for validation, approval verification, and repository team-permission mutation.
+    - name: GITHUB_TOKEN
+      required: true
+      description: Default GitHub Actions repository token used for standard workflow context operations.
+
+authorization:
+  requester_identity: github.event.issue.user.login
+  allowed_approvers:
+    - single designated active target-organization owner for the full request batch
+  execution_identity:
+    model: personal access token supplied to the workflow from ISSUEOPS_GITHUB_TOKEN
+    bootstrap: repository or organization Actions secret injection
+    required_permissions:
+      administration: write
+      members: read
+      metadata: read
+      issues: write
+
+validation_rules:
+  - Exactly one intake source must be populated: `requested_repositories` or `bulk_csv_requested_repositories`.
+  - Requests that populate both intake sources remain invalid and must not be reclassified to a single intake mode in summaries or audit artifacts.
+  - A request that populates neither intake source must fail validation before approval or mutation.
+  - Manual-mode behavior must remain equivalent to the baseline add-team-repo-access workflow.
+  - Bulk CSV submissions must provide a header row containing `repository`.
+  - Properly quoted `repository` values are valid CSV input and must normalize the same as equivalent unquoted repository values.
+  - CSV row findings must use 1-based data-row numbers that exclude the header row.
+  - Repository values from CSV are normalized into the same comparison-safe repository model used by the manual path.
+  - Duplicate or conflicting CSV repository rows are rejected for repository-access requests rather than silently deduplicated.
+  - Fully blank CSV rows are ignored for approval-readiness purposes but remain visible in row findings.
+  - Unsupported CSV columns are rejected because the enhancement remains within one organization, one team, one permission level, one designated approver, and repository-access-only scope.
+  - Row-level organization, team, permission, approver, hierarchy, membership, or broader repository-administration data must be rejected.
+  - The target organization must exist and be visible to the executing identity.
+  - The requested target team must exist in the target organization.
+  - Each requested repository must exist in the same target organization.
+  - The designated approver must be a current active owner of the target organization.
+  - Archived repositories are rejected before mutation.
+  - Repositories with stronger existing access are already satisfied no-op outcomes.
+  - Repositories with weaker existing access that would require in-place modification are rejected before mutation.
+  - Approval must be present as an issue comment containing exactly `approved` and must be granted by the designated approver.
+
+reconciliation:
+  current_state_reads:
+    - target organization visibility lookup
+    - requested team lookup
+    - requested repository lookups
+    - current repository-team permission for each requested repository
+    - latest repository state before approved execution
+  mutation_rule: Grant only missing eligible repository access after intake normalization produces one validated requested-repository-grant list.
+  no_op_rule: Report repositories that already have exact-match or stronger team access without rewriting them.
+  partial_success_rule: Persist per-repository success or failure and surface required follow-up.
+  idempotency_rule: Re-running an already-satisfied approved request must not create duplicate repository grants.
+
+rate_limit_handling:
+  inspect_headers:
+    - x-ratelimit-remaining
+    - x-ratelimit-reset
+    - retry-after
+  retry_policy:
+    strategy: bounded exponential backoff
+    retryable_conditions:
+      - transient secondary rate limit
+      - explicit retry-after guidance
+    non_retryable_conditions:
+      - invalid approval
+      - missing target team or repository
+      - weaker existing permission conflict
+      - archived repository
+      - malformed or ambiguous CSV intake
+
+observability:
+  outputs:
+    - GitHub step summary
+    - JSON audit artifact
+    - requester-facing workflow summary in the Actions run
+  execution_field_mapping:
+    granted_repository_grants: execution.created_teams
+    no_op_repository_grants: execution.noop_teams
+    failed_repository_grants: execution.failed_teams
+  required_fields:
+    - issue_number
+    - run_id
+    - requester_login
+    - approver_login
+    - approval_status
+    - assignment_status
+    - organization
+    - target_team
+    - designated_approver
+    - requested_permission_level
+    - intake_mode
+    - requested_repositories
+    - requested_repository_grants.source_row_number
+    - execution.granted_count
+    - execution.noop_count
+    - execution.rejected_count
+    - execution.failure_count
+    - duplicate_row_count
+    - invalid_row_count
+    - csv_row_findings
+    - csv_row_numbering_convention
+    - execution.created_teams.source_row_number
+    - execution.noop_teams.source_row_number
+    - execution.failed_teams.source_row_number
+    - execution.rejected_subset.source_row_number
+    - execution.created_teams
+    - execution.noop_teams
+    - execution.failed_teams
+    - execution.rejected_subset
+    - rollback_status
+    - reconciliation.intake_mode
+    - reconciliation.repository_grants_to_apply.source_row_number
+    - reconciliation.repository_grants_already_satisfied.source_row_number
+    - reconciliation.repository_grants_to_apply
+    - reconciliation.repository_grants_already_satisfied
+  operator_notes:
+    - Central assignment is queue ownership only and does not authorize repository-access mutation.
+    - The shared execution artifact reuses generic array keys; `execution.created_teams`, `execution.noop_teams`, and `execution.failed_teams` represent granted, already-satisfied, and failed repository-access grants for this workflow.
+    - Repositories with stronger existing access remain no-op outcomes instead of being downgraded.
+    - Approved reruns against already-satisfied repository state must report no-op outcomes instead of repeating mutations.
+    - Invalid dual-input requests keep `intake_mode` unset in summary and audit output so validation failures remain explicit.

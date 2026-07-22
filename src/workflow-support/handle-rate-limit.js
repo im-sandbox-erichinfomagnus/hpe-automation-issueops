@@ -113,6 +113,56 @@ function buildRepositoryGrantRateLimitContext(error = {}, options = {}) {
   });
 }
 
+function buildTenantBootstrapRateLimitContext(error = {}, options = {}) {
+  return buildRateLimitContext(error, {
+    operation: options.operation || 'tenant_bootstrap_mutation',
+    attempt: options.attempt || 1,
+    maxRetries: options.maxRetries || 3,
+    baseDelayMs: options.baseDelayMs,
+    maxDelayMs: options.maxDelayMs,
+  });
+}
+
+function buildTenantRepoCreationRateLimitContext(error = {}, options = {}) {
+  return buildRateLimitContext(error, {
+    operation: options.operation || 'tenant_repo_creation_mutation',
+    attempt: options.attempt || 1,
+    maxRetries: options.maxRetries || 3,
+    baseDelayMs: options.baseDelayMs,
+    maxDelayMs: options.maxDelayMs,
+  });
+}
+
+function buildTopologyRegistryReadRateLimitContext(error = {}, options = {}) {
+  return buildRateLimitContext(error, {
+    operation: options.operation || 'tenant_topology_registry_read',
+    attempt: options.attempt || 1,
+    maxRetries: options.maxRetries || 3,
+    baseDelayMs: options.baseDelayMs,
+    maxDelayMs: options.maxDelayMs,
+  });
+}
+
+function buildCapabilityAssignmentRateLimitContext(error = {}, options = {}) {
+  return buildRateLimitContext(error, {
+    operation: options.operation || 'tenant_cicd_capability_assignment',
+    attempt: options.attempt || 1,
+    maxRetries: options.maxRetries || 3,
+    baseDelayMs: options.baseDelayMs,
+    maxDelayMs: options.maxDelayMs,
+  });
+}
+
+function buildOwnedTopologyPersistenceRateLimitContext(error = {}, options = {}) {
+  return buildRateLimitContext(error, {
+    operation: options.operation || 'tenant_topology_owned_persistence',
+    attempt: options.attempt || 1,
+    maxRetries: options.maxRetries || 3,
+    baseDelayMs: options.baseDelayMs,
+    maxDelayMs: options.maxDelayMs,
+  });
+}
+
 async function executeWithBoundedRetry(operation, options = {}) {
   const maxRetries = options.maxRetries || 3;
   const sleep = options.sleep || ((delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)));
@@ -185,11 +235,26 @@ async function executeWithBoundedRetry(operation, options = {}) {
   };
 }
 
+async function executeCapabilityOperationWithRetry(operation, options = {}) {
+  return executeWithBoundedRetry(operation, {
+    maxRetries: options.maxRetries || 3,
+    sleep: options.sleep,
+    baseDelayMs: options.baseDelayMs || 1000,
+    maxDelayMs: options.maxDelayMs || 30000,
+  });
+}
+
 module.exports = {
+  buildCapabilityAssignmentRateLimitContext,
   buildRepositoryGrantRateLimitContext,
+  buildTenantRepoCreationRateLimitContext,
+  buildTenantBootstrapRateLimitContext,
   buildRateLimitContext,
+  buildOwnedTopologyPersistenceRateLimitContext,
+  buildTopologyRegistryReadRateLimitContext,
   computeRetryDelayMs,
   createRetryPlan,
+  executeCapabilityOperationWithRetry,
   executeWithBoundedRetry,
   isRetryableGitHubFailure,
   parseRateLimitHeaders,

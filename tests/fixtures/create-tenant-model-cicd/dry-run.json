@@ -1,0 +1,16 @@
+{
+  "name": "dry_run",
+  "request": {
+    "organization": "octo-org",
+    "tenant_name": "Acme",
+    "designated_approver": "org-owner-user",
+    "dry_run": true,
+    "justification": "Preview CICD enhancement changes"
+  },
+  "expected": {
+    "mutation_count": 0,
+    "selected_path": "none",
+    "request_status": "approved",
+    "capability_status": "requested"
+  }
+}

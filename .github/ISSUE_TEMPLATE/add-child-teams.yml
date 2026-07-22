@@ -5,13 +5,6 @@ labels:
   - issueops
   - add-child-teams
 body:
-  - type: markdown
-    attributes:
-      value: |
-        Use this request to validate and, after approval in a later phase,
-        attach one or more existing child teams under one existing parent team
-        in a target GitHub organization.
-
   - type: input
     id: organization
     attributes:
@@ -31,7 +24,7 @@ body:
       required: true
 
   - type: input
-    id: designated_approver
+    id: designated_hierarchy_approver
     attributes:
       label: Designated hierarchy approver
       description: GitHub login of the single approver who must be a current maintainer of the requested parent team and every requested child team in this batch.
@@ -39,17 +32,40 @@ body:
     validations:
       required: true
 
+  - type: dropdown
+    id: intake_mode
+    attributes:
+      label: Intake mode
+      description: Choose how requested child teams will be provided for this request.
+      options:
+        - manual
+        - csv_attachment
+      default: 0
+    validations:
+      required: true
+
   - type: textarea
     id: requested_child_teams
     attributes:
-      label: Requested child teams
-      description: One existing child team per line. Duplicate child teams, re-parenting requests, cycle-creating requests, and team-creation or member-management instructions are rejected.
+      label: Requested child teams (manual mode only)
+      description: Use this field only when intake mode is manual and provide one existing child team per line. Leave this field empty when intake mode is csv_attachment. Duplicate child teams, re-parenting requests, cycle-creating requests, and team-creation or member-management instructions are rejected.
       placeholder: |
         application-platform
         release-engineering
       render: text
     validations:
-      required: true
+      required: false
+
+  - type: markdown
+    attributes:
+      value: |
+        ### CSV Attachment Mode Instructions
+
+        When intake mode is `csv_attachment`:
+        1. Submit this issue with `Requested child teams` left empty.
+        2. Post a same-issue comment authored by the requester with exactly one CSV attachment.
+        3. Use UTF-8 CSV with header `child_team` and one child team per data row.
+        4. The request remains `waiting_for_attachment` until a qualifying attachment is accepted.
 
   - type: textarea
     id: business_justification

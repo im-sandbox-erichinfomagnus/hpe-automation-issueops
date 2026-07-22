@@ -1,0 +1,92 @@
+name: Move tenant GitHub-hosted runner
+description: Move one tenant-scoped GitHub-hosted runner into an existing tenant runner group.
+title: "[move-tenant-hosted-runner] <org>/<runner>: <target-group>"
+labels:
+  - issueops
+  - move-tenant-hosted-runner
+body:
+  - type: input
+    id: organization
+    attributes:
+      label: Target organization
+      description: GitHub organization containing the hosted runner and target runner group.
+      placeholder: octo-org
+    validations:
+      required: true
+
+  - type: input
+    id: tenant_name
+    attributes:
+      label: Tenant name
+      description: Human-readable tenant name exactly as defined in tenant-registry for the target organization.
+      placeholder: ContosoUK
+    validations:
+      required: true
+
+  - type: textarea
+    id: runner_moves_csv
+    attributes:
+      label: Runner moves CSV (spreadsheet input)
+      description: >-
+        Preferred input. Paste exactly one row using runner_name,hosted_runner_id,target_runner_group_name.
+        The header is optional. hosted_runner_id may be blank when the runner name is unique.
+      placeholder: |
+        runner_name,hosted_runner_id,target_runner_group_name
+        linux-build,,DemoCorp_Builders
+    validations:
+      required: false
+
+  - type: input
+    id: runner_name
+    attributes:
+      label: Runner name
+      description: Runner to move. Accepts the full tenant-prefixed name or the base name.
+      placeholder: ubuntu-build
+    validations:
+      required: false
+
+  - type: input
+    id: hosted_runner_id
+    attributes:
+      label: Hosted runner id
+      description: Optional numeric runner id used to disambiguate multiple runners with the same name.
+      placeholder: "12345"
+
+  - type: input
+    id: target_runner_group_name
+    attributes:
+      label: Target runner group name
+      description: Existing tenant-prefixed runner group that should receive the runner.
+      placeholder: ContosoUK_Builders
+    validations:
+      required: false
+
+  - type: input
+    id: designated_approver
+    attributes:
+      label: Designated approver
+      description: GitHub login for the active organization owner who will post the approval comment.
+      placeholder: org-owner-user
+    validations:
+      required: true
+
+  - type: dropdown
+    id: dry_run
+    attributes:
+      label: Dry-run mode
+      description: Dry-run validates and reports the planned move without updating the runner.
+      options:
+        - "true"
+        - "false"
+      default: 0
+    validations:
+      required: true
+
+  - type: textarea
+    id: justification
+    attributes:
+      label: Business justification
+      description: Explain why the hosted runner should move to this tenant runner group.
+      placeholder: Place the build runner in the tenant-isolated runner group.
+    validations:
+      required: true

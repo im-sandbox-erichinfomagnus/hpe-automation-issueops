@@ -133,6 +133,45 @@ This list should be updated as new IssueOps workflows are added.
 - `manage-cost-centers`: Request, validate, approve, and reconcile bulk
 	create/rename/delete of GitHub Enterprise billing cost centers from a CSV
 	spreadsheet, with delete blocked on non-empty cost centers unless forced.
+- `create-tenant-model`: Spreadsheet-first tenant bootstrap. An active
+	organization owner creates the canonical root, admin, RepoAdmin, and
+	CICDAdmin teams and assigns the designated tenant admin as maintainer on all
+	four teams.
+- `create-tenant-repos`: Spreadsheet batch creation of tenant repositories,
+	authorized through the tenant RepoAdmin or tenant-admin path.
+- `create-tenant-hosted-runner`: Request, validate, approve, and reconcile
+	creating one tenant-prefixed GitHub-hosted runner from one spreadsheet row,
+	at organization level,
+	authorized by active membership in the canonical tenant topology admin team.
+- `delete-tenant-hosted-runner`: Request, validate, approve, and reconcile
+	deleting one tenant-prefixed GitHub-hosted runner from one spreadsheet row,
+	at organization level,
+	with no-op convergence when the runner is already absent.
+- `create-tenant-runner-groups`: Request, validate, approve, and reconcile
+	creating one tenant-prefixed Actions runner group from one spreadsheet row
+	at organization level
+	with isolation-preserving defaults.
+- `move-tenant-hosted-runner`: Request, validate, approve, and reconcile moving
+	one existing tenant-prefixed GitHub-hosted runner from one spreadsheet row
+	into one existing
+	tenant-prefixed runner group, with optional runner-id disambiguation.
+- `manage-tenant-variables`: Request, validate, approve, and reconcile create,
+	update, or delete of tenant-prefixed organization Actions variables,
+	authorized by active maintainership of the tenant top team.
+- `create-repository-ruleset`: Spreadsheet-first batch. Request, validate,
+	approve, and reconcile creation of repository-level rulesets across many
+	repositories from a CSV textarea (single-item form fields are the secondary
+	path), idempotent per row by ruleset name. Each row is authorized
+	independently by admin permission on that row's repository, or, when the
+	repository resolves to a tenant, an active member/maintainer of that tenant's
+	repo-admin team or an active maintainer of the tenant top team. Works on
+	imported repositories that are not in the tenant model; an unauthorized or
+	failing row never aborts the others.
+- `delete-repository-ruleset`: Spreadsheet-first batch. Request, validate,
+	approve, and reconcile deletion of repository-level rulesets across many
+	repositories from a CSV textarea (single-item form fields are the secondary
+	path), a no-op per row when the named ruleset is absent, with the same
+	per-row authorization and per-row audit as the create op.
 
 Detailed design and operator guidance for the current operation live in:
 
@@ -144,6 +183,8 @@ Detailed design and operator guidance for the current operation live in:
 - [`specs/004-add-child-teams/contracts/add-child-teams-workflow.yaml`](specs/004-add-child-teams/contracts/add-child-teams-workflow.yaml)
 - [`specs/005-add-team-repo-access/quickstart.md`](specs/005-add-team-repo-access/quickstart.md)
 - [`specs/005-add-team-repo-access/contracts/add-team-repo-access-workflow.yaml`](specs/005-add-team-repo-access/contracts/add-team-repo-access-workflow.yaml)
+- [`docs/tenant-issueops-runbook.md`](docs/tenant-issueops-runbook.md)
+- [`docs/tenant-issueops-requirements-matrix.md`](docs/tenant-issueops-requirements-matrix.md)
 
 ## Repository Standards
 

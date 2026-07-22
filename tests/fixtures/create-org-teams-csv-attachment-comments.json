@@ -1,0 +1,38 @@
+[
+  {
+    "id": 6101,
+    "created_at": "2026-05-22T09:05:00Z",
+    "body": "Attaching the requested CSV for validation.\n\n[team-creation.csv](https://github.com/octo-org/issueops-speckit/files/6101/team-creation.csv)",
+    "html_url": "https://github.com/octo-org/issueops-speckit/issues/611#issuecomment-6101",
+    "user": {
+      "login": "requester"
+    }
+  },
+  {
+    "id": 6102,
+    "created_at": "2026-05-22T09:07:00Z",
+    "body": "Posting a second attachment from a non-requester.\n\n[outsider-team-creation.csv](https://github.com/octo-org/issueops-speckit/files/6102/outsider-team-creation.csv)",
+    "html_url": "https://github.com/octo-org/issueops-speckit/issues/611#issuecomment-6102",
+    "user": {
+      "login": "other-user"
+    }
+  },
+  {
+    "id": 6103,
+    "created_at": "2026-05-22T09:10:00Z",
+    "body": "Posting a corrected CSV after a failed validation attempt.\n\n[team-creation-corrected.csv](https://github.com/octo-org/issueops-speckit/files/6103/team-creation-corrected.csv)",
+    "html_url": "https://github.com/octo-org/issueops-speckit/issues/611#issuecomment-6103",
+    "user": {
+      "login": "requester"
+    }
+  },
+  {
+    "id": 6104,
+    "created_at": "2026-05-22T09:13:00Z",
+    "body": "approved",
+    "html_url": "https://github.com/octo-org/issueops-speckit/issues/611#issuecomment-6104",
+    "user": {
+      "login": "platform-owner"
+    }
+  }
+]

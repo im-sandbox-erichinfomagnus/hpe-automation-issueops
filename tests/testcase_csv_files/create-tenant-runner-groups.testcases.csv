@@ -1,0 +1,4 @@
+test_id,user_story,scenario,preconditions,form_inputs,expected_result,case_type
+RG-01,specs/023-create-tenant-runner-groups/spec.md,Validate creation of a tenant runner group,"Authorized CICD admin; tenant in registry","org, tenant, runner_groups_csv, approver, dry_run=true","Status awaiting_approval; plan to create the tenant-prefixed group; no mutation",happy
+RG-02,specs/023-create-tenant-runner-groups/spec.md,Creating an existing group is a no-op,"Authorized; group already exists","valid fields, dry_run=true","No-op; group already present, no duplicate",idempotent
+RG-03,specs/023-create-tenant-runner-groups/spec.md,Reject a group name without the tenant prefix,"Authorized","runner_group_name without TenantName_ prefix","Rejected: group name must carry the tenant naming prefix",guardrail

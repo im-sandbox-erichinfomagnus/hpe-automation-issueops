@@ -25,7 +25,7 @@ function writeArtifact(baseArtifact) {
 function createBulkCsvApprovedArtifact() {
   const artifact = loadFixture('create-team-success.json').approved_artifact;
   artifact.request.intake_mode = 'bulk_csv';
-  artifact.request.bulk_csv_input = '```csv\nteam_name\nPlatform Engineering\nAI Model Routing Specialists\n```';
+  artifact.request.bulk_csv_input = '```csv\nteam_name\nPlatform Engineering\nAI Model Routing Specialists\nPlatform Engineering\n```';
   artifact.request.bulk_csv_submission = {
     encoding: 'utf-8',
     header_columns: ['team_name'],
@@ -121,6 +121,37 @@ test('executes approved team creation and records created teams', async () => {
   assert.equal(result.execution.created_count, 2);
   assert.equal(result.execution.noop_count, 0);
   assert.equal(result.execution.failure_count, 0);
+});
+
+test('manual create-org-teams execution applies terminal status label', async () => {
+  const baseArtifact = loadFixture('create-team-success.json').approved_artifact;
+  const artifactPath = writeArtifact(baseArtifact);
+  const appliedLabels = [];
+
+  const result = await runApprovedExecution({
+    env: {
+      AUDIT_ARTIFACT_PATH: artifactPath,
+      GITHUB_RUN_ID: '778',
+      GITHUB_RUN_ATTEMPT: '2',
+    },
+    tokenInfo: { token: 'test-token', source: 'ISSUEOPS_GITHUB_TOKEN', is_pat_backed: true, token_kind: 'pat' },
+    createApi: () => ({
+      listOrgTeams: async () => [],
+      createTeam: async ({ name, organization }) => ({
+        id: 1,
+        name,
+        organization,
+        slug: name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+      }),
+      addIssueLabels: async ({ labels }) => {
+        appliedLabels.push(...labels);
+        return labels;
+      },
+    }),
+  });
+
+  assert.equal(result.request.request_status, 'executed');
+  assert.ok(appliedLabels.includes('issueops:create-org-teams:executed'));
 });
 
 test('execution persists team-creation audit fields and requester-facing summary content', async () => {
@@ -435,4 +466,199 @@ test('retryable rate-limit handling for bulk CSV team creation preserves CSV exe
   assert.equal(result.execution.duplicate_row_count, 1);
   assert.equal(result.execution.invalid_row_count, 0);
   assert.equal(result.reconciliation.rate_limit_snapshot.retry_after_seconds, 2);
+});
+
+function createCsvAttachmentApprovedArtifact() {
+  const artifact = loadFixture('create-team-success.json').approved_artifact;
+  artifact.request.intake_mode = 'csv_attachment';
+  artifact.request.bulk_csv_input = 'team_name\nPlatform Engineering\nAI Model Routing Specialists\n';
+  artifact.request.bulk_csv_submission = {
+    encoding: 'utf-8',
+    header_columns: ['team_name'],
+    required_columns: ['team_name'],
+    unsupported_columns: [],
+    row_count: 2,
+    valid_row_count: 2,
+    invalid_row_count: 0,
+    duplicate_row_count: 0,
+    schema_status: 'valid',
+    schema_errors: [],
+  };
+  artifact.request.csv_row_findings = [
+    { row_number: 1, team_name: 'Platform Engineering', normalized_slug: 'platform-engineering', validation_status: 'valid' },
+    { row_number: 2, team_name: 'AI Model Routing Specialists', normalized_slug: 'ai-model-routing-specialists', validation_status: 'valid' },
+  ];
+  artifact.request.csv_row_numbering_convention = '1-based data-row numbers that exclude the header row';
+  artifact.request.accepted_attachment_submission = {
+    comment_id: 9001,
+    comment_created_at: '2026-05-22T15:00:00Z',
+    uploader_login: 'requester',
+    attachment_url: 'https://github.com/octo-org/issueops-speckit/files/9001/teams.csv',
+    filename: 'teams.csv',
+    extension: '.csv',
+    content_hash: 'sha256-abc',
+    acceptance_status: 'accepted',
+    rejection_reason: null,
+  };
+  artifact.request.requested_teams = [
+    {
+      requested_name: 'Platform Engineering',
+      normalized_slug: 'platform-engineering',
+      intended_owner_login: 'himanshu-im',
+      source_row_number: 1,
+      source_comment_id: 9001,
+      validation_status: 'valid',
+      desired_action: 'create_team',
+      execution_result: 'not_started',
+      failure_reason: null,
+    },
+    {
+      requested_name: 'AI Model Routing Specialists',
+      normalized_slug: 'ai-model-routing-specialists',
+      intended_owner_login: 'himanshu-im',
+      source_row_number: 2,
+      source_comment_id: 9001,
+      validation_status: 'valid',
+      desired_action: 'create_team',
+      execution_result: 'not_started',
+      failure_reason: null,
+    },
+  ];
+  artifact.validation.csv_row_findings = [...artifact.request.csv_row_findings];
+  artifact.validation.requested_teams = [...artifact.request.requested_teams];
+  return artifact;
+}
+
+test('csv_attachment rerun with all teams present produces no-op and preserves attachment provenance', async () => {
+  const artifactPath = writeArtifact(createCsvAttachmentApprovedArtifact());
+
+  const result = await runApprovedExecution({
+    env: {
+      AUDIT_ARTIFACT_PATH: artifactPath,
+    },
+    tokenInfo: { token: 'test-token', source: 'ISSUEOPS_GITHUB_TOKEN', is_pat_backed: true, token_kind: 'pat' },
+    createApi: () => ({
+      listOrgTeams: async () => [
+        { id: 1, name: 'Platform Engineering', slug: 'platform-engineering' },
+        { id: 2, name: 'AI Model Routing Specialists', slug: 'ai-model-routing-specialists' },
+      ],
+      createTeam: async () => { throw new Error('mutation should not run for satisfied teams'); },
+    }),
+  });
+
+  const persisted = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
+  const summary = formatAuditSummary(persisted);
+
+  assert.equal(result.request.request_status, 'executed');
+  assert.equal(result.execution.noop_count, 2);
+  assert.equal(result.execution.created_count, 0);
+  assert.deepEqual(
+    persisted.execution.noop_teams.map((e) => e.source_comment_id),
+    [9001, 9001]
+  );
+  assert.match(summary, /Intake mode: csv_attachment/i);
+  assert.match(summary, /Attachment comment ID: 9001/i);
+  assert.match(summary, /No-op: 2/i);
+});
+
+test('csv_attachment partial failure preserves source_comment_id on both created and failed teams', async () => {
+  const artifactPath = writeArtifact(createCsvAttachmentApprovedArtifact());
+  let firstCall = true;
+
+  const result = await runApprovedExecution({
+    env: {
+      AUDIT_ARTIFACT_PATH: artifactPath,
+    },
+    tokenInfo: { token: 'test-token', source: 'ISSUEOPS_GITHUB_TOKEN', is_pat_backed: true, token_kind: 'pat' },
+    createApi: () => ({
+      listOrgTeams: async () => [],
+      createTeam: async ({ name }) => {
+        if (firstCall) {
+          firstCall = false;
+          return { id: 1, name, slug: 'platform-engineering' };
+        }
+        const error = new Error('Failed to create team');
+        error.status = 422;
+        error.payload = { message: 'Validation failed' };
+        error.headers = {};
+        throw error;
+      },
+    }),
+    sleep: async () => { throw new Error('sleep should not be called'); },
+  });
+
+  const persisted = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
+
+  assert.equal(result.request.request_status, 'partially_executed');
+  assert.deepEqual(persisted.execution.created_teams.map((e) => e.source_comment_id), [9001]);
+  assert.deepEqual(persisted.execution.failed_teams.map((e) => e.source_comment_id), [9001]);
+  assert.equal(persisted.execution.rollback_status, 'compensating_action_required');
+});
+
+test('retryable rate-limit handling for csv_attachment team creation preserves attachment execution metadata', async () => {
+  const artifactPath = writeArtifact(createCsvAttachmentApprovedArtifact());
+  const rateLimitError = loadFixture('team-create-rate-limit.json').secondary_limit_error;
+  let attempts = 0;
+
+  const result = await runApprovedExecution({
+    env: {
+      AUDIT_ARTIFACT_PATH: artifactPath,
+    },
+    tokenInfo: { token: 'test-token', source: 'ISSUEOPS_GITHUB_TOKEN', is_pat_backed: true, token_kind: 'pat' },
+    createApi: () => ({
+      listOrgTeams: async () => [],
+      createTeam: async ({ name }) => {
+        attempts += 1;
+        if (attempts === 1) {
+          const error = new Error('secondary rate limit');
+          error.status = rateLimitError.status;
+          error.payload = rateLimitError.payload;
+          error.headers = rateLimitError.headers;
+          throw error;
+        }
+        return { id: attempts, name, slug: name.toLowerCase().replace(/[^a-z0-9]+/g, '-') };
+      },
+    }),
+    sleep: async () => {},
+  });
+
+  assert.equal(result.request.request_status, 'executed');
+  assert.equal(result.reconciliation.rate_limit_snapshot.retry_after_seconds, 2);
+  assert.equal(result.request.intake_mode, 'csv_attachment');
+  assert.ok(result.request.accepted_attachment_submission.comment_id);
+
+  const persisted = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
+  assert.match(formatAuditSummary(persisted), /Attachment comment ID: 9001/i);
+});
+
+test('csv_attachment execution exhausting bounded retry reports retry-required failure with attachment context', async () => {
+  const artifactPath = writeArtifact(createCsvAttachmentApprovedArtifact());
+  const rateLimitError = loadFixture('team-create-rate-limit.json').secondary_limit_error;
+
+  const result = await runApprovedExecution({
+    env: {
+      AUDIT_ARTIFACT_PATH: artifactPath,
+    },
+    tokenInfo: { token: 'test-token', source: 'ISSUEOPS_GITHUB_TOKEN', is_pat_backed: true, token_kind: 'pat' },
+    createApi: () => ({
+      listOrgTeams: async () => [],
+      createTeam: async () => {
+        const error = new Error('secondary rate limit');
+        error.status = rateLimitError.status;
+        error.payload = rateLimitError.payload;
+        error.headers = rateLimitError.headers;
+        throw error;
+      },
+    }),
+    sleep: async () => {},
+    maxRetries: 1,
+  });
+
+  const persisted = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
+
+  assert.equal(result.request.request_status, 'failed');
+  assert.equal(persisted.execution.rollback_status, 'manual_follow_up_required');
+  assert.equal(result.request.intake_mode, 'csv_attachment');
+  assert.ok(persisted.execution.failed_teams.length > 0);
+  assert.deepEqual(persisted.execution.failed_teams.map((e) => e.source_comment_id), [9001, 9001]);
 });

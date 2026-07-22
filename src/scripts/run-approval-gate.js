@@ -45,6 +45,46 @@ function buildAssignmentNote(operation) {
     return 'Central issue assignment is for queue ownership only and does not authorize repository access mutation.';
   }
 
+  if (operation === 'team_repo_access_removal') {
+    return 'Central issue assignment is for queue ownership only and does not authorize repository access removal mutation.';
+  }
+
+  if (operation === 'tenant_creation') {
+    return 'Central issue assignment is for queue ownership only and does not authorize tenant bootstrap mutation.';
+  }
+
+  if (operation === 'tenant_repo_creation') {
+    return 'Central issue assignment is for queue ownership only and does not authorize tenant repository creation mutation.';
+  }
+
+  if (operation === 'hosted_runner_creation') {
+    return 'Central issue assignment is for queue ownership only and does not authorize tenant hosted-runner creation mutation.';
+  }
+
+  if (operation === 'hosted_runner_deletion') {
+    return 'Central issue assignment is for queue ownership only and does not authorize tenant hosted-runner deletion mutation.';
+  }
+
+  if (operation === 'hosted_runner_move') {
+    return 'Central issue assignment is for queue ownership only and does not authorize tenant hosted-runner move mutation.';
+  }
+
+  if (operation === 'runner_group_creation') {
+    return 'Central issue assignment is for queue ownership only and does not authorize tenant runner group creation mutation.';
+  }
+
+  if (operation === 'tenant_variable_management') {
+    return 'Central issue assignment is for queue ownership only and does not authorize tenant variable mutation.';
+  }
+
+  if (operation === 'repository_ruleset_creation') {
+    return 'Central issue assignment is for queue ownership only and does not authorize repository ruleset creation mutation.';
+  }
+
+  if (operation === 'repository_ruleset_deletion') {
+    return 'Central issue assignment is for queue ownership only and does not authorize repository ruleset deletion mutation.';
+  }
+
   return 'Central issue assignment is for queue ownership only and does not authorize membership mutation.';
 }
 
@@ -58,6 +98,17 @@ async function runApprovalGate(options = {}) {
   );
   const auditArtifact = readAuditArtifact(artifactPath);
   const operation = auditArtifact.metadata && auditArtifact.metadata.operation;
+
+  if (
+    (operation === 'team_membership' || operation === 'team_creation' || operation === 'team_hierarchy' || operation === 'team_repo_access' || operation === 'team_repo_access_removal' || operation === 'tenant_creation' || operation === 'tenant_repo_creation') &&
+    auditArtifact.request &&
+    auditArtifact.request.intake_mode === 'csv_attachment' &&
+    ['executed', 'partially_executed', 'failed', 'failed_after_approved_execution'].includes(auditArtifact.request.request_status)
+  ) {
+    writeGitHubOutput('approval-status', 'not_requested', env.GITHUB_OUTPUT);
+    emitAuditSummary(auditArtifact, { summaryPath: env.GITHUB_STEP_SUMMARY, overwrite: true });
+    return auditArtifact;
+  }
 
   if (!auditArtifact.validation || auditArtifact.validation.is_valid !== true) {
     writeGitHubOutput('approval-status', auditArtifact.approval && auditArtifact.approval.approval_status || 'not_requested', env.GITHUB_OUTPUT);
@@ -127,6 +178,11 @@ async function runApprovalGate(options = {}) {
     auditArtifact.approval = await evaluateApprovalGate(
       {
         organization: auditArtifact.request.organization,
+        request_status: auditArtifact.request.request_status,
+        intake_mode: auditArtifact.request.intake_mode,
+        latestContextMarker: auditArtifact.request.context_marker,
+        priorApprovedContextMarker: auditArtifact.approval && auditArtifact.approval.approved_context_marker,
+        accepted_attachment_submission: auditArtifact.request.accepted_attachment_submission,
         intendedOwnerLogin: auditArtifact.request.intended_owner_login,
         designatedApproverLogin: auditArtifact.request.designated_approver_login,
         parentTeamSlug: auditArtifact.request.parent_team_slug,
@@ -137,6 +193,14 @@ async function runApprovalGate(options = {}) {
             ? 'team_hierarchy'
             : auditArtifact.metadata && auditArtifact.metadata.operation === 'team_repo_access'
               ? 'team_repo_access'
+              : auditArtifact.metadata && auditArtifact.metadata.operation === 'team_repo_access_removal'
+                ? 'team_repo_access_removal'
+              : auditArtifact.metadata && auditArtifact.metadata.operation === 'tenant_repo_creation'
+                ? 'tenant_repo_creation'
+              : auditArtifact.metadata && auditArtifact.metadata.operation === 'tenant_creation'
+                ? 'tenant_creation'
+              : auditArtifact.metadata && ['hosted_runner_creation', 'hosted_runner_deletion', 'hosted_runner_move', 'runner_group_creation', 'tenant_variable_management', 'repository_ruleset_creation', 'repository_ruleset_deletion'].includes(auditArtifact.metadata.operation)
+                ? auditArtifact.metadata.operation
               : 'team_membership',
         issueComments,
         priorApprovalStatus: auditArtifact.approval && auditArtifact.approval.approval_status,
@@ -147,14 +211,23 @@ async function runApprovalGate(options = {}) {
     );
   }
 
-  auditArtifact.request.request_status =
-    auditArtifact.approval.approval_status === 'approved'
+  const isWaitingForAttachment =
+    auditArtifact.request &&
+    auditArtifact.request.intake_mode === 'csv_attachment' &&
+    auditArtifact.approval &&
+    auditArtifact.approval.approval_status === 'not_requested';
+
+  auditArtifact.request.request_status = isWaitingForAttachment
+    ? 'waiting_for_attachment'
+    : auditArtifact.approval.approval_status === 'approved'
       ? 'approved'
       : 'awaiting_approval';
   auditArtifact.execution.summary =
     auditArtifact.metadata && auditArtifact.metadata.operation === 'team_hierarchy'
       ? auditArtifact.approval.approval_status === 'approved'
         ? 'Request approval was granted by the authorized designated hierarchy approver. No child-team mutation was attempted in this phase.'
+        : auditArtifact.approval.approval_status === 'not_requested'
+          ? 'Request is still waiting for a requester-authored CSV attachment comment before approval can be evaluated. No child-team mutation was attempted.'
         : auditArtifact.approval.approval_status === 'denied'
           ? 'Approval was denied because the approval comment did not come from the authorized designated hierarchy approver. No child-team mutation was attempted.'
           : auditArtifact.approval.approval_status === 'invalidated'
@@ -171,11 +244,63 @@ async function runApprovalGate(options = {}) {
       : auditArtifact.metadata && auditArtifact.metadata.operation === 'team_repo_access'
       ? auditArtifact.approval.approval_status === 'approved'
         ? 'Request approval was granted by the authorized designated target organization owner. No repository-access mutation was attempted in this phase.'
+        : auditArtifact.approval.approval_status === 'not_requested'
+          ? 'Request is still waiting for a requester-authored CSV attachment comment before approval can be evaluated. No repository-access mutation was attempted.'
         : auditArtifact.approval.approval_status === 'denied'
           ? 'Approval was denied because the approval comment did not come from the authorized designated target organization owner. No repository-access mutation was attempted.'
           : auditArtifact.approval.approval_status === 'invalidated'
             ? 'Approval was invalidated after the approval comment was removed. No repository-access mutation was attempted.'
             : 'Request is validated, centrally routed, and awaiting approval from the designated target organization owner. No repository-access mutation was attempted.'
+      : auditArtifact.metadata && auditArtifact.metadata.operation === 'team_repo_access_removal'
+      ? auditArtifact.approval.approval_status === 'approved'
+        ? 'Request approval was granted by the authorized designated target organization owner. No repository-access removal mutation was attempted in this phase.'
+        : auditArtifact.approval.approval_status === 'not_requested'
+          ? 'Request is still waiting for a requester-authored CSV attachment comment before approval can be evaluated. No repository-access removal mutation was attempted.'
+        : auditArtifact.approval.approval_status === 'denied'
+          ? 'Approval was denied because the approval comment did not come from the authorized designated target organization owner. No repository-access removal mutation was attempted.'
+          : auditArtifact.approval.approval_status === 'invalidated'
+            ? 'Approval was invalidated after the approval comment was removed. No repository-access removal mutation was attempted.'
+            : 'Request is validated, centrally routed, and awaiting approval from the designated target organization owner. No repository-access removal mutation was attempted.'
+      : auditArtifact.metadata && auditArtifact.metadata.operation === 'tenant_creation'
+      ? auditArtifact.approval.approval_status === 'approved'
+        ? 'Request approval was granted by the authorized designated target organization owner. No tenant bootstrap mutation was attempted in this phase.'
+        : auditArtifact.approval.approval_status === 'denied'
+          ? 'Approval was denied because the approval comment did not come from the authorized designated target organization owner. No tenant bootstrap mutation was attempted.'
+          : auditArtifact.approval.approval_status === 'invalidated'
+            ? 'Approval was invalidated after the approval comment was removed. No tenant bootstrap mutation was attempted.'
+            : 'Request is validated, centrally routed, and awaiting approval from the designated target organization owner. No tenant bootstrap mutation was attempted.'
+      : auditArtifact.metadata && auditArtifact.metadata.operation === 'tenant_repo_creation'
+      ? auditArtifact.approval.approval_status === 'approved'
+        ? 'Request approval was granted by the authorized designated target organization owner. No tenant repository mutation was attempted in this phase.'
+        : auditArtifact.approval.approval_status === 'denied'
+          ? 'Approval was denied because the approval comment did not come from the authorized designated target organization owner. No tenant repository mutation was attempted.'
+          : auditArtifact.approval.approval_status === 'invalidated'
+            ? 'Approval was invalidated after the approval comment was removed. No tenant repository mutation was attempted.'
+            : 'Request is validated, centrally routed, and awaiting approval from the designated target organization owner. No tenant repository mutation was attempted.'
+      : auditArtifact.metadata && ['hosted_runner_creation', 'hosted_runner_deletion', 'hosted_runner_move', 'runner_group_creation'].includes(auditArtifact.metadata.operation)
+      ? auditArtifact.approval.approval_status === 'approved'
+        ? 'Request approval was granted by the authorized designated target organization owner. No tenant runner mutation was attempted in this phase.'
+        : auditArtifact.approval.approval_status === 'denied'
+          ? 'Approval was denied because the approval comment did not come from the authorized designated target organization owner. No tenant runner mutation was attempted.'
+          : auditArtifact.approval.approval_status === 'invalidated'
+            ? 'Approval was invalidated after the approval comment was removed. No tenant runner mutation was attempted.'
+            : 'Request is validated, centrally routed, and awaiting approval from the designated target organization owner. No tenant runner mutation was attempted.'
+      : auditArtifact.metadata && auditArtifact.metadata.operation === 'tenant_variable_management'
+      ? auditArtifact.approval.approval_status === 'approved'
+        ? 'Request approval was granted by the authorized designated target organization owner. No tenant variable mutation was attempted in this phase.'
+        : auditArtifact.approval.approval_status === 'denied'
+          ? 'Approval was denied because the approval comment did not come from the authorized designated target organization owner. No tenant variable mutation was attempted.'
+          : auditArtifact.approval.approval_status === 'invalidated'
+            ? 'Approval was invalidated after the approval comment was removed. No tenant variable mutation was attempted.'
+            : 'Request is validated, centrally routed, and awaiting approval from the designated target organization owner. No tenant variable mutation was attempted.'
+      : auditArtifact.metadata && (auditArtifact.metadata.operation === 'repository_ruleset_creation' || auditArtifact.metadata.operation === 'repository_ruleset_deletion')
+      ? auditArtifact.approval.approval_status === 'approved'
+        ? 'Request approval was granted by the authorized designated target organization owner. No repository ruleset mutation was attempted in this phase.'
+        : auditArtifact.approval.approval_status === 'denied'
+          ? 'Approval was denied because the approval comment did not come from the authorized designated target organization owner. No repository ruleset mutation was attempted.'
+          : auditArtifact.approval.approval_status === 'invalidated'
+            ? 'Approval was invalidated after the approval comment was removed. No repository ruleset mutation was attempted.'
+            : 'Request is validated, centrally routed, and awaiting approval from the designated target organization owner. No repository ruleset mutation was attempted.'
       : auditArtifact.approval.approval_status === 'approved'
         ? 'Request approval was granted by an organization owner. No membership mutation was attempted in this phase.'
         : auditArtifact.approval.approval_status === 'denied'
@@ -191,7 +316,11 @@ async function runApprovalGate(options = {}) {
     approval: auditArtifact.approval,
     reconciliationPlan: auditArtifact.reconciliation,
     executionOutcome: auditArtifact.execution,
-    runContext: auditArtifact.metadata,
+    runContext: {
+      run_id: env.GITHUB_RUN_ID || auditArtifact.metadata && auditArtifact.metadata.run_id,
+      run_attempt: env.GITHUB_RUN_ATTEMPT || auditArtifact.metadata && auditArtifact.metadata.run_attempt,
+      operation: auditArtifact.metadata && auditArtifact.metadata.operation,
+    },
   });
 
   fs.writeFileSync(artifactPath, toAuditArtifactJson({
@@ -207,6 +336,9 @@ async function runApprovalGate(options = {}) {
   emitAuditSummary(updatedArtifact, { summaryPath: env.GITHUB_STEP_SUMMARY, overwrite: true });
   writeGitHubOutput('approval-status', updatedArtifact.approval.approval_status, env.GITHUB_OUTPUT);
   writeGitHubOutput('assigned-login', updatedArtifact.assignment.assigned_login || '', env.GITHUB_OUTPUT);
+  writeGitHubOutput('audit-artifact-path', artifactPath, env.GITHUB_OUTPUT);
+  writeGitHubOutput('audit-artifact-name', path.basename(artifactPath), env.GITHUB_OUTPUT);
+  writeGitHubOutput('audit-artifact-retention-days', env.AUDIT_ARTIFACT_RETENTION_DAYS || '', env.GITHUB_OUTPUT);
 
   if (updatedArtifact.approval.approval_status === 'denied' && shouldSetProcessExitCode) {
     process.exitCode = 1;

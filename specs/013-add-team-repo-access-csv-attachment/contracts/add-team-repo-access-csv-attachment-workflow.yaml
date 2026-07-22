@@ -1,0 +1,178 @@
+name: add-team-repo-access-csv-attachment-workflow-contract
+version: 1
+purpose: >-
+  Contract for the IssueOps enhancement that preserves existing add-team-repo-access
+  manual behavior while introducing requester-comment CSV attachment intake for
+  high-volume repository access grants.
+
+issue_form:
+  path: .github/ISSUE_TEMPLATE/add-team-repo-access.yml
+  required_fields:
+    - id: organization
+      type: input
+    - id: team
+      type: input
+    - id: requested_permission
+      type: dropdown
+      allowed:
+        - read
+        - triage
+        - write
+        - maintain
+        - admin
+    - id: designated_approver
+      type: input
+    - id: intake_mode
+      type: dropdown
+      allowed:
+        - manual
+        - csv_attachment
+    - id: dry_run
+      type: dropdown
+  conditional_fields:
+    - id: requested_repositories
+      type: textarea
+      rules:
+        - May be populated only when intake_mode is manual.
+        - Must be empty when intake_mode is csv_attachment.
+
+parser:
+  action: issue-ops/parser@v5
+  outputs:
+    - json
+    - parsed_organization
+    - parsed_team
+    - parsed_requested_permission
+    - parsed_designated_approver
+    - parsed_intake_mode
+    - parsed_requested_repositories
+    - parsed_dry_run
+
+workflow_entry_assumptions:
+  add_team_repo_access_workflow:
+    events:
+      issues:
+        - opened
+        - edited
+        - reopened
+        - labeled
+      issue_comment:
+        - created
+        - edited
+        - deleted
+    applicability_gate:
+      required_parser_outputs:
+        - parsed_target_team
+        - parsed_designated_approver
+        - parsed_permission_level
+    execution_gate:
+      approval_output_key: approval-status
+      required_expression: steps.approval_gate.outputs['approval-status'] == 'approved'
+  lint_workflows:
+    push_branches:
+      - main
+      - 013-setup-feature-branch
+  security_automation:
+    codeql_push_branches:
+      - main
+      - 013-setup-feature-branch
+    dependabot_target_branch: 013-setup-feature-branch
+
+authorization:
+  requester_identity: github.event.issue.user.login
+  attachment_uploader_requirement: Accepted CSV attachment comment author equals requester.
+  approval_model: Preserve baseline 005 designated approver eligibility checks for full batch.
+  central_assignment_semantics: Routing only; never approval evidence.
+  execution_identity:
+    credential: ISSUEOPS_GITHUB_TOKEN
+    least_privilege: true
+
+terminal_state:
+  statuses:
+    - executed
+    - partially_executed
+    - failed_after_approved_execution
+  forbidden_reopen_transitions:
+    - waiting_for_attachment
+    - validation_failed
+    - awaiting_approval
+  enforcement:
+    restore_artifact: true
+    operation_aware_labels:
+      prefix: issueops:add-team-repo-access:
+      statuses:
+        - executed
+        - partially_executed
+        - failed_after_approved_execution
+
+validation_rules:
+  - Preserve manual-path behavior from specs/005-add-team-repo-access/spec.md.
+  - Preserve CSV semantics from specs/009-add-team-repo-access-bulk-csv-mode/spec.md.
+  - Exactly one intake mode must be selected.
+  - csv_attachment requests with valid metadata enter waiting_for_attachment until accepted CSV validates.
+  - Approval is blocked while waiting_for_attachment.
+  - Attachment candidates are requester-authored same-issue comments only.
+  - Exactly one attachment candidate is accepted per attempt; ambiguous candidates fail closed.
+  - Active candidate is newest eligible requester attachment comment posted after latest failed attempt.
+  - Attachment-level checks: size cap, UTF-8 decode, CSV suitability, deterministic content hash.
+  - CSV-level checks preserve repository header and row semantics from feature 009.
+  - Built-in permission levels only: read, triage, write, maintain, admin.
+  - Exact/stronger existing access is no-op; weaker/conflicting access is rejected per baseline.
+
+reconciliation:
+  current_state_reads:
+    - issue comment history for attachment and approval context
+    - org/team/repository visibility
+    - current team-repository permission state
+  mutation_rule: Grant only missing eligible repository access.
+  no_op_rule: Exact or stronger existing permission remains unchanged.
+  stale_state_rule: Recompute state before mutation.
+  rerun_rule: Idempotent no duplicate grants.
+  dry_run_rule: Approved dry-run requests stay non-mutating and report an execution-blocked summary.
+
+observability:
+  outputs:
+    - github_step_summary
+    - json_audit_artifact
+  required_fields:
+    - issue_number
+    - run_id
+    - requester_login
+    - approver_login
+    - organization
+    - team
+    - requested_permission
+    - intake_mode
+    - request_status
+    - attachment_url
+    - attachment_comment_id
+    - attachment_uploader_login
+    - attachment_filename
+    - attachment_content_hash
+    - attachment_downloaded_at
+    - csv_row_findings
+    - duplicate_row_count
+    - invalid_row_count
+    - applied_repositories
+    - noop_repositories
+    - rejected_repositories
+    - failed_repositories
+    - rollback_status
+
+rate_limit_handling:
+  strategy: bounded_exponential_backoff
+  inspect_headers:
+    - x-ratelimit-remaining
+    - x-ratelimit-reset
+    - retry-after
+  retryable_conditions:
+    - transient secondary rate limit
+    - explicit retry-after guidance
+    - transient attachment download failure
+  non_retryable_conditions:
+    - invalid approval
+    - missing org/team/repository
+    - ambiguous attachment candidate
+    - oversized attachment
+    - decode failure
+    - malformed or invalid CSV content

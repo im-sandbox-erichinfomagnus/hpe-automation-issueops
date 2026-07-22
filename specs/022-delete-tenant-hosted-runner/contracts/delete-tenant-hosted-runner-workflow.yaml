@@ -1,0 +1,252 @@
+name: delete-tenant-hosted-runner-workflow-contract
+version: 1
+purpose: >-
+  Contract for the tenant-scoped GitHub-hosted runner deletion IssueOps
+  workflow that resolves canonical tenant context from tenant-registry plus
+  live governance state, authorizes the requester through active membership in
+  the tenant topology admin team (type "admin", read from the canonical tenant topology), derives the
+  tenant-prefixed runner name, resolves the live runner identifier, deletes
+  the runner only when present after designated active-org-owner approval, and
+  emits durable audit evidence.
+
+implementation_status: complete
+last_validated: 2026-06-05
+validated_against:
+  - issue_form: .github/ISSUE_TEMPLATE/delete-tenant-hosted-runner.yml
+  - workflow: .github/workflows/delete-tenant-hosted-runner.yml
+  - scripts:
+      - src/scripts/run-request-validation.js
+      - src/scripts/run-approval-gate.js
+      - src/scripts/run-approved-execution.js
+  - modules:
+      - src/workflow-support/parse-hosted-runner-deletion-request.js
+      - src/workflow-support/resolve-tenant-cicd-context-from-registry.js
+      - src/workflow-support/validate-hosted-runner-deletion-request.js
+      - src/workflow-support/reconcile-hosted-runner-deletion.js
+      - src/workflow-support/resolve-hosted-runner-approver.js
+      - src/workflow-support/approval-gate.js
+      - src/workflow-support/build-audit-artifact.js
+      - src/workflow-support/build-execution-outcome.js
+      - src/workflow-support/github-runner-api.js
+      - src/actions/hosted-runner-policy/index.js
+
+issue_form:
+  path: .github/ISSUE_TEMPLATE/delete-tenant-hosted-runner.yml
+  required_fields:
+    - id: organization
+      type: input
+      parsed_env_key: PARSED_ORGANIZATION
+    - id: tenant_name
+      type: input
+      parsed_env_key: PARSED_TENANT_NAME
+    - id: runner_name
+      type: input
+      parsed_env_key: PARSED_RUNNER_NAME
+      note: >-
+        Accepts the full tenant-prefixed runner name or the base name; both
+        derive to the same TenantName_RunnerBaseName target.
+    - id: designated_approver
+      type: input
+      parsed_env_key: PARSED_DESIGNATED_APPROVER
+    - id: dry_run
+      type: dropdown
+      default: "true"
+      parsed_env_key: PARSED_DRY_RUN
+    - id: justification
+      type: textarea
+      parsed_env_key: PARSED_JUSTIFICATION
+
+parser:
+  action: issue-ops/parser@v5
+  outputs:
+    - json
+    - parsed_organization
+    - parsed_tenant_name
+    - parsed_runner_name
+    - parsed_designated_approver
+    - parsed_dry_run
+    - parsed_justification
+
+operation_detection:
+  note: >-
+    A parsed runner_name without runner image/size fields detects
+    hosted_runner_deletion; the parsed request also carries
+    runner_deletion_scope=organization for artifact-level detection.
+
+workflow_entry_assumptions:
+  delete_tenant_hosted_runner_workflow:
+    events:
+      issues:
+        - opened
+        - edited
+        - reopened
+        - labeled
+      issue_comment:
+        - created
+        - edited
+        - deleted
+    concurrency:
+      group: delete-tenant-hosted-runner-{issue_number}
+      cancel_in_progress: false
+    execution_gate:
+      approval_output_key: approval-status
+      required_expression: steps.approval_gate.outputs['approval-status'] == 'approved'
+    workflow_permissions:
+      actions: read
+      contents: read
+      issues: write
+    terminal_state_labels:
+      prefix: "issueops:delete-tenant-hosted-runner:"
+      values:
+        - issueops:delete-tenant-hosted-runner:executed
+        - issueops:delete-tenant-hosted-runner:failed
+        - issueops:delete-tenant-hosted-runner:partially_executed
+
+authorization:
+  requester_identity: github.event.issue.user.login
+  approver_model: designated currently authorized target-organization approver
+  requester_tenant_requirements:
+    - requester tenant name must resolve to exactly one registry record for the target organization
+    - the tenant topology admin team (type "admin", <tenant-slug>-admin) must exist in the target organization
+    - requester must be an active member (member or maintainer) of the tenant topology admin team
+  execution_identity:
+    credential: ISSUEOPS_GITHUB_TOKEN
+    token_kind: pat
+    least_privilege: true
+    required_scope: manage_runners:org (classic) or equivalent fine-grained organization hosted-runner administration permission
+    fail_closed: >-
+      execution is blocked if ISSUEOPS_GITHUB_TOKEN is missing or if the token
+      fails the PAT-backed check in assertHostedRunnerMutationAllowed
+
+tenant_resolution:
+  authoritative_registry_source: tenant-registry/ on repository main branch
+  shared_resolver: resolve-tenant-cicd-context-from-registry.js (operation hosted_runner_deletion)
+  fail_closed_conditions:
+    - no tenant match
+    - ambiguous tenant match
+    - missing or malformed registry record
+    - missing tenant team in live state
+    - missing tenant topology admin team
+    - requester not an active member of the tenant topology admin team
+
+context_marker:
+  format: "tenant-runner-context:{16-char-sha256-hex}"
+  inputs:
+    - operation (literal 'hosted_runner_deletion')
+    - organization (normalized)
+    - runner_name_derived (normalized)
+    - designated_approver_login (normalized)
+    - tenant_key (normalized)
+    - cicd_admin_team_slug (normalized)
+    - registry_ref
+
+approval:
+  mode: context_bound
+  authorized_approver_role: target_org_owner (active admin of the target organization)
+  designated_approver_check: commenter login must match designated_approver_login from request
+  denial_note_pattern: "does not authorize tenant hosted-runner deletion mutation"
+
+validation_rules:
+  - tenant_name_input is required; validation fails immediately if absent or empty.
+  - Runner name must derive deterministically into a valid tenant-prefixed hosted-runner name.
+  - Canonical tenant CI/CD context must resolve to exactly one authorized match.
+  - Requester must be an active member of the tenant topology admin team (type "admin").
+  - Designated approver must be currently authorized (active admin) for the target organization.
+  - An absent target runner keeps the request valid and marks no-op convergence.
+  - Dry-run requests pass validation and produce mutation intent but must not execute any mutation.
+
+reconciliation:
+  current_state_reads:
+    - organization visibility
+    - authoritative tenant-registry record from main branch
+    - live tenant root team and tenant topology admin team existence
+    - requester membership on the tenant topology admin team
+    - organization hosted-runner listing (derived-name resolution to runner id)
+  mutation_rule:
+    - delete hosted runner by resolved id only when present (deletion_action = delete_hosted_runner)
+  no_op_rule:
+    - absent runner at validation or execution time, or 404 on deletion: deletion_action/result = noop
+  blocked_rule:
+    - boundary_mismatch: requester authorization or governance state changed between validation and execution
+    - missing_tenant_context: resolved context is absent at execution time
+  rerun_rule: idempotent; rerunning a completed deletion converges as no-op
+
+execution:
+  policy_guards:
+    - assertHostedRunnerMutationAllowed: checks approval_status=approved, approver_role=target_org_owner, authorization_state=authorized, PAT-backed token
+  mutation_order:
+    - 1. deleteHostedRunner via DELETE /orgs/{org}/actions/hosted-runners/{hosted_runner_id} (202)
+  api_endpoints:
+    - GET /orgs/{org}/actions/hosted-runners
+    - DELETE /orgs/{org}/actions/hosted-runners/{hosted_runner_id}
+  rollback_handling: >-
+    Deletion is irreversible; the audit artifact preserves the deleted runner
+    id and name, and remediation guidance points to the
+    create-tenant-hosted-runner workflow for re-creation.
+
+observability:
+  persistence_model: retained workflow artifact plus github step summary
+  artifact_name_pattern: "delete-tenant-hosted-runner-execution-{issue_number}-{run_attempt}"
+  audit_artifact_fields:
+    request:
+      - request_id
+      - issue_number
+      - requester_login
+      - organization
+      - tenant_name_input
+      - runner_base_name_input
+      - runner_name_derived
+      - runner_deletion_scope
+      - designated_approver_login
+      - dry_run
+      - request_status
+      - context_marker
+      - tenant_key
+      - cicd_admin_team_slug
+    validation:
+      - is_valid
+      - errors
+      - warnings
+      - tenant_resolution
+      - runner_exists
+      - existing_runner_id
+      - existing_runner_status
+    approval:
+      - approval_status
+      - approver_login
+      - approver_role
+      - approved_context_marker
+      - latest_context_marker
+    reconciliation:
+      - deletion_action
+      - boundary_revalidation_status
+      - blocked_reason
+    execution:
+      - runner_deletion_result
+      - audit_persistence_result
+      - mutation_count
+      - noop_count
+      - failure_count
+      - rollback_status
+      - summary
+  lifecycle_states:
+    - submitted
+    - awaiting_approval
+    - approved
+    - validation_failed
+    - executed
+    - failed
+    - partially_executed
+    - blocked
+
+rate_limit_handling:
+  strategy: bounded_exponential_backoff
+  retryable_conditions:
+    - transient 5xx responses
+    - secondary rate limit responses (429 with retry-after)
+  non_retryable_conditions:
+    - ambiguous tenant resolution
+    - unauthorized approver
+    - missing tenant topology admin team
+    - requester not an active tenant topology admin team member
+    - boundary mismatch at execution time

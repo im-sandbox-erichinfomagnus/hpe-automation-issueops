@@ -1,0 +1,54 @@
+{
+  "tenantId": "acme",
+  "tenantName": "Acme Platform",
+  "tenantType": "application",
+  "topology": {
+    "teams": {
+      "structure": [
+        {
+          "team": "acme-cicd-admin",
+          "parent": "acme-root",
+          "type": "cicd-admin"
+        }
+      ]
+    }
+  },
+  "externalMappings": {
+    "cmdbId": null,
+    "costCenter": null,
+    "businessUnit": null,
+    "environment": "nonprod"
+  },
+  "metadata": {
+    "primaryContact": "",
+    "secondaryContact": null,
+    "createdBy": "requester-user",
+    "createdDate": "2026-06-15T17:13:36.150Z"
+  },
+  "lifecycleStatus": "active",
+  "tenant_key": "acme",
+  "tenant_display_name": "Acme Platform",
+  "organization": "octo-org",
+  "tenant_team_slug": "acme-root",
+  "repo_admin_team_slug": "acme-repo-admin",
+  "cicd_admin_team_name": "acme-cicd-admin",
+  "cicd_admin_team_slug": "acme-cicd-admin",
+  "cicd_topology_relation": {
+    "parent_team_name": null,
+    "parent_team_slug": "acme-root",
+    "child_team_name": "acme-cicd-admin",
+    "child_team_slug": "acme-cicd-admin",
+    "relation_status": "applied",
+    "conflict_reason": null
+  },
+  "cicd_capability_status": "applied",
+  "cicd_capability_reason_code": null,
+  "cicd_capability_evidence_ref": null,
+  "bootstrap_tenant_admin_login": "requester-user",
+  "requester_login": "requester-user",
+  "approver_login": "approver-user",
+  "lifecycle_status": "active",
+  "created_at": "2026-06-12T06:41:36.577Z",
+  "updated_at": "2026-06-15T17:13:36.150Z",
+  "source_run_id": null
+}
