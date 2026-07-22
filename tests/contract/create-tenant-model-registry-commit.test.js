@@ -1,6 +1,9 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const test = require('node:test');
 
 const { commitRegistryRecord } = require('../../src/workflow-support/commit-registry-record');
@@ -204,27 +207,36 @@ test('T030: buildTenantRegistryRecord includes CICD capability status and reason
 });
 
 test('T030: persistTenantRegistryRecord returns record with CICD fields preserved', () => {
-  const result = persistTenantRegistryRecord({
-    request: {
-      tenant_key: 'acme',
-      tenant_display_name: 'Acme Platform',
-      tenant_type: 'application',
-      tenant_team_slug: 'acme-root',
-      repo_admin_team_slug: 'acme-repo-admin',
-      cicd_admin_team_name: 'acme-cicd-admin',
-      cicd_admin_team_slug: 'acme-cicd-admin',
-      organization: 'octo-org',
-      requester_login: 'requester-user',
-      compatibility: { mode: 'canonical' },
-    },
-    reconciliation: {
-      cicd_capability_decision: { status: 'applied' },
-    },
-    approver_login: 'approver-user',
-    lifecycle_status: 'active',
-    mode: 'noop',
-  });
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'tenant-registry-contract-'));
+  const registryDirectory = path.join(workspace, 'tenant-registry');
+  fs.mkdirSync(registryDirectory);
 
-  assert.equal(result.record.cicd_admin_team_name, 'acme-cicd-admin');
-  assert.equal(result.record.cicd_capability_status, 'applied');
+  try {
+    const result = persistTenantRegistryRecord({
+      request: {
+        tenant_key: 'acme',
+        tenant_display_name: 'Acme Platform',
+        tenant_type: 'application',
+        tenant_team_slug: 'acme-root',
+        repo_admin_team_slug: 'acme-repo-admin',
+        cicd_admin_team_name: 'acme-cicd-admin',
+        cicd_admin_team_slug: 'acme-cicd-admin',
+        organization: 'octo-org',
+        requester_login: 'requester-user',
+        compatibility: { mode: 'canonical' },
+      },
+      reconciliation: {
+        cicd_capability_decision: { status: 'applied' },
+      },
+      approver_login: 'approver-user',
+      lifecycle_status: 'active',
+      mode: 'durable',
+      registryDirectory,
+    });
+
+    assert.equal(result.record.cicd_admin_team_name, 'acme-cicd-admin');
+    assert.equal(result.record.cicd_capability_status, 'applied');
+  } finally {
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
 });
