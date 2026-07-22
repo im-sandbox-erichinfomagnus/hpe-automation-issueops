@@ -1,2 +1,0 @@
-tenant_name,tenant_admin_login,tenant_type,cmdb_id,cost_center,business_unit,environment,primary_contact,secondary_contact,code_scanning_enabled,secret_scanning_enabled,dependabot_enabled
-EricDemo,adamg-infomagnus,platform,CMDB-ERIC-1001,CC-ERIC-1001,Platform,nonprod,adam.galyoon@verificoncrete.com,,true,true,true

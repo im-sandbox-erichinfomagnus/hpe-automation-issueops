@@ -1,2 +1,0 @@
-runner_name,runner_image_id,runner_image_source,runner_size,runner_group_name,maximum_runners
-linux-build,2295,github,4-core,EricDemo_Builders,1
