@@ -8,11 +8,11 @@ name: Sync this repo and source branch to remote repo destination feature branch
 # - Scheduled daily at midnight UTC
 # - Manual trigger via workflow_dispatch
 on:
-  push:
-    branches:
-      - main  # Run only on push to main branch
-  schedule:
-    - cron:  "0 0 * * *"
+#  push:
+#    branches:
+#      - main  # Run only on push to main branch
+# schedule:
+#   - cron:  "0 0 * * *"
   workflow_dispatch:
 
 jobs:
