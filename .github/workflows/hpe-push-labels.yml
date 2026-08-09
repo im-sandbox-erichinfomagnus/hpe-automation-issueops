@@ -1,0 +1,120 @@
+name: Copy Labels to Another Repo
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_owner:
+        description: 'Source Owner (User or Org)'
+        required: true
+        type: string
+      source_repo:
+        description: 'Source Repository Name'
+        required: true
+        type: string
+      destination_owner:
+        description: 'Destination Owner (User or Org)'
+        required: true
+        type: string
+      destination_repo:
+        description: 'Destination Repository Name'
+        required: true
+        type: string
+
+jobs:
+  copy-labels:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch and Create Labels
+        env:
+          SRC_GH_TOKEN: ${{ secrets.SYNC_SOURCE_PAT }}
+          DEST_GH_TOKEN: ${{ secrets.SYNC_DESTINATION_PAT }}
+          SRC_OWNER: ${{ inputs.source_owner }}
+          SRC_REPO: ${{ inputs.source_repo }}
+          DEST_OWNER: ${{ inputs.destination_owner }}
+          DEST_REPO: ${{ inputs.destination_repo }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${SRC_GH_TOKEN:-}" ]; then
+            echo "Required secret SYNC_SOURCE_PAT is not set."
+            exit 1
+          fi
+
+          if [ -z "${DEST_GH_TOKEN:-}" ]; then
+            echo "Required secret SYNC_DESTINATION_PAT is not set."
+            exit 1
+          fi
+
+          api_base="https://api.github.com"
+          src_auth_header="Authorization: Bearer $SRC_GH_TOKEN"
+          dest_auth_header="Authorization: Bearer $DEST_GH_TOKEN"
+          accept_header="Accept: application/vnd.github+json"
+          content_type_header="Content-Type: application/json"
+
+          echo "Validating source token access..."
+          SRC_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "$src_auth_header" \
+            -H "$accept_header" \
+            "$api_base/repos/$SRC_OWNER/$SRC_REPO")
+
+          if [ "$SRC_STATUS" -ne 200 ]; then
+            echo "SOURCE_GH_PAT cannot access source repository $SRC_OWNER/$SRC_REPO (HTTP $SRC_STATUS)."
+            exit 1
+          fi
+
+          echo "Validating destination token access..."
+          DEST_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "$dest_auth_header" \
+            -H "$accept_header" \
+            "$api_base/repos/$DEST_OWNER/$DEST_REPO")
+
+          if [ "$DEST_STATUS" -ne 200 ]; then
+            echo "DESTINATION_GH_PAT cannot access destination repository $DEST_OWNER/$DEST_REPO (HTTP $DEST_STATUS)."
+            exit 1
+          fi
+
+          echo "Fetching labels from $SRC_OWNER/$SRC_REPO..."
+          RESPONSE=$(curl -fsSL \
+            -H "$src_auth_header" \
+            -H "$accept_header" \
+            "$api_base/repos/$SRC_OWNER/$SRC_REPO/labels?per_page=100")
+
+          if [ "$(echo "$RESPONSE" | jq 'length')" -eq 0 ]; then
+            echo "No labels found in source repository."
+            exit 0
+          fi
+
+          echo "$RESPONSE" | jq -c '.[]' | while read -r label; do
+            NAME=$(echo "$label" | jq -r '.name')
+            COLOR=$(echo "$label" | jq -r '.color')
+            DESCRIPTION=$(echo "$label" | jq -r '.description // ""')
+
+            ENCODED_NAME=$(jq -rn --arg x "$NAME" '$x|@uri')
+            echo "Processing label: $NAME"
+
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              -H "$dest_auth_header" \
+              -H "$accept_header" \
+              "$api_base/repos/$DEST_OWNER/$DEST_REPO/labels/$ENCODED_NAME")
+
+            if [ "$STATUS" -eq 200 ]; then
+              echo "Label '$NAME' exists. Updating..."
+              curl -fsSL -X PATCH \
+                -H "$dest_auth_header" \
+                -H "$accept_header" \
+                -H "$content_type_header" \
+                "$api_base/repos/$DEST_OWNER/$DEST_REPO/labels/$ENCODED_NAME" \
+                -d "$(jq -n --arg name "$NAME" --arg color "$COLOR" --arg desc "$DESCRIPTION" '{new_name: $name, color: $color, description: $desc}')"
+            elif [ "$STATUS" -eq 404 ]; then
+              echo "Label '$NAME' does not exist. Creating..."
+              curl -fsSL -X POST \
+                -H "$dest_auth_header" \
+                -H "$accept_header" \
+                -H "$content_type_header" \
+                "$api_base/repos/$DEST_OWNER/$DEST_REPO/labels" \
+                -d "$(jq -n --arg name "$NAME" --arg color "$COLOR" --arg desc "$DESCRIPTION" '{name: $name, color: $color, description: $desc}')"
+            else
+              echo "Failed to query destination label '$NAME' in $DEST_OWNER/$DEST_REPO (HTTP $STATUS)."
+              exit 1
+            fi
+          done
