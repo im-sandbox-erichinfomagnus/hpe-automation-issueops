@@ -109,57 +109,6 @@ function writeGitHubOutput(key, value, outputPath = process.env.GITHUB_OUTPUT) {
   fs.appendFileSync(outputPath, `${key}=${value}\n`, 'utf8');
 }
 
-function hasAutomaticRequesterAuthorization(approval = {}) {
-  const requesterAuthorization = approval.requester_authorization || {};
-  return (
-    approval.decision_source === 'automatic_demo' &&
-    approval.approval_status === 'approved' &&
-    requesterAuthorization.authorized === true
-  );
-}
-
-function isAutomaticExecutionArtifact(auditArtifact = {}) {
-  const metadata = auditArtifact.metadata || {};
-  const approval = auditArtifact.approval || {};
-  return (
-    String(metadata.approval_mode || '').toLowerCase() === 'automatic' ||
-    approval.decision_source === 'automatic_demo'
-  );
-}
-
-function formatExecutionSummaryLead(options = {}) {
-  const auditArtifact = options.auditArtifact || {};
-  const status = String(options.status || 'failed');
-  const executionLabel = String(options.executionLabel || 'execution');
-  const mutationLabel = String(options.mutationLabel || executionLabel);
-  const automatic = isAutomaticExecutionArtifact(auditArtifact);
-
-  if (status === 'dry_run') {
-    return automatic
-      ? 'Automatic authorization passed, but execution remains blocked because the request is dry-run only.'
-      : 'Approved execution remains blocked because the request is dry-run only.';
-  }
-  if (status === 'noop') {
-    return automatic
-      ? `Request is already satisfied. Re-running the automatically authorized request does not trigger a new ${mutationLabel} mutation run.`
-      : `Request is already satisfied. Additional approval comments do not trigger a new ${mutationLabel} mutation run.`;
-  }
-  if (status === 'executed') {
-    return automatic
-      ? `${executionLabel} completed after automatic authorization.`
-      : `Approved ${executionLabel} completed.`;
-  }
-  if (status === 'partially_executed') {
-    return automatic
-      ? `${executionLabel} completed with partial failure after automatic authorization.`
-      : `Approved ${executionLabel} completed with partial failure.`;
-  }
-
-  return automatic
-    ? `${executionLabel} failed after automatic authorization.`
-    : `Approved ${executionLabel} failed.`;
-}
-
 function normalizeRequesterMaintainerPolicy(value) {
   const normalized = String(value || '').trim().toLowerCase();
   if (!normalized || normalized === 'keep' || normalized === 'keep_maintainer') {
@@ -193,121 +142,6 @@ function summarizeMaintainerNormalizationActions(actions = [], policy = 'keep_ma
   }
 
   return `Requester maintainership normalization applied with policy ${policy}: changed=${mutated}, noop=${noop}, failed=0.`;
-}
-
-function buildContextBindingEvidence(auditArtifact = {}, executionContextMarker = null) {
-  const approval = auditArtifact.approval || {};
-  const approvedContextMarker = approval.approved_context_marker || null;
-  const latestContextMarker = approval.latest_context_marker || null;
-  const normalizedExecutionContextMarker = executionContextMarker || null;
-  const contextBindingStatus = (
-    approvedContextMarker &&
-    latestContextMarker &&
-    normalizedExecutionContextMarker &&
-    String(approvedContextMarker) === String(latestContextMarker) &&
-    String(latestContextMarker) === String(normalizedExecutionContextMarker)
-  )
-    ? 'matched'
-    : 'mismatched';
-
-  return {
-    approved_context_marker: approvedContextMarker,
-    latest_context_marker: latestContextMarker,
-    execution_context_marker: normalizedExecutionContextMarker,
-    context_binding_status: contextBindingStatus,
-  };
-}
-
-// Finds an organization membership reader for the pre-mutation caller recheck.
-// Injected adapters win so tests and workflows share one path; a real token is the
-// last resort. Returning null is a deliberate fail-closed signal, not a skip.
-function resolveCallerMembershipLookup(context = {}) {
-  const options = context.options || {};
-  const mutationDecision = context.mutationDecision || {};
-  const auditArtifact = context.auditArtifact || null;
-
-  if (typeof options.getOrganizationMembership === 'function') {
-    return ({ organization, username }) => options.getOrganizationMembership({ organization, username });
-  }
-
-  const adapters = [];
-  if (options.teamApi) {
-    adapters.push(options.teamApi);
-  }
-  if (typeof options.createApi === 'function') {
-    adapters.push(options.createApi({
-      token: mutationDecision.tokenInfo && mutationDecision.tokenInfo.token,
-      auditArtifact,
-    }));
-  }
-  if (options.api) {
-    adapters.push(options.api);
-  }
-
-  const adapter = adapters.find(
-    (candidate) => candidate && typeof candidate.getOrganizationMembership === 'function'
-  );
-  if (adapter) {
-    return ({ organization, username }) => adapter.getOrganizationMembership({ organization, username });
-  }
-
-  const token = mutationDecision.tokenInfo && mutationDecision.tokenInfo.token;
-  if (!token || adapters.length > 0) {
-    return null;
-  }
-
-  const liveApi = createGitHubTeamApi({ token });
-  return ({ organization, username }) => liveApi.getOrganizationMembership({ organization, username });
-}
-
-function buildExecutionApprovalContext(auditArtifact = {}) {
-  const approval = auditArtifact.approval || {};
-  if (!hasAutomaticRequesterAuthorization(approval)) {
-    return approval;
-  }
-
-  const request = auditArtifact.request || {};
-  const requesterAuthorization = approval.requester_authorization || {};
-  const requesterLogin =
-    requesterAuthorization.requester_login ||
-    request.requester_login ||
-    '';
-  const operation = auditArtifact.metadata && auditArtifact.metadata.operation || 'team_membership';
-  if (operation === 'team_membership') {
-    return {
-      ...approval,
-      approver_login: requesterLogin,
-      approver_role: 'org_owner',
-      approver_authorization_state: 'authorized',
-    };
-  }
-
-  if (operation === 'team_creation') {
-    return {
-      ...approval,
-      approver_login: request.intended_owner_login || '',
-      approver_role: 'intended_owner',
-      approver_authorization_state: 'authorized',
-    };
-  }
-
-  if (operation === 'team_hierarchy') {
-    return {
-      ...approval,
-      approver_login: requesterLogin,
-      designated_approver_login: requesterLogin,
-      approver_role: 'designated_hierarchy_approver',
-      approver_authorization_state: 'authorized',
-    };
-  }
-
-  return {
-    ...approval,
-    approver_login: requesterLogin,
-    designated_approver_login: requesterLogin,
-    approver_role: 'target_org_owner',
-    approver_authorization_state: 'authorized',
-  };
 }
 
 function buildValidatedPeople(auditArtifact = {}) {
@@ -1813,13 +1647,6 @@ async function runApprovedExecution(options = {}) {
     auditArtifact.request.tenant_admin_login
   ) {
     try {
-      assertLiveRevalidationReaders([
-        {
-          adapter: api,
-          adapterLabel: 'teamApi',
-          methods: ['getMembershipForUser'],
-        },
-      ]);
       tenantAdminMembership = await api.getMembershipForUser({
         organization: auditArtifact.request.organization,
         teamSlug: auditArtifact.request.tenant_team_slug,
