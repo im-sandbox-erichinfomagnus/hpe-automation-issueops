@@ -41,7 +41,7 @@ jobs:
       TENANT_REGISTRY_PERSISTENCE_MODE: durable
       TENANT_REGISTRY_DIR: tenant-registry
       TENANT_REGISTRY_REQUIRE_DIRECTORY: "true"
-      TENANT_BOOTSTRAP_REQUESTER_POLICY: member
+      TENANT_BOOTSTRAP_REQUESTER_POLICY: remove
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -184,6 +184,7 @@ jobs:
           TENANT_REGISTRY_PERSISTENCE_MODE: ${{ env.TENANT_REGISTRY_PERSISTENCE_MODE }}
           TENANT_REGISTRY_DIR: ${{ env.TENANT_REGISTRY_DIR }}
           TENANT_REGISTRY_REQUIRE_DIRECTORY: ${{ env.TENANT_REGISTRY_REQUIRE_DIRECTORY }}
+          TENANT_BOOTSTRAP_REQUESTER_POLICY: ${{ env.TENANT_BOOTSTRAP_REQUESTER_POLICY }}
           AUDIT_ARTIFACT_PATH: artifacts/create-tenant-model-validation-${{ env.ISSUE_NUMBER || 'manual' }}.json
         run: node src/scripts/run-approved-execution.js
 

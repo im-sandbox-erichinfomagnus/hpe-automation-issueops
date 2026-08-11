@@ -53,6 +53,7 @@ function parseSingleCsvRow(rawValue, columns = []) {
   const rows = [];
   const errors = [];
   let headerSkipped = false;
+  const expectedFirstColumn = columns[0] ? String(columns[0]).toLowerCase() : '';
 
   for (const rawLine of rawText.split('\n')) {
     const line = rawLine.trim();
@@ -67,7 +68,14 @@ function parseSingleCsvRow(rawValue, columns = []) {
     }
 
     const cells = parsedLine.cells.map((cell) => cell.trim());
-    if (!headerSkipped && cells[0] && columns[0] && cells[0].toLowerCase() === columns[0].toLowerCase()) {
+
+    // Skip preface text (for example, "Input given:") before the actual CSV
+    // header/data. These lines frequently appear in pasted issue comments.
+    if (!headerSkipped && cells.length < 2 && columns.length > 1) {
+      continue;
+    }
+
+    if (!headerSkipped && cells[0] && expectedFirstColumn && cells[0].toLowerCase() === expectedFirstColumn) {
       headerSkipped = true;
       continue;
     }
