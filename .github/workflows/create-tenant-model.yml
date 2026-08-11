@@ -41,6 +41,7 @@ jobs:
       TENANT_REGISTRY_PERSISTENCE_MODE: durable
       TENANT_REGISTRY_DIR: tenant-registry
       TENANT_REGISTRY_REQUIRE_DIRECTORY: "true"
+      TENANT_BOOTSTRAP_REQUESTER_POLICY: member
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
