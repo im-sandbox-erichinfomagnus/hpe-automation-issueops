@@ -2614,44 +2614,74 @@ async function runApprovedExecution(options = {}) {
         });
       }
     } else if (isTenantCreation || isTeamCreation) {
-      for (const team of reconciliationPlan.teams_to_create) {
-        const attemptResult = await executeWithBoundedRetry(
-          () => api.createTeam({
-            organization: auditArtifact.request.organization,
-            name: team.requested_name,
-          }),
-          {
-            maxRetries: options.maxRetries || 2,
-            sleep: options.sleep,
+      let tenantBootstrapPreflightError = null;
+      if (isTenantCreation) {
+        const tenantAdminLogin = auditArtifact.request && auditArtifact.request.tenant_admin_login
+          ? String(auditArtifact.request.tenant_admin_login).trim().toLowerCase()
+          : '';
+        const requesterLogin = auditArtifact.request && auditArtifact.request.requester_login
+          ? String(auditArtifact.request.requester_login).trim().toLowerCase()
+          : '';
+        const requesterMaintainerPolicy = normalizeRequesterMaintainerPolicy(env.TENANT_BOOTSTRAP_REQUESTER_POLICY);
+
+        if (!tenantAdminLogin) {
+          tenantBootstrapPreflightError = 'Tenant bootstrap policy blocked because tenant_admin_login is missing before team creation; requester fallback is disabled.';
+        } else if (
+          requesterMaintainerPolicy === 'remove' &&
+          requesterLogin &&
+          requesterLogin !== tenantAdminLogin &&
+          typeof api.removeTeamMembership !== 'function'
+        ) {
+          tenantBootstrapPreflightError = 'Tenant bootstrap policy blocked because strict requester removal is required but removeTeamMembership is unavailable before team creation.';
+        }
+      }
+
+      if (tenantBootstrapPreflightError) {
+        executionResults.push({
+          execution_result: 'failed',
+          failure_reason: 'tenant_policy_blocked',
+          detail: tenantBootstrapPreflightError,
+        });
+      } else {
+        for (const team of reconciliationPlan.teams_to_create) {
+          const attemptResult = await executeWithBoundedRetry(
+            () => api.createTeam({
+              organization: auditArtifact.request.organization,
+              name: team.requested_name,
+            }),
+            {
+              maxRetries: options.maxRetries || 2,
+              sleep: options.sleep,
+            }
+          );
+
+          latestRateLimitSnapshot = attemptResult.retry_plan.rate_limit_snapshot || latestRateLimitSnapshot;
+
+          if (attemptResult.ok) {
+            executionResults.push({
+              normalized_slug: team.normalized_slug,
+              requested_name: team.requested_name,
+              source_row_number: team.source_row_number || null,
+              source_comment_id: team.source_comment_id || null,
+              created_team_id: attemptResult.value && attemptResult.value.id || null,
+              execution_result: 'created',
+              failure_reason: null,
+            });
+            continue;
           }
-        );
 
-        latestRateLimitSnapshot = attemptResult.retry_plan.rate_limit_snapshot || latestRateLimitSnapshot;
-
-        if (attemptResult.ok) {
           executionResults.push({
             normalized_slug: team.normalized_slug,
             requested_name: team.requested_name,
             source_row_number: team.source_row_number || null,
             source_comment_id: team.source_comment_id || null,
-            created_team_id: attemptResult.value && attemptResult.value.id || null,
-            execution_result: 'created',
-            failure_reason: null,
+            execution_result: 'failed',
+            failure_reason: classifyFailureReason(attemptResult.error),
           });
-          continue;
         }
-
-        executionResults.push({
-          normalized_slug: team.normalized_slug,
-          requested_name: team.requested_name,
-          source_row_number: team.source_row_number || null,
-          source_comment_id: team.source_comment_id || null,
-          execution_result: 'failed',
-          failure_reason: classifyFailureReason(attemptResult.error),
-        });
       }
 
-      if (isTenantCreation) {
+      if (isTenantCreation && !tenantBootstrapPreflightError) {
         const refreshedTeamsResult = await executeWithBoundedRetry(
           () => api.listOrgTeams({ organization: auditArtifact.request.organization }),
           {
@@ -3613,7 +3643,7 @@ async function runApprovedExecution(options = {}) {
     executionOutcome.summary = `${executionOutcome.summary} Note: GitHub automatically makes the authenticated creator a team maintainer when a new team is created, so the creator becomes a team maintainer as an operational constraint of this workflow.`;
   }
   if (isTenantCreation) {
-    const intendedTenantAdmin = reconciliationPlan.tenant_admin_intended_login || auditArtifact.request.tenant_admin_login || auditArtifact.request.requester_login || 'n/a';
+    const intendedTenantAdmin = reconciliationPlan.tenant_admin_intended_login || auditArtifact.request.tenant_admin_login || 'n/a';
     const creatorMaintainerBehavior = reconciliationPlan.creator_maintainer_behavior
       ? 'GitHub automatically makes the authenticated creator a team maintainer when a new team is created.'
       : 'Creator maintainership behavior not recorded.';
