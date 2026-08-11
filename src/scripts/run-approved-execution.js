@@ -2992,18 +2992,25 @@ async function runApprovedExecution(options = {}) {
                   );
 
                   latestRateLimitSnapshot = removalResult.retry_plan.rate_limit_snapshot || latestRateLimitSnapshot;
+                  const removed = Boolean(removalResult.ok && removalResult.value && removalResult.value.removed);
+                  const removalExecutionResult = !removalResult.ok
+                    ? 'failed'
+                    : removed ? 'removed' : 'noop';
+                  const removalFailureReason = removalResult.ok ? null : classifyFailureReason(removalResult.error);
+
                   executionResults.push({
                     team_slug: teamSlug,
                     username: requesterLogin,
-                    execution_result: removalResult.ok ? 'removed' : 'failed',
-                    failure_reason: removalResult.ok ? null : classifyFailureReason(removalResult.error),
+                    execution_result: removalExecutionResult,
+                    failure_reason: removalFailureReason,
                   });
                   tenantBootstrapMaintainerActions.push({
                     team_slug: teamSlug,
                     username: requesterLogin,
                     action: 'normalize_requester_remove_membership',
-                    execution_result: removalResult.ok ? 'removed' : 'failed',
-                    failure_reason: removalResult.ok ? null : classifyFailureReason(removalResult.error),
+                    execution_result: removalExecutionResult,
+                    failure_reason: removalFailureReason,
+                    detail: removed ? null : 'requester_membership_already_absent',
                   });
                   continue;
                 }
