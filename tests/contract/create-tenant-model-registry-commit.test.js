@@ -86,7 +86,7 @@ test('T030: buildTenantRegistryRecord includes CICD admin team fields', () => {
   assert.ok(record.cicd_topology_relation);
 });
 
-test('buildTenantRegistryRecord falls back bootstrap admin to requester when tenant admin is missing', () => {
+test('buildTenantRegistryRecord keeps bootstrap admin empty when tenant admin is missing', () => {
   const record = buildTenantRegistryRecord({
     request: {
       tenant_key: 'acme',
@@ -99,7 +99,7 @@ test('buildTenantRegistryRecord falls back bootstrap admin to requester when ten
     },
   });
 
-  assert.equal(record.bootstrap_tenant_admin_login, 'requester-user');
+  assert.equal(record.bootstrap_tenant_admin_login, null);
 });
 
 test('T030A: buildTenantRegistryRecord persists CICD topology parent-child relation', () => {

@@ -334,8 +334,7 @@ function parseTenantCreationRequest(input = {}) {
       csvRow.tenant_admin_login,
       readField(parsed, ['tenant_admin_login', 'parsed_tenant_admin_login']),
       input.tenant_admin_login,
-      input.tenantAdminLogin,
-      requesterLogin
+      input.tenantAdminLogin
     )
   ).toLowerCase();
   const designatedApprover = normalizeIssueFormScalar(readField(parsed, ['designated_approver', 'parsed_designated_approver']) || input.designated_approver).toLowerCase();

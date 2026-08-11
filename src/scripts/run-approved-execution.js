@@ -1810,13 +1810,38 @@ async function runApprovedExecution(options = {}) {
     typeof api.getMembershipForUser === 'function' &&
     auditArtifact.request &&
     auditArtifact.request.tenant_team_slug &&
-    (auditArtifact.request.tenant_admin_login || auditArtifact.request.requester_login)
+    auditArtifact.request.tenant_admin_login
   ) {
-    tenantAdminMembership = await api.getMembershipForUser({
-      organization: auditArtifact.request.organization,
-      teamSlug: auditArtifact.request.tenant_team_slug,
-      username: auditArtifact.request.tenant_admin_login || auditArtifact.request.requester_login,
-    });
+    try {
+      assertLiveRevalidationReaders([
+        {
+          adapter: api,
+          adapterLabel: 'teamApi',
+          methods: ['getMembershipForUser'],
+        },
+      ]);
+      tenantAdminMembership = await api.getMembershipForUser({
+        organization: auditArtifact.request.organization,
+        teamSlug: auditArtifact.request.tenant_team_slug,
+        username: auditArtifact.request.tenant_admin_login,
+      });
+    } catch (error) {
+      return failPreMutationExecution({
+        auditArtifact,
+        artifactPath,
+        env,
+        error,
+        operationLabel: 'tenant_bootstrap',
+        rateLimitSnapshot:
+          tenantValidationRateLimitSnapshot ||
+          auditArtifact.reconciliation && auditArtifact.reconciliation.rate_limit_snapshot,
+        rateLimitOperation: 'tenant_admin_membership_read',
+        maxRetries: options.maxRetries || 2,
+        shouldSetExitCode,
+        failureMessage: ({ failureReason }) =>
+          `Execution stopped before tenant bootstrap mutation because tenant admin membership could not be read safely (${failureReason}). No tenant bootstrap mutation was attempted.`,
+      });
+    }
   }
   let latestRateLimitSnapshot = tenantValidationRateLimitSnapshot || auditArtifact.reconciliation && auditArtifact.reconciliation.rate_limit_snapshot || null;
   let currentMembers = [];
@@ -2931,7 +2956,7 @@ async function runApprovedExecution(options = {}) {
               tokenInfo: mutationDecision.tokenInfo,
             });
 
-            const tenantAdminLogin = auditArtifact.request.tenant_admin_login || auditArtifact.request.requester_login;
+            const tenantAdminLogin = auditArtifact.request.tenant_admin_login || '';
             const requesterLogin = auditArtifact.request.requester_login || '';
             const requesterMaintainerPolicy = normalizeRequesterMaintainerPolicy(env.TENANT_BOOTSTRAP_REQUESTER_POLICY);
             const tenantTeamSlugs = [...new Set((auditArtifact.request.requested_teams || [])
@@ -2943,6 +2968,10 @@ async function runApprovedExecution(options = {}) {
             reconciliationPlan.tenant_admin_intended_login = tenantAdminLogin;
             reconciliationPlan.requester_maintainer_normalization_policy = requesterMaintainerPolicy;
             reconciliationPlan.creator_maintainer_behavior = 'github_auto_adds_creator_as_maintainer';
+
+            if (!tenantAdminLogin) {
+              throw new Error('Tenant bootstrap policy blocked because tenant_admin_login is missing; requester fallback is disabled.');
+            }
 
             for (const teamSlug of tenantTeamSlugs) {
               const currentMembership = typeof api.getMembershipForUser === 'function'
