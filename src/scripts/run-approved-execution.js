@@ -3015,7 +3015,7 @@ async function runApprovedExecution(options = {}) {
                   continue;
                 }
 
-                // Fallback when explicit remove is unavailable: downgrade to member.
+                // Fallback when explicit remove is unavailable: downgrade to member (currently unreachable because tenant bootstrap preflight blocks when removeTeamMembership is unavailable).
                 const fallbackResult = await executeWithBoundedRetry(
                   () => api.addOrUpdateTeamMembership({
                     organization: auditArtifact.request.organization,
