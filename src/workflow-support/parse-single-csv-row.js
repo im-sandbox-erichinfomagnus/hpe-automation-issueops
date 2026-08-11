@@ -69,9 +69,7 @@ function parseSingleCsvRow(rawValue, columns = []) {
 
     const cells = parsedLine.cells.map((cell) => cell.trim());
 
-    // Skip preface text (for example, "Input given:") before the actual CSV
-    // header/data. These lines frequently appear in pasted issue comments.
-    if (!headerSkipped && cells.length < 2 && columns.length > 1) {
+    if (!headerSkipped && cells.length < 2 && columns.length > 1 && (!cells[0] || cells[0].toLowerCase() !== expectedFirstColumn)) {
       continue;
     }
 
