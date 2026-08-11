@@ -62,6 +62,16 @@ function buildExecutionApi(state) {
         role,
       };
     },
+    async removeTeamMembership({ teamSlug, username }) {
+      const before = state.memberships.length;
+      state.memberships = state.memberships.filter((membership) =>
+        !(membership.teamSlug === teamSlug && membership.username === username)
+      );
+      return {
+        username,
+        removed: state.memberships.length !== before,
+      };
+    },
     async getMembershipForUser({ teamSlug, username }) {
       const membership = state.memberships.find((entry) =>
         entry.teamSlug === teamSlug && entry.username === username
@@ -1178,6 +1188,144 @@ test('runApprovedExecution for create-tenant-model assigns tenant admin as maint
   assert.equal(state.memberships.length, 4);
   assert.equal(state.memberships.every((membership) => membership.role === 'maintainer'), true);
   assert.match(result.execution.summary, /Processed 4 tenant_bootstrap\(ies\), 11 no-op tenant_bootstrap\(ies\)/i);
+});
+
+test('runApprovedExecution for create-tenant-model normalizes requester maintainership when policy is downgrade_to_member', async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'create-tenant-model-requester-normalize-'));
+  const artifactPath = path.join(workspace, 'audit.json');
+  const registryDirectory = path.join(workspace, 'tenant-registry');
+  fs.mkdirSync(registryDirectory, { recursive: true });
+
+  const state = {
+    nextTeamId: 3100,
+    teams: [
+      { id: 3100, name: 'litware-root', slug: 'litware-root', parent: null },
+      {
+        id: 3101,
+        name: 'litware-admin',
+        slug: 'litware-admin',
+        parent: { id: 3100, slug: 'litware-root' },
+      },
+      {
+        id: 3102,
+        name: 'litware-repo-admin',
+        slug: 'litware-repo-admin',
+        parent: { id: 3100, slug: 'litware-root' },
+      },
+      {
+        id: 3103,
+        name: 'litware-cicd-admin',
+        slug: 'litware-cicd-admin',
+        parent: { id: 3100, slug: 'litware-root' },
+      },
+    ],
+    memberships: [
+      { teamSlug: 'litware-root', username: 'himanshu-im', role: 'maintainer' },
+      { teamSlug: 'litware-admin', username: 'himanshu-im', role: 'maintainer' },
+      { teamSlug: 'litware-repo-admin', username: 'himanshu-im', role: 'maintainer' },
+      { teamSlug: 'litware-cicd-admin', username: 'himanshu-im', role: 'maintainer' },
+    ],
+  };
+
+  await runRequestValidation({
+    env: {
+      GITHUB_REPOSITORY: 'im-sandbox-himanshu/issueops-speckit',
+      ISSUE_NUMBER: '219',
+      REQUESTER_LOGIN: 'himanshu-im',
+      PARSED_ORGANIZATION: 'im-sandbox-himanshu',
+      PARSED_TENANT_NAME: 'Litware',
+      PARSED_TENANT_TYPE: 'application',
+      PARSED_TENANT_ADMIN_LOGIN: 'erich-infomagnus',
+      PARSED_PRIMARY_CONTACT: 'owner@example.com',
+      PARSED_SECONDARY_CONTACT: 'secondary@example.com',
+      PARSED_CMDB_ID: 'CMDB-001',
+      PARSED_COST_CENTER: 'CC-001',
+      PARSED_BUSINESS_UNIT: 'platform',
+      PARSED_ENVIRONMENT: 'nonprod',
+      PARSED_GOVERNANCE_CODE_SCANNING_ENABLED: 'true',
+      PARSED_GOVERNANCE_SECRET_SCANNING_ENABLED: 'true',
+      PARSED_GOVERNANCE_DEPENDABOT_ENABLED: 'true',
+      PARSED_DESIGNATED_APPROVER: 'himanshu-im',
+      PARSED_JUSTIFICATION: 'Bootstrap Litware tenant with explicit admin',
+      PARSED_DRY_RUN: 'false',
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      AUDIT_ARTIFACT_PATH: artifactPath,
+      GITHUB_RUN_ID: '26559705720',
+      GITHUB_RUN_ATTEMPT: '1',
+    },
+    api: {
+      getOrganization: async () => ({ exists: true }),
+      getOrganizationMembership: async () => ({
+        exists: true,
+        membership: { role: 'admin', state: 'active' },
+      }),
+      listOrgTeams: async () => state.teams,
+    },
+    setProcessExitCode: false,
+  });
+
+  await runApprovalGate({
+    env: {
+      AUDIT_ARTIFACT_PATH: artifactPath,
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      GITHUB_TOKEN: 'repo-token',
+    },
+    api: {
+      getAssignableOwners: async () => ['aeruvakalpanaa'],
+      addIssueAssignees: async () => ({ status: 'assigned' }),
+      listIssueComments: async () => [
+        {
+          id: 304,
+          body: 'approved',
+          created_at: '2026-05-28T10:15:00Z',
+          user: { login: 'himanshu-im' },
+        },
+      ],
+      getOrganizationMembership: async () => ({
+        exists: true,
+        membership: { role: 'admin', state: 'active' },
+      }),
+    },
+    setProcessExitCode: false,
+  });
+
+  const result = await runApprovedExecution({
+    env: {
+      AUDIT_ARTIFACT_PATH: artifactPath,
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      GITHUB_RUN_ID: '26559705720',
+      GITHUB_RUN_ATTEMPT: '1',
+      TENANT_REGISTRY_DIR: registryDirectory,
+      TENANT_REGISTRY_PERSISTENCE_MODE: 'repo',
+      TENANT_REGISTRY_REQUIRE_DIRECTORY: 'true',
+      TENANT_BOOTSTRAP_REQUESTER_POLICY: 'member',
+    },
+    createApi: () => buildExecutionApi(state),
+    tokenInfo: {
+      token: 'pat-token',
+      source: 'ISSUEOPS_GITHUB_TOKEN',
+      token_kind: 'pat',
+      is_pat_backed: true,
+      supports_team_hierarchy_mutation: true,
+    },
+    setProcessExitCode: false,
+  });
+
+  const registryPath = path.join(registryDirectory, 'litware.json');
+  const registryRecord = JSON.parse(fs.readFileSync(registryPath, 'utf8'));
+  const tenantAdminMemberships = state.memberships.filter((entry) => entry.username === 'erich-infomagnus');
+  const requesterMemberships = state.memberships.filter((entry) => entry.username === 'himanshu-im');
+
+  assert.equal(result.request.request_status, 'executed');
+  assert.equal(result.reconciliation.tenant_admin_intended_login, 'erich-infomagnus');
+  assert.equal(result.reconciliation.requester_maintainer_normalization_policy, 'downgrade_to_member');
+  assert.equal(registryRecord.bootstrap_tenant_admin_login, 'erich-infomagnus');
+  assert.equal(tenantAdminMemberships.length, 4);
+  assert.equal(tenantAdminMemberships.every((membership) => membership.role === 'maintainer'), true);
+  assert.equal(requesterMemberships.length, 4);
+  assert.equal(requesterMemberships.every((membership) => membership.role === 'member'), true);
+  assert.match(result.execution.summary, /Intended tenant admin: erich-infomagnus\./i);
+  assert.match(result.execution.summary, /Final maintainer list action taken:/i);
 });
 
 test('runApprovedExecution for create-tenant-model reports partial execution when durable registry persistence fails', async () => {
