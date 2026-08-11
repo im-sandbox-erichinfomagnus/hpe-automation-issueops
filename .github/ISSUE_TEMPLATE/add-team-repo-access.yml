@@ -88,6 +88,6 @@ body:
       options:
         - "true"
         - "false"
-      default: 0
+      default: 1
     validations:
       required: true

@@ -109,6 +109,41 @@ function writeGitHubOutput(key, value, outputPath = process.env.GITHUB_OUTPUT) {
   fs.appendFileSync(outputPath, `${key}=${value}\n`, 'utf8');
 }
 
+function normalizeRequesterMaintainerPolicy(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized || normalized === 'keep' || normalized === 'keep_maintainer') {
+    return 'keep_maintainer';
+  }
+  if (['member', 'downgrade_to_member', 'downgrade'].includes(normalized)) {
+    return 'downgrade_to_member';
+  }
+  if (['remove', 'remove_membership', 'remove_requester'].includes(normalized)) {
+    return 'remove';
+  }
+  return 'keep_maintainer';
+}
+
+function summarizeMaintainerNormalizationActions(actions = [], policy = 'keep_maintainer') {
+  const requesterActions = actions.filter((entry) => String(entry.action || '').startsWith('normalize_requester'));
+  const mutated = requesterActions.filter((entry) => ['added', 'mutated', 'removed'].includes(entry.execution_result)).length;
+  const failed = requesterActions.filter((entry) => entry.execution_result === 'failed').length;
+  const noop = requesterActions.filter((entry) => entry.execution_result === 'noop').length;
+
+  if (policy === 'keep_maintainer') {
+    return 'Requester maintainership retained by policy (keep_maintainer).';
+  }
+
+  if (requesterActions.length === 0) {
+    return `No requester maintainership normalization was required (policy=${policy}).`;
+  }
+
+  if (failed > 0) {
+    return `Requester maintainership normalization attempted with policy ${policy}: changed=${mutated}, noop=${noop}, failed=${failed}.`;
+  }
+
+  return `Requester maintainership normalization applied with policy ${policy}: changed=${mutated}, noop=${noop}, failed=0.`;
+}
+
 function buildValidatedPeople(auditArtifact = {}) {
   const validationPeople = auditArtifact.validation && auditArtifact.validation.requested_people;
   const request = auditArtifact.request || {};
@@ -1609,13 +1644,31 @@ async function runApprovedExecution(options = {}) {
     typeof api.getMembershipForUser === 'function' &&
     auditArtifact.request &&
     auditArtifact.request.tenant_team_slug &&
-    (auditArtifact.request.tenant_admin_login || auditArtifact.request.requester_login)
+    auditArtifact.request.tenant_admin_login
   ) {
-    tenantAdminMembership = await api.getMembershipForUser({
-      organization: auditArtifact.request.organization,
-      teamSlug: auditArtifact.request.tenant_team_slug,
-      username: auditArtifact.request.tenant_admin_login || auditArtifact.request.requester_login,
-    });
+    try {
+      tenantAdminMembership = await api.getMembershipForUser({
+        organization: auditArtifact.request.organization,
+        teamSlug: auditArtifact.request.tenant_team_slug,
+        username: auditArtifact.request.tenant_admin_login,
+      });
+    } catch (error) {
+      return failPreMutationExecution({
+        auditArtifact,
+        artifactPath,
+        env,
+        error,
+        operationLabel: 'tenant_bootstrap',
+        rateLimitSnapshot:
+          tenantValidationRateLimitSnapshot ||
+          auditArtifact.reconciliation && auditArtifact.reconciliation.rate_limit_snapshot,
+        rateLimitOperation: 'tenant_admin_membership_read',
+        maxRetries: options.maxRetries || 2,
+        shouldSetExitCode,
+        failureMessage: ({ failureReason }) =>
+          `Execution stopped before tenant bootstrap mutation because tenant admin membership could not be read safely (${failureReason}). No tenant bootstrap mutation was attempted.`,
+      });
+    }
   }
   let latestRateLimitSnapshot = tenantValidationRateLimitSnapshot || auditArtifact.reconciliation && auditArtifact.reconciliation.rate_limit_snapshot || null;
   let currentMembers = [];
@@ -2388,44 +2441,74 @@ async function runApprovedExecution(options = {}) {
         });
       }
     } else if (isTenantCreation || isTeamCreation) {
-      for (const team of reconciliationPlan.teams_to_create) {
-        const attemptResult = await executeWithBoundedRetry(
-          () => api.createTeam({
-            organization: auditArtifact.request.organization,
-            name: team.requested_name,
-          }),
-          {
-            maxRetries: options.maxRetries || 2,
-            sleep: options.sleep,
+      let tenantBootstrapPreflightError = null;
+      if (isTenantCreation) {
+        const tenantAdminLogin = auditArtifact.request && auditArtifact.request.tenant_admin_login
+          ? String(auditArtifact.request.tenant_admin_login).trim().toLowerCase()
+          : '';
+        const requesterLogin = auditArtifact.request && auditArtifact.request.requester_login
+          ? String(auditArtifact.request.requester_login).trim().toLowerCase()
+          : '';
+        const requesterMaintainerPolicy = normalizeRequesterMaintainerPolicy(env.TENANT_BOOTSTRAP_REQUESTER_POLICY);
+
+        if (!tenantAdminLogin) {
+          tenantBootstrapPreflightError = 'Tenant bootstrap policy blocked because tenant_admin_login is missing before team creation; requester fallback is disabled.';
+        } else if (
+          requesterMaintainerPolicy === 'remove' &&
+          requesterLogin &&
+          requesterLogin !== tenantAdminLogin &&
+          typeof api.removeTeamMembership !== 'function'
+        ) {
+          tenantBootstrapPreflightError = 'Tenant bootstrap policy blocked because strict requester removal is required but removeTeamMembership is unavailable before team creation.';
+        }
+      }
+
+      if (tenantBootstrapPreflightError) {
+        executionResults.push({
+          execution_result: 'failed',
+          failure_reason: 'tenant_policy_blocked',
+          detail: tenantBootstrapPreflightError,
+        });
+      } else {
+        for (const team of reconciliationPlan.teams_to_create) {
+          const attemptResult = await executeWithBoundedRetry(
+            () => api.createTeam({
+              organization: auditArtifact.request.organization,
+              name: team.requested_name,
+            }),
+            {
+              maxRetries: options.maxRetries || 2,
+              sleep: options.sleep,
+            }
+          );
+
+          latestRateLimitSnapshot = attemptResult.retry_plan.rate_limit_snapshot || latestRateLimitSnapshot;
+
+          if (attemptResult.ok) {
+            executionResults.push({
+              normalized_slug: team.normalized_slug,
+              requested_name: team.requested_name,
+              source_row_number: team.source_row_number || null,
+              source_comment_id: team.source_comment_id || null,
+              created_team_id: attemptResult.value && attemptResult.value.id || null,
+              execution_result: 'created',
+              failure_reason: null,
+            });
+            continue;
           }
-        );
 
-        latestRateLimitSnapshot = attemptResult.retry_plan.rate_limit_snapshot || latestRateLimitSnapshot;
-
-        if (attemptResult.ok) {
           executionResults.push({
             normalized_slug: team.normalized_slug,
             requested_name: team.requested_name,
             source_row_number: team.source_row_number || null,
             source_comment_id: team.source_comment_id || null,
-            created_team_id: attemptResult.value && attemptResult.value.id || null,
-            execution_result: 'created',
-            failure_reason: null,
+            execution_result: 'failed',
+            failure_reason: classifyFailureReason(attemptResult.error),
           });
-          continue;
         }
-
-        executionResults.push({
-          normalized_slug: team.normalized_slug,
-          requested_name: team.requested_name,
-          source_row_number: team.source_row_number || null,
-          source_comment_id: team.source_comment_id || null,
-          execution_result: 'failed',
-          failure_reason: classifyFailureReason(attemptResult.error),
-        });
       }
 
-      if (isTenantCreation) {
+      if (isTenantCreation && !tenantBootstrapPreflightError) {
         const refreshedTeamsResult = await executeWithBoundedRetry(
           () => api.listOrgTeams({ organization: auditArtifact.request.organization }),
           {
@@ -2730,10 +2813,22 @@ async function runApprovedExecution(options = {}) {
               tokenInfo: mutationDecision.tokenInfo,
             });
 
-            const tenantAdminLogin = auditArtifact.request.tenant_admin_login || auditArtifact.request.requester_login;
+            const tenantAdminLogin = auditArtifact.request.tenant_admin_login || '';
+            const requesterLogin = auditArtifact.request.requester_login || '';
+            const requesterMaintainerPolicy = normalizeRequesterMaintainerPolicy(env.TENANT_BOOTSTRAP_REQUESTER_POLICY);
             const tenantTeamSlugs = [...new Set((auditArtifact.request.requested_teams || [])
               .map((team) => String(team && team.normalized_slug || '').toLowerCase())
               .filter(Boolean))];
+            const tenantBootstrapMaintainerActions = [];
+
+            reconciliationPlan.tenant_admin_bootstrap_action = reconciliationPlan.tenant_admin_bootstrap_action || reconciliationPlan.requester_bootstrap_action || 'ensure_maintainer';
+            reconciliationPlan.tenant_admin_intended_login = tenantAdminLogin;
+            reconciliationPlan.requester_maintainer_normalization_policy = requesterMaintainerPolicy;
+            reconciliationPlan.creator_maintainer_behavior = 'github_auto_adds_creator_as_maintainer';
+
+            if (!tenantAdminLogin) {
+              throw new Error('Tenant bootstrap policy blocked because tenant_admin_login is missing; requester fallback is disabled.');
+            }
 
             for (const teamSlug of tenantTeamSlugs) {
               const currentMembership = typeof api.getMembershipForUser === 'function'
@@ -2754,6 +2849,13 @@ async function runApprovedExecution(options = {}) {
                 executionResults.push({
                   team_slug: teamSlug,
                   username: tenantAdminLogin,
+                  execution_result: 'noop',
+                  failure_reason: null,
+                });
+                tenantBootstrapMaintainerActions.push({
+                  team_slug: teamSlug,
+                  username: tenantAdminLogin,
+                  action: 'ensure_intended_admin_maintainer',
                   execution_result: 'noop',
                   failure_reason: null,
                 });
@@ -2780,7 +2882,176 @@ async function runApprovedExecution(options = {}) {
                 execution_result: membershipResult.ok ? 'added' : 'failed',
                 failure_reason: membershipResult.ok ? null : classifyFailureReason(membershipResult.error),
               });
+              tenantBootstrapMaintainerActions.push({
+                team_slug: teamSlug,
+                username: tenantAdminLogin,
+                action: 'ensure_intended_admin_maintainer',
+                execution_result: membershipResult.ok ? 'added' : 'failed',
+                failure_reason: membershipResult.ok ? null : classifyFailureReason(membershipResult.error),
+              });
             }
+
+            if (
+              requesterLogin &&
+              tenantAdminLogin &&
+              requesterLogin !== tenantAdminLogin &&
+              requesterMaintainerPolicy !== 'keep_maintainer'
+            ) {
+              for (const teamSlug of tenantTeamSlugs) {
+                const requesterMembership = typeof api.getMembershipForUser === 'function'
+                  ? await api.getMembershipForUser({
+                      organization: auditArtifact.request.organization,
+                      teamSlug,
+                      username: requesterLogin,
+                    })
+                  : null;
+                const requesterState = requesterMembership && requesterMembership.state
+                  ? String(requesterMembership.state || '').toLowerCase()
+                  : 'absent';
+                const requesterRole = requesterMembership && requesterMembership.membership
+                  ? String(requesterMembership.membership.role || '').toLowerCase()
+                  : '';
+
+                if (requesterMaintainerPolicy === 'downgrade_to_member') {
+                  if (requesterState !== 'active') {
+                    tenantBootstrapMaintainerActions.push({
+                      team_slug: teamSlug,
+                      username: requesterLogin,
+                      action: 'normalize_requester_to_member',
+                      execution_result: 'noop',
+                      failure_reason: null,
+                      detail: 'requester_membership_absent',
+                    });
+                    continue;
+                  }
+
+                  if (requesterRole === 'member') {
+                    tenantBootstrapMaintainerActions.push({
+                      team_slug: teamSlug,
+                      username: requesterLogin,
+                      action: 'normalize_requester_to_member',
+                      execution_result: 'noop',
+                      failure_reason: null,
+                    });
+                    continue;
+                  }
+
+                  const downgradeResult = await executeWithBoundedRetry(
+                    () => api.addOrUpdateTeamMembership({
+                      organization: auditArtifact.request.organization,
+                      teamSlug,
+                      username: requesterLogin,
+                      role: 'member',
+                    }),
+                    {
+                      maxRetries: options.maxRetries || 2,
+                      sleep: options.sleep,
+                    }
+                  );
+
+                  latestRateLimitSnapshot = downgradeResult.retry_plan.rate_limit_snapshot || latestRateLimitSnapshot;
+                  executionResults.push({
+                    team_slug: teamSlug,
+                    username: requesterLogin,
+                    execution_result: downgradeResult.ok ? 'mutated' : 'failed',
+                    failure_reason: downgradeResult.ok ? null : classifyFailureReason(downgradeResult.error),
+                  });
+                  tenantBootstrapMaintainerActions.push({
+                    team_slug: teamSlug,
+                    username: requesterLogin,
+                    action: 'normalize_requester_to_member',
+                    execution_result: downgradeResult.ok ? 'mutated' : 'failed',
+                    failure_reason: downgradeResult.ok ? null : classifyFailureReason(downgradeResult.error),
+                  });
+                  continue;
+                }
+
+                if (requesterState !== 'active') {
+                  tenantBootstrapMaintainerActions.push({
+                    team_slug: teamSlug,
+                    username: requesterLogin,
+                    action: 'normalize_requester_remove_membership',
+                    execution_result: 'noop',
+                    failure_reason: null,
+                    detail: 'requester_membership_absent',
+                  });
+                  continue;
+                }
+
+                if (typeof api.removeTeamMembership === 'function') {
+                  const removalResult = await executeWithBoundedRetry(
+                    () => api.removeTeamMembership({
+                      organization: auditArtifact.request.organization,
+                      teamSlug,
+                      username: requesterLogin,
+                    }),
+                    {
+                      maxRetries: options.maxRetries || 2,
+                      sleep: options.sleep,
+                    }
+                  );
+
+                  latestRateLimitSnapshot = removalResult.retry_plan.rate_limit_snapshot || latestRateLimitSnapshot;
+                  const removed = Boolean(removalResult.ok && removalResult.value && removalResult.value.removed);
+                  const removalExecutionResult = !removalResult.ok
+                    ? 'failed'
+                    : removed ? 'removed' : 'noop';
+                  const removalFailureReason = removalResult.ok ? null : classifyFailureReason(removalResult.error);
+
+                  executionResults.push({
+                    team_slug: teamSlug,
+                    username: requesterLogin,
+                    execution_result: removalExecutionResult,
+                    failure_reason: removalFailureReason,
+                  });
+                  tenantBootstrapMaintainerActions.push({
+                    team_slug: teamSlug,
+                    username: requesterLogin,
+                    action: 'normalize_requester_remove_membership',
+                    execution_result: removalExecutionResult,
+                    failure_reason: removalFailureReason,
+                    detail: removed ? null : 'requester_membership_already_absent',
+                  });
+                  continue;
+                }
+
+                // Fallback when explicit remove is unavailable: downgrade to member (currently unreachable because tenant bootstrap preflight blocks when removeTeamMembership is unavailable).
+                const fallbackResult = await executeWithBoundedRetry(
+                  () => api.addOrUpdateTeamMembership({
+                    organization: auditArtifact.request.organization,
+                    teamSlug,
+                    username: requesterLogin,
+                    role: 'member',
+                  }),
+                  {
+                    maxRetries: options.maxRetries || 2,
+                    sleep: options.sleep,
+                  }
+                );
+
+                latestRateLimitSnapshot = fallbackResult.retry_plan.rate_limit_snapshot || latestRateLimitSnapshot;
+                executionResults.push({
+                  team_slug: teamSlug,
+                  username: requesterLogin,
+                  execution_result: fallbackResult.ok ? 'mutated' : 'failed',
+                  failure_reason: fallbackResult.ok ? null : classifyFailureReason(fallbackResult.error),
+                });
+                tenantBootstrapMaintainerActions.push({
+                  team_slug: teamSlug,
+                  username: requesterLogin,
+                  action: 'normalize_requester_remove_membership_fallback_to_member',
+                  execution_result: fallbackResult.ok ? 'mutated' : 'failed',
+                  failure_reason: fallbackResult.ok ? null : classifyFailureReason(fallbackResult.error),
+                  detail: 'remove_team_membership_unavailable',
+                });
+              }
+            }
+
+            reconciliationPlan.tenant_bootstrap_maintainer_actions = tenantBootstrapMaintainerActions;
+            reconciliationPlan.tenant_bootstrap_final_maintainer_action = summarizeMaintainerNormalizationActions(
+              tenantBootstrapMaintainerActions,
+              requesterMaintainerPolicy
+            );
           }
         } catch (error) {
           const rateContext = buildTenantBootstrapRateLimitContext(error, {
@@ -3200,9 +3471,18 @@ async function runApprovedExecution(options = {}) {
     requestStatus === 'executed' &&
     executionOutcome.mutation_count === 0 &&
     executionOutcome.pending_count === 0 &&
-    executionOutcome.failure_count === 0;
-  if ((isTenantCreation || isTeamCreation) && executionOutcome.created_count > 0) {
+    executionOutcome.failure_count === 0 &&
+    executionOutcome.rejected_count === 0;
+  if (isTeamCreation && executionOutcome.created_count > 0) {
     executionOutcome.summary = `${executionOutcome.summary} Note: GitHub automatically makes the authenticated creator a team maintainer when a new team is created, so the creator becomes a team maintainer as an operational constraint of this workflow.`;
+  }
+  if (isTenantCreation) {
+    const intendedTenantAdmin = reconciliationPlan.tenant_admin_intended_login || auditArtifact.request.tenant_admin_login || 'n/a';
+    const creatorMaintainerBehavior = reconciliationPlan.creator_maintainer_behavior
+      ? 'GitHub automatically makes the authenticated creator a team maintainer when a new team is created.'
+      : 'Creator maintainership behavior not recorded.';
+    const finalMaintainerAction = reconciliationPlan.tenant_bootstrap_final_maintainer_action || 'Final maintainer list action not recorded.';
+    executionOutcome.summary = `${executionOutcome.summary} Intended tenant admin: ${intendedTenantAdmin}. Auto-added creator maintainer behavior: ${creatorMaintainerBehavior} Final maintainer list action taken: ${finalMaintainerAction}`;
   }
   const operationExecutionLabel = isTenantCreation
     ? 'tenant bootstrap execution'

@@ -256,6 +256,7 @@ function buildAuditArtifact(input = {}) {
       tenant_display_name: request.tenant_display_name,
       tenant_key: request.tenant_key,
       tenant_type: request.tenant_type || null,
+      tenant_admin_login: request.tenant_admin_login || null,
       primary_contact: request.primary_contact ?? null,
       primary_contact_type: request.primary_contact_type || 'absent',
       secondary_contact: request.secondary_contact || null,

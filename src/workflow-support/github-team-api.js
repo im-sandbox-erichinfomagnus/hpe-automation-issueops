@@ -307,6 +307,27 @@ function createGitHubTeamApi(options = {}) {
       };
     },
 
+    async removeTeamMembership({ organization, teamSlug, username }) {
+      const result = await request(
+        `/orgs/${organization}/teams/${teamSlug}/memberships/${username}`,
+        {
+          method: 'DELETE',
+        }
+      );
+
+      if (!result.ok && result.status !== 404) {
+        throw Object.assign(new Error('Failed to remove team membership'), result, {
+          retry_after: getHeader(result.headers, 'retry-after'),
+          team_sync_blocked: result.team_sync_blocked,
+        });
+      }
+
+      return {
+        username,
+        removed: result.status !== 404,
+      };
+    },
+
     async createTeam({ organization, name, privacy = 'closed' }) {
       const result = await request(`/orgs/${organization}/teams`, {
         method: 'POST',
