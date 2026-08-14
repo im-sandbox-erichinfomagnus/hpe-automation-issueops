@@ -2442,6 +2442,7 @@ async function runApprovedExecution(options = {}) {
       }
     } else if (isTenantCreation || isTeamCreation) {
       let tenantBootstrapPreflightError = null;
+      let teamCreationPreflightError = null;
       const createdTeamSlugs = [];
       if (isTenantCreation) {
         const tenantAdminLogin = auditArtifact.request && auditArtifact.request.tenant_admin_login
@@ -2464,11 +2465,26 @@ async function runApprovedExecution(options = {}) {
         }
       }
 
-      if (tenantBootstrapPreflightError) {
+      if (isTeamCreation) {
+        const intendedOwnerLogin = auditArtifact.request && auditArtifact.request.intended_owner_login
+          ? String(auditArtifact.request.intended_owner_login).trim().toLowerCase()
+          : '';
+        if (!intendedOwnerLogin) {
+          teamCreationPreflightError = 'Team creation policy blocked because intended_owner_login is missing; unable to enforce creator-only maintainer policy.';
+        } else if (
+          typeof api.addOrUpdateTeamMembership !== 'function' ||
+          typeof api.listTeamMembers !== 'function' ||
+          typeof api.removeTeamMembership !== 'function'
+        ) {
+          teamCreationPreflightError = 'Team creation policy blocked because required membership-normalization APIs are unavailable; creator-only maintainer policy cannot be enforced.';
+        }
+      }
+
+      if (tenantBootstrapPreflightError || teamCreationPreflightError) {
         executionResults.push({
           execution_result: 'failed',
-          failure_reason: 'tenant_policy_blocked',
-          detail: tenantBootstrapPreflightError,
+          failure_reason: isTeamCreation ? 'team_policy_blocked' : 'tenant_policy_blocked',
+          detail: teamCreationPreflightError || tenantBootstrapPreflightError,
         });
       } else {
         for (const team of reconciliationPlan.teams_to_create) {
@@ -2511,12 +2527,10 @@ async function runApprovedExecution(options = {}) {
           });
         }
 
-        if (isTeamCreation && createdTeamSlugs.length > 0 && typeof api.addOrUpdateTeamMembership === 'function') {
-          const maintainerLogin = auditArtifact.request && auditArtifact.request.requester_login
-            ? String(auditArtifact.request.requester_login).trim().toLowerCase()
-            : auditArtifact.request && auditArtifact.request.intended_owner_login
-              ? String(auditArtifact.request.intended_owner_login).trim().toLowerCase()
-              : '';
+        if (isTeamCreation && createdTeamSlugs.length > 0) {
+          const maintainerLogin = auditArtifact.request && auditArtifact.request.intended_owner_login
+            ? String(auditArtifact.request.intended_owner_login).trim().toLowerCase()
+            : '';
 
           if (maintainerLogin) {
             for (const teamSlug of createdTeamSlugs) {
@@ -2542,6 +2556,51 @@ async function runApprovedExecution(options = {}) {
                   failure_reason: classifyFailureReason(membershipResult.error),
                   detail: 'creator_maintainer_assignment_failed',
                 });
+              }
+
+              // GitHub auto-adds the authenticated creator as a team maintainer.
+              // For create-org-teams, keep only the requested org member as maintainer.
+              const teamMembersResult = await executeWithBoundedRetry(
+                () => api.listTeamMembers({
+                  organization: auditArtifact.request.organization,
+                  teamSlug,
+                }),
+                {
+                  maxRetries: options.maxRetries || 2,
+                  sleep: options.sleep,
+                }
+              );
+
+              latestRateLimitSnapshot = teamMembersResult.retry_plan.rate_limit_snapshot || latestRateLimitSnapshot;
+              if (teamMembersResult.ok) {
+                const removableMembers = (teamMembersResult.value || [])
+                  .map((member) => String(member.username || '').trim().toLowerCase())
+                  .filter((username) => username && username !== maintainerLogin);
+
+                for (const username of removableMembers) {
+                  const removalResult = await executeWithBoundedRetry(
+                    () => api.removeTeamMembership({
+                      organization: auditArtifact.request.organization,
+                      teamSlug,
+                      username,
+                    }),
+                    {
+                      maxRetries: options.maxRetries || 2,
+                      sleep: options.sleep,
+                    }
+                  );
+
+                  latestRateLimitSnapshot = removalResult.retry_plan.rate_limit_snapshot || latestRateLimitSnapshot;
+                  if (!removalResult.ok) {
+                    executionResults.push({
+                      team_slug: teamSlug,
+                      username,
+                      execution_result: 'failed',
+                      failure_reason: classifyFailureReason(removalResult.error),
+                      detail: 'creator_membership_normalization_failed',
+                    });
+                  }
+                }
               }
             }
           }
@@ -3514,7 +3573,7 @@ async function runApprovedExecution(options = {}) {
     executionOutcome.failure_count === 0 &&
     executionOutcome.rejected_count === 0;
   if (isTeamCreation && executionOutcome.created_count > 0) {
-    executionOutcome.summary = `${executionOutcome.summary} Note: GitHub automatically makes the authenticated creator a team maintainer when a new team is created, so the creator becomes a team maintainer as an operational constraint of this workflow.`;
+    executionOutcome.summary = `${executionOutcome.summary} Membership normalization enforced: only the requested org member remains as team maintainer for newly created teams.`;
   }
   if (isTenantCreation) {
     const intendedTenantAdmin = reconciliationPlan.tenant_admin_intended_login || auditArtifact.request.tenant_admin_login || 'n/a';
