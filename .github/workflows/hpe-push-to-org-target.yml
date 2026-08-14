@@ -1,5 +1,5 @@
 # =============================================================================
-# push-to-target.yml  —  Landing repo -> target org repo (DRAFT for review)
+# hpe-push-to-org-target.yml  —  Landing repo -> target org repo (DRAFT for review)
 # -----------------------------------------------------------------------------
 # Per Eric's request (Aug 14):
 #   A new manually-triggered workflow that runs FROM the landing repo and pushes
@@ -24,7 +24,7 @@
 # PR; review/scans/merge stay with the receiving side. dry_run = true by default.
 # =============================================================================
 
-name: push-to-target
+name: hpe-push-to-org-target
 
 on:
   workflow_dispatch:
@@ -72,7 +72,7 @@ permissions:
   contents: read   # reads THIS repo; writes to the target happen via SYNC_DESTINATION_PAT
 
 concurrency:
-  group: push-to-target-${{ inputs.target_org }}-${{ inputs.target_repo }}
+  group: hpe-push-to-org-target-${{ inputs.target_org }}-${{ inputs.target_repo }}
   cancel-in-progress: false
 
 jobs:
@@ -142,7 +142,7 @@ jobs:
             --exclude='/.github/workflows/.github/' \
             --exclude='/.github/workflows/hpe-repo-sync.yml' \
             --exclude='/.github/workflows/hpe-push-labels.yml' \
-            --exclude='/.github/workflows/push-to-target.yml' \
+            --exclude='/.github/workflows/hpe-push-to-org-target.yml' \
             --exclude='/tenant-registry/acme.json' \
             --include='/.github/' \
             --include='/.github/workflows/***' \
