@@ -2442,6 +2442,7 @@ async function runApprovedExecution(options = {}) {
       }
     } else if (isTenantCreation || isTeamCreation) {
       let tenantBootstrapPreflightError = null;
+      const createdTeamSlugs = [];
       if (isTenantCreation) {
         const tenantAdminLogin = auditArtifact.request && auditArtifact.request.tenant_admin_login
           ? String(auditArtifact.request.tenant_admin_login).trim().toLowerCase()
@@ -2485,6 +2486,9 @@ async function runApprovedExecution(options = {}) {
           latestRateLimitSnapshot = attemptResult.retry_plan.rate_limit_snapshot || latestRateLimitSnapshot;
 
           if (attemptResult.ok) {
+            if (team && team.normalized_slug) {
+              createdTeamSlugs.push(String(team.normalized_slug).toLowerCase());
+            }
             executionResults.push({
               normalized_slug: team.normalized_slug,
               requested_name: team.requested_name,
@@ -2505,6 +2509,42 @@ async function runApprovedExecution(options = {}) {
             execution_result: 'failed',
             failure_reason: classifyFailureReason(attemptResult.error),
           });
+        }
+
+        if (isTeamCreation && createdTeamSlugs.length > 0 && typeof api.addOrUpdateTeamMembership === 'function') {
+          const maintainerLogin = auditArtifact.request && auditArtifact.request.requester_login
+            ? String(auditArtifact.request.requester_login).trim().toLowerCase()
+            : auditArtifact.request && auditArtifact.request.intended_owner_login
+              ? String(auditArtifact.request.intended_owner_login).trim().toLowerCase()
+              : '';
+
+          if (maintainerLogin) {
+            for (const teamSlug of createdTeamSlugs) {
+              const membershipResult = await executeWithBoundedRetry(
+                () => api.addOrUpdateTeamMembership({
+                  organization: auditArtifact.request.organization,
+                  teamSlug,
+                  username: maintainerLogin,
+                  role: 'maintainer',
+                }),
+                {
+                  maxRetries: options.maxRetries || 2,
+                  sleep: options.sleep,
+                }
+              );
+
+              latestRateLimitSnapshot = membershipResult.retry_plan.rate_limit_snapshot || latestRateLimitSnapshot;
+              if (!membershipResult.ok) {
+                executionResults.push({
+                  team_slug: teamSlug,
+                  username: maintainerLogin,
+                  execution_result: 'failed',
+                  failure_reason: classifyFailureReason(membershipResult.error),
+                  detail: 'creator_maintainer_assignment_failed',
+                });
+              }
+            }
+          }
         }
       }
 
