@@ -132,7 +132,8 @@ jobs:
       # Filter order matters in rsync (first match wins): per-file EXCLUDES first,
       # then directory INCLUDES, then the catch-all exclude.
       # Ships: IssueOps workflows + issue templates + dependabot, src/, scripts/,
-      #        tenant-registry (minus demo acme.json), sample CSVs, docs, README.
+      #        tenant-registry structure (all tenant *.json runtime records are
+      #        protected from --delete in both directions), sample CSVs, docs, README.
       # Omits: the source-side sync tooling, specs/tests/.specify/prompts/agents,
       #        demo kit, artifacts. Drop --delete for additive-only pushes.
       - name: Sync curated runtime payload into target
@@ -175,51 +176,43 @@ jobs:
           fi
 
       - name: Commit
+        id: commit
         if: ${{ inputs.push_code == true && inputs.dry_run == false }}
         run: |
           cd target-repo
           if git diff --cached --quiet; then
+            echo "committed=false" >> "$GITHUB_OUTPUT"
             echo "No changes to commit — target already matches ${{ inputs.source_ref }} (replay is safe)."
             exit 0
           fi
           git commit -m "IssueOps delivery ${{ inputs.source_ref }} (run ${{ github.run_id }})"
+          echo "committed=true" >> "$GITHUB_OUTPUT"
 
       - name: Push delivery branch
-        if: ${{ inputs.push_code == true && inputs.dry_run == false }}
+        if: ${{ inputs.push_code == true && inputs.dry_run == false && steps.commit.outputs.committed == 'true' }}
         env:
           TOKEN: ${{ secrets.SYNC_DESTINATION_PAT }}
         run: |
           cd target-repo
-          if git rev-parse --verify "${{ steps.branch.outputs.name }}" >/dev/null 2>&1 && ! git diff --quiet HEAD~1 HEAD 2>/dev/null; then
-            git push "https://x-access-token:${TOKEN}@github.com/${{ inputs.target_org }}/${{ inputs.target_repo }}.git" \
-              "${{ steps.branch.outputs.name }}"
-          else
-            echo "Nothing to push."
-          fi
+          git push "https://x-access-token:${TOKEN}@github.com/${{ inputs.target_org }}/${{ inputs.target_repo }}.git" \
+            "${{ steps.branch.outputs.name }}"
 
       - name: Open pull request
-        if: ${{ inputs.push_code == true && inputs.dry_run == false }}
+        if: ${{ inputs.push_code == true && inputs.dry_run == false && steps.commit.outputs.committed == 'true' }}
         env:
           GH_TOKEN: ${{ secrets.SYNC_DESTINATION_PAT }}
         run: |
           cd target-repo
-          # Only open a PR if the delivery branch exists on the remote.
-          if git ls-remote --exit-code --heads \
-              "https://x-access-token:${GH_TOKEN}@github.com/${{ inputs.target_org }}/${{ inputs.target_repo }}.git" \
-              "${{ steps.branch.outputs.name }}" >/dev/null 2>&1; then
-            gh pr create \
-              --repo "${{ inputs.target_org }}/${{ inputs.target_repo }}" \
-              --base "${{ inputs.target_base_branch }}" \
-              --head "${{ steps.branch.outputs.name }}" \
-              --title "IssueOps delivery ${{ inputs.source_ref }}" \
-              --body  "Automated code push from the landing repo.
+          gh pr create \
+            --repo "${{ inputs.target_org }}/${{ inputs.target_repo }}" \
+            --base "${{ inputs.target_base_branch }}" \
+            --head "${{ steps.branch.outputs.name }}" \
+            --title "IssueOps delivery ${{ inputs.source_ref }}" \
+            --body  "Automated code push from the landing repo.
           Source ref: ${{ inputs.source_ref }}
           Run: ${{ github.run_id }}
           Review, required scans (code + secret scanning), tests and merge remain with the receiving side." \
-            || echo "PR may already exist."
-          else
-            echo "No delivery branch on remote (no changes) — skipping PR."
-          fi
+          || echo "PR may already exist."
 
       # ==================================================================
       # LABEL PUSH  (push_labels == true) — logic mirrors hpe-push-labels.yml
