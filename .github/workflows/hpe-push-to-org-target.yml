@@ -1,0 +1,280 @@
+# =============================================================================
+# hpe-push-to-org-target.yml  —  Landing repo -> target org repo (DRAFT for review)
+# -----------------------------------------------------------------------------
+# Per Eric's request (Aug 14):
+#   A new manually-triggered workflow that runs FROM the landing repo and pushes
+#   into a target repo in one of HPE's orgs:
+#     - push code to a DELIVERY branch (for a pull request) in the target repo
+#     - push LABELS to the target repo
+#   The target repo is an input; the workflow runs on the "source" (landing) repo
+#   and uses a token with permissions to the target repo. Test in Eric's sandbox.
+#
+# Verified against im-customers/hpe-automation-issueops (Aug 14):
+#   - Secret convention: SYNC_SOURCE_PAT (read source), SYNC_DESTINATION_PAT
+#     (write target). Same names the existing hpe-push-labels.yml / hpe-repo-sync.yml
+#     already use. (ISSUEOPS_GITHUB_TOKEN is the RUNTIME token the IssueOps
+#     workflows use inside the target org - provisioned by HPE, not used here.)
+#   - The existing hpe-repo-sync.yml uses the git-sync action to push the WHOLE
+#     main branch (no filtering) to HPE-EMU/github-tools branch "infomagnus_delivery".
+#     This workflow instead ships a CURATED runtime payload to a delivery branch
+#     and opens a PR. >>> Confirm with Eric which he wants: ship-everything
+#     (match existing) vs curated payload (below).
+#
+# SDLC: pushes only to a delivery branch (never the protected base) and opens a
+# PR; review/scans/merge stay with the receiving side. dry_run = true by default.
+# =============================================================================
+
+name: hpe-push-to-org-target
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_org:
+        description: 'Target org (destination owner) in HPE'
+        required: true
+        type: string
+      target_repo:
+        description: 'Target repository name in that org'
+        required: true
+        type: string
+      target_base_branch:
+        description: 'PR base branch on the target repo (never pushed to directly)'
+        required: true
+        default: 'main'
+        type: string
+      source_ref:
+        description: 'Ref (tag/branch/SHA) of THIS landing repo to publish'
+        required: true
+        default: 'main'
+        type: string
+      delivery_branch_prefix:
+        description: 'Delivery branch name root on the target (a run id is appended)'
+        required: true
+        default: 'infomagnus_delivery'
+        type: string
+      push_code:
+        description: 'Push code to the delivery branch + open PR'
+        required: false
+        default: true
+        type: boolean
+      push_labels:
+        description: 'Copy labels from the landing repo to the target repo'
+        required: false
+        default: true
+        type: boolean
+      dry_run:
+        description: 'Preview only: build the branch + show the diff, do NOT push, PR, or mutate labels'
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read   # reads THIS repo; writes to the target happen via SYNC_DESTINATION_PAT
+
+concurrency:
+  group: hpe-push-to-org-target-${{ inputs.target_org }}-${{ inputs.target_repo }}
+  cancel-in-progress: false
+
+jobs:
+  push:
+    runs-on: ubuntu-latest
+    steps:
+      # 1) Check out THIS (landing) repo at the ref we intend to ship.
+      - name: Checkout landing source (${{ inputs.source_ref }})
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref }}
+          path: landing-src
+          fetch-depth: 0
+
+      # 2) Verify the destination token (write access to the target repo).
+      - name: Validate destination token access
+        env:
+          DEST_GH_TOKEN: ${{ secrets.SYNC_DESTINATION_PAT }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DEST_GH_TOKEN:-}" ]; then
+            echo "::error::Required secret SYNC_DESTINATION_PAT is not set."
+            exit 1
+          fi
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer $DEST_GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ inputs.target_org }}/${{ inputs.target_repo }}")
+          if [ "$STATUS" -ne 200 ]; then
+            echo "::error::SYNC_DESTINATION_PAT cannot access ${{ inputs.target_org }}/${{ inputs.target_repo }} (HTTP $STATUS)."
+            exit 1
+          fi
+          echo "Destination token OK."
+
+      # ==================================================================
+      # CODE PUSH  (push_code == true)
+      # ==================================================================
+      - name: Clone target repo
+        if: ${{ inputs.push_code == true }}
+        env:
+          TOKEN: ${{ secrets.SYNC_DESTINATION_PAT }}
+        run: |
+          git clone --branch "${{ inputs.target_base_branch }}" \
+            "https://x-access-token:${TOKEN}@github.com/${{ inputs.target_org }}/${{ inputs.target_repo }}.git" \
+            target-repo
+
+      - name: Create delivery branch
+        id: branch
+        if: ${{ inputs.push_code == true }}
+        run: |
+          BRANCH="${{ inputs.delivery_branch_prefix }}-${{ github.run_id }}"
+          echo "name=${BRANCH}" >> "$GITHUB_OUTPUT"
+          cd target-repo
+          git checkout -b "${BRANCH}"
+
+      # Curated runtime payload (verified against the repo structure).
+      # Filter order matters in rsync (first match wins): per-file EXCLUDES first,
+      # then directory INCLUDES, then the catch-all exclude.
+      # Ships: IssueOps workflows + issue templates + dependabot, src/, scripts/,
+      #        tenant-registry (minus demo acme.json), sample CSVs, docs, README.
+      # Omits: the source-side sync tooling, specs/tests/.specify/prompts/agents,
+      #        demo kit, artifacts. Drop --delete for additive-only pushes.
+      - name: Sync curated runtime payload into target
+        if: ${{ inputs.push_code == true }}
+        run: |
+          rsync -a --delete \
+            --exclude='/.github/workflows/.github/' \
+            --exclude='/.github/workflows/hpe-repo-sync.yml' \
+            --exclude='/.github/workflows/hpe-push-labels.yml' \
+            --exclude='/.github/workflows/hpe-push-to-org-target.yml' \
+            --exclude='/tenant-registry/acme.json' \
+            --include='/.github/' \
+            --include='/.github/workflows/***' \
+            --include='/.github/ISSUE_TEMPLATE/***' \
+            --include='/.github/dependabot.yml' \
+            --include='/src/***' \
+            --include='/scripts/***' \
+            --include='/tenant-registry/***' \
+            --include='/sample-input-csvs/***' \
+            --include='/docs/***' \
+            --include='/README.md' \
+            --include='/.gitignore' \
+            --include='/.gitattributes' \
+            --exclude='*' \
+            landing-src/ target-repo/
+          cd target-repo
+          git config user.name  "infomagnus-issueops-bot"
+          git config user.email "issueops-bot@users.noreply.github.com"
+          git add -A
+
+      - name: Show diff / dry-run gate
+        if: ${{ inputs.push_code == true }}
+        run: |
+          cd target-repo
+          echo "===== Proposed code changes for ${{ inputs.target_org }}/${{ inputs.target_repo }} ====="
+          git status
+          git diff --cached --stat
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            echo "DRY RUN: no commit, no push, no PR. Review the diff above."
+          fi
+
+      - name: Commit
+        if: ${{ inputs.push_code == true && inputs.dry_run == false }}
+        run: |
+          cd target-repo
+          if git diff --cached --quiet; then
+            echo "No changes to commit — target already matches ${{ inputs.source_ref }} (replay is safe)."
+            exit 0
+          fi
+          git commit -m "IssueOps delivery ${{ inputs.source_ref }} (run ${{ github.run_id }})"
+
+      - name: Push delivery branch
+        if: ${{ inputs.push_code == true && inputs.dry_run == false }}
+        env:
+          TOKEN: ${{ secrets.SYNC_DESTINATION_PAT }}
+        run: |
+          cd target-repo
+          if git rev-parse --verify "${{ steps.branch.outputs.name }}" >/dev/null 2>&1 && ! git diff --quiet HEAD~1 HEAD 2>/dev/null; then
+            git push "https://x-access-token:${TOKEN}@github.com/${{ inputs.target_org }}/${{ inputs.target_repo }}.git" \
+              "${{ steps.branch.outputs.name }}"
+          else
+            echo "Nothing to push."
+          fi
+
+      - name: Open pull request
+        if: ${{ inputs.push_code == true && inputs.dry_run == false }}
+        env:
+          GH_TOKEN: ${{ secrets.SYNC_DESTINATION_PAT }}
+        run: |
+          cd target-repo
+          # Only open a PR if the delivery branch exists on the remote.
+          if git ls-remote --exit-code --heads \
+              "https://x-access-token:${GH_TOKEN}@github.com/${{ inputs.target_org }}/${{ inputs.target_repo }}.git" \
+              "${{ steps.branch.outputs.name }}" >/dev/null 2>&1; then
+            gh pr create \
+              --repo "${{ inputs.target_org }}/${{ inputs.target_repo }}" \
+              --base "${{ inputs.target_base_branch }}" \
+              --head "${{ steps.branch.outputs.name }}" \
+              --title "IssueOps delivery ${{ inputs.source_ref }}" \
+              --body  "Automated code push from the landing repo.
+          Source ref: ${{ inputs.source_ref }}
+          Run: ${{ github.run_id }}
+          Review, required scans (code + secret scanning), tests and merge remain with the receiving side." \
+            || echo "PR may already exist."
+          else
+            echo "No delivery branch on remote (no changes) — skipping PR."
+          fi
+
+      # ==================================================================
+      # LABEL PUSH  (push_labels == true) — logic mirrors hpe-push-labels.yml
+      # Source = this landing repo; destination = the target repo.
+      # ==================================================================
+      - name: Copy labels to target
+        if: ${{ inputs.push_labels == true }}
+        env:
+          SRC_GH_TOKEN: ${{ secrets.SYNC_SOURCE_PAT }}
+          DEST_GH_TOKEN: ${{ secrets.SYNC_DESTINATION_PAT }}
+          SRC_OWNER: ${{ github.repository_owner }}
+          SRC_REPO: ${{ github.event.repository.name }}
+          DEST_OWNER: ${{ inputs.target_org }}
+          DEST_REPO: ${{ inputs.target_repo }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SRC_GH_TOKEN:-}" ]; then echo "::error::SYNC_SOURCE_PAT is not set."; exit 1; fi
+          if [ -z "${DEST_GH_TOKEN:-}" ]; then echo "::error::SYNC_DESTINATION_PAT is not set."; exit 1; fi
+          api_base="https://api.github.com"
+          src_auth="Authorization: Bearer $SRC_GH_TOKEN"
+          dest_auth="Authorization: Bearer $DEST_GH_TOKEN"
+          accept="Accept: application/vnd.github+json"
+          ctype="Content-Type: application/json"
+
+          echo "Fetching labels from $SRC_OWNER/$SRC_REPO..."
+          RESPONSE=$(curl -fsSL -H "$src_auth" -H "$accept" \
+            "$api_base/repos/$SRC_OWNER/$SRC_REPO/labels?per_page=100")
+          if [ "$(echo "$RESPONSE" | jq 'length')" -eq 0 ]; then
+            echo "No labels found in source repository."; exit 0
+          fi
+
+          echo "$RESPONSE" | jq -c '.[]' | while read -r label; do
+            NAME=$(echo "$label" | jq -r '.name')
+            COLOR=$(echo "$label" | jq -r '.color')
+            DESCRIPTION=$(echo "$label" | jq -r '.description // ""')
+            ENCODED_NAME=$(jq -rn --arg x "$NAME" '$x|@uri')
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "DRY RUN: would sync label '$NAME' -> $DEST_OWNER/$DEST_REPO"
+              continue
+            fi
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              -H "$dest_auth" -H "$accept" \
+              "$api_base/repos/$DEST_OWNER/$DEST_REPO/labels/$ENCODED_NAME")
+            if [ "$STATUS" -eq 200 ]; then
+              echo "Label '$NAME' exists. Updating..."
+              curl -fsSL -X PATCH -H "$dest_auth" -H "$accept" -H "$ctype" \
+                "$api_base/repos/$DEST_OWNER/$DEST_REPO/labels/$ENCODED_NAME" \
+                -d "$(jq -n --arg name "$NAME" --arg color "$COLOR" --arg desc "$DESCRIPTION" '{new_name:$name,color:$color,description:$desc}')" >/dev/null
+            elif [ "$STATUS" -eq 404 ]; then
+              echo "Label '$NAME' missing. Creating..."
+              curl -fsSL -X POST -H "$dest_auth" -H "$accept" -H "$ctype" \
+                "$api_base/repos/$DEST_OWNER/$DEST_REPO/labels" \
+                -d "$(jq -n --arg name "$NAME" --arg color "$COLOR" --arg desc "$DESCRIPTION" '{name:$name,color:$color,description:$desc}')" >/dev/null
+            else
+              echo "::error::Failed to query destination label '$NAME' (HTTP $STATUS)."; exit 1
+            fi
+          done
