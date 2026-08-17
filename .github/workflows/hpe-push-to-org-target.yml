@@ -78,7 +78,45 @@ concurrency:
 jobs:
   push:
     runs-on: ubuntu-latest
+    env:
+      TARGET_ORG: ${{ inputs.target_org }}
+      TARGET_REPO: ${{ inputs.target_repo }}
+      TARGET_BASE_BRANCH: ${{ inputs.target_base_branch }}
+      SOURCE_REF: ${{ inputs.source_ref }}
+      DELIVERY_BRANCH_PREFIX: ${{ inputs.delivery_branch_prefix }}
+      DRY_RUN: ${{ inputs.dry_run }}
     steps:
+      - name: Validate workflow inputs
+        run: |
+          set -euo pipefail
+
+          if ! [[ "$TARGET_ORG" =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,38}$ ]]; then
+            echo "::error::target_org must be a valid GitHub owner name."
+            exit 1
+          fi
+
+          if ! [[ "$TARGET_REPO" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "::error::target_repo must contain only letters, numbers, '.', '_' or '-'."
+            exit 1
+          fi
+
+          if ! git check-ref-format --branch "$TARGET_BASE_BRANCH" >/dev/null 2>&1; then
+            echo "::error::target_base_branch must be a valid branch name."
+            exit 1
+          fi
+
+          if ! git check-ref-format --branch "$DELIVERY_BRANCH_PREFIX" >/dev/null 2>&1; then
+            echo "::error::delivery_branch_prefix must be a valid branch name prefix."
+            exit 1
+          fi
+
+          if [[ "$SOURCE_REF" =~ ^[0-9a-fA-F]{7,40}$ ]]; then
+            :
+          elif ! git check-ref-format --allow-onelevel "$SOURCE_REF" >/dev/null 2>&1; then
+            echo "::error::source_ref must be a valid branch, tag, or commit SHA."
+            exit 1
+          fi
+
       # 1) Check out THIS (landing) repo at the ref we intend to ship.
       - name: Checkout landing source (${{ inputs.source_ref }})
         uses: actions/checkout@v4
@@ -93,6 +131,7 @@ jobs:
           DEST_GH_TOKEN: ${{ secrets.SYNC_DESTINATION_PAT }}
         run: |
           set -euo pipefail
+          api_base="https://api.github.com"
           if [ -z "${DEST_GH_TOKEN:-}" ]; then
             echo "::error::Required secret SYNC_DESTINATION_PAT is not set."
             exit 1
@@ -100,9 +139,9 @@ jobs:
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
             -H "Authorization: Bearer $DEST_GH_TOKEN" \
             -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${{ inputs.target_org }}/${{ inputs.target_repo }}")
+            "$api_base/repos/$TARGET_ORG/$TARGET_REPO")
           if [ "$STATUS" -ne 200 ]; then
-            echo "::error::SYNC_DESTINATION_PAT cannot access ${{ inputs.target_org }}/${{ inputs.target_repo }} (HTTP $STATUS)."
+            echo "::error::SYNC_DESTINATION_PAT cannot access $TARGET_ORG/$TARGET_REPO (HTTP $STATUS)."
             exit 1
           fi
           echo "Destination token OK."
@@ -115,15 +154,21 @@ jobs:
         env:
           TOKEN: ${{ secrets.SYNC_DESTINATION_PAT }}
         run: |
-          git clone --branch "${{ inputs.target_base_branch }}" \
-            "https://x-access-token:${TOKEN}@github.com/${{ inputs.target_org }}/${{ inputs.target_repo }}.git" \
+          git clone --branch "$TARGET_BASE_BRANCH" \
+            "https://x-access-token:${TOKEN}@github.com/$TARGET_ORG/$TARGET_REPO.git" \
             target-repo
 
+      # Branch name embeds run_id AND run_attempt so a re-run of a failed run
+      # never collides (non-fast-forward) with a branch pushed by an earlier attempt.
       - name: Create delivery branch
         id: branch
         if: ${{ inputs.push_code == true }}
         run: |
-          BRANCH="${{ inputs.delivery_branch_prefix }}-${{ github.run_id }}"
+          BRANCH="${DELIVERY_BRANCH_PREFIX}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          if ! git check-ref-format --branch "$BRANCH" >/dev/null 2>&1; then
+            echo "::error::Derived delivery branch name is invalid: $BRANCH"
+            exit 1
+          fi
           echo "name=${BRANCH}" >> "$GITHUB_OUTPUT"
           cd target-repo
           git checkout -b "${BRANCH}"
@@ -132,7 +177,8 @@ jobs:
       # Filter order matters in rsync (first match wins): per-file EXCLUDES first,
       # then directory INCLUDES, then the catch-all exclude.
       # Ships: IssueOps workflows + issue templates + dependabot, src/, scripts/,
-      #        tenant-registry (minus demo acme.json), sample CSVs, docs, README.
+      #        tenant-registry structure (all tenant *.json runtime records are
+      #        protected from --delete in both directions), sample CSVs, docs, README.
       # Omits: the source-side sync tooling, specs/tests/.specify/prompts/agents,
       #        demo kit, artifacts. Drop --delete for additive-only pushes.
       - name: Sync curated runtime payload into target
@@ -143,7 +189,7 @@ jobs:
             --exclude='/.github/workflows/hpe-repo-sync.yml' \
             --exclude='/.github/workflows/hpe-push-labels.yml' \
             --exclude='/.github/workflows/hpe-push-to-org-target.yml' \
-            --exclude='/tenant-registry/acme.json' \
+            --exclude='/tenant-registry/*.json' \
             --include='/.github/' \
             --include='/.github/workflows/***' \
             --include='/.github/ISSUE_TEMPLATE/***' \
@@ -167,58 +213,70 @@ jobs:
         if: ${{ inputs.push_code == true }}
         run: |
           cd target-repo
-          echo "===== Proposed code changes for ${{ inputs.target_org }}/${{ inputs.target_repo }} ====="
+          echo "===== Proposed code changes for $TARGET_ORG/$TARGET_REPO ====="
           git status
           git diff --cached --stat
-          if [ "${{ inputs.dry_run }}" = "true" ]; then
+          if [ "$DRY_RUN" = "true" ]; then
             echo "DRY RUN: no commit, no push, no PR. Review the diff above."
           fi
 
       - name: Commit
+        id: commit
         if: ${{ inputs.push_code == true && inputs.dry_run == false }}
         run: |
           cd target-repo
           if git diff --cached --quiet; then
-            echo "No changes to commit — target already matches ${{ inputs.source_ref }} (replay is safe)."
+            echo "committed=false" >> "$GITHUB_OUTPUT"
+            echo "No changes to commit — target already matches $SOURCE_REF (replay is safe)."
             exit 0
           fi
-          git commit -m "IssueOps delivery ${{ inputs.source_ref }} (run ${{ github.run_id }})"
+          git commit -m "IssueOps delivery $SOURCE_REF (run $GITHUB_RUN_ID)"
+          echo "committed=true" >> "$GITHUB_OUTPUT"
 
       - name: Push delivery branch
-        if: ${{ inputs.push_code == true && inputs.dry_run == false }}
+        if: ${{ inputs.push_code == true && inputs.dry_run == false && steps.commit.outputs.committed == 'true' }}
         env:
           TOKEN: ${{ secrets.SYNC_DESTINATION_PAT }}
+          DELIVERY_BRANCH: ${{ steps.branch.outputs.name }}
         run: |
           cd target-repo
-          if git rev-parse --verify "${{ steps.branch.outputs.name }}" >/dev/null 2>&1 && ! git diff --quiet HEAD~1 HEAD 2>/dev/null; then
-            git push "https://x-access-token:${TOKEN}@github.com/${{ inputs.target_org }}/${{ inputs.target_repo }}.git" \
-              "${{ steps.branch.outputs.name }}"
-          else
-            echo "Nothing to push."
-          fi
+          git push "https://x-access-token:${TOKEN}@github.com/$TARGET_ORG/$TARGET_REPO.git" \
+            "$DELIVERY_BRANCH"
 
+      # PR creation fails the job on unexpected errors; the only tolerated
+      # "failure" is an already-open PR for this exact head branch.
       - name: Open pull request
-        if: ${{ inputs.push_code == true && inputs.dry_run == false }}
+        if: ${{ inputs.push_code == true && inputs.dry_run == false && steps.commit.outputs.committed == 'true' }}
         env:
           GH_TOKEN: ${{ secrets.SYNC_DESTINATION_PAT }}
+          DELIVERY_BRANCH: ${{ steps.branch.outputs.name }}
         run: |
+          set -euo pipefail
           cd target-repo
-          # Only open a PR if the delivery branch exists on the remote.
-          if git ls-remote --exit-code --heads \
-              "https://x-access-token:${GH_TOKEN}@github.com/${{ inputs.target_org }}/${{ inputs.target_repo }}.git" \
-              "${{ steps.branch.outputs.name }}" >/dev/null 2>&1; then
-            gh pr create \
-              --repo "${{ inputs.target_org }}/${{ inputs.target_repo }}" \
-              --base "${{ inputs.target_base_branch }}" \
-              --head "${{ steps.branch.outputs.name }}" \
-              --title "IssueOps delivery ${{ inputs.source_ref }}" \
-              --body  "Automated code push from the landing repo.
-          Source ref: ${{ inputs.source_ref }}
-          Run: ${{ github.run_id }}
-          Review, required scans (code + secret scanning), tests and merge remain with the receiving side." \
-            || echo "PR may already exist."
+          PR_REPO="$TARGET_ORG/$TARGET_REPO"
+          PR_TITLE="IssueOps delivery $SOURCE_REF"
+          PR_BODY=$(printf '%s\n' \
+            "Automated code push from the landing repo." \
+            "Source ref: $SOURCE_REF" \
+            "Run: $GITHUB_RUN_ID" \
+            "Review, required scans (code + secret scanning), tests and merge remain with the receiving side.")
+          if gh pr create \
+            --repo "$PR_REPO" \
+            --base "$TARGET_BASE_BRANCH" \
+            --head "$DELIVERY_BRANCH" \
+            --title "$PR_TITLE" \
+            --body "$PR_BODY"; then
+            echo "PR created."
           else
-            echo "No delivery branch on remote (no changes) — skipping PR."
+            echo "gh pr create failed — checking for an existing open PR for $DELIVERY_BRANCH..."
+            EXISTING=$(gh pr list --repo "$PR_REPO" \
+              --head "$DELIVERY_BRANCH" --state open --json number --jq 'length')
+            if [ "${EXISTING:-0}" -ge 1 ]; then
+              echo "Open PR already exists for $DELIVERY_BRANCH — continuing."
+            else
+              echo "::error::PR creation failed and no open PR exists for $DELIVERY_BRANCH."
+              exit 1
+            fi
           fi
 
       # ==================================================================
@@ -240,19 +298,20 @@ jobs:
           if [ -z "${SRC_GH_TOKEN:-}" ]; then echo "::error::SYNC_SOURCE_PAT is not set."; exit 1; fi
           if [ -z "${DEST_GH_TOKEN:-}" ]; then echo "::error::SYNC_DESTINATION_PAT is not set."; exit 1; fi
           api_base="https://api.github.com"
-          src_auth="Authorization: Bearer $SRC_GH_TOKEN"
           dest_auth="Authorization: Bearer $DEST_GH_TOKEN"
           accept="Accept: application/vnd.github+json"
           ctype="Content-Type: application/json"
 
-          echo "Fetching labels from $SRC_OWNER/$SRC_REPO..."
-          RESPONSE=$(curl -fsSL -H "$src_auth" -H "$accept" \
-            "$api_base/repos/$SRC_OWNER/$SRC_REPO/labels?per_page=100")
-          if [ "$(echo "$RESPONSE" | jq 'length')" -eq 0 ]; then
+          echo "Fetching labels from $SRC_OWNER/$SRC_REPO (all pages)..."
+          # gh api --paginate follows Link headers so >100 labels sync too.
+          LABELS=$(GH_TOKEN="$SRC_GH_TOKEN" gh api --paginate \
+            "repos/$SRC_OWNER/$SRC_REPO/labels?per_page=100" --jq '.[]')
+          if [ -z "$LABELS" ]; then
             echo "No labels found in source repository."; exit 0
           fi
+          echo "Found $(printf '%s\n' "$LABELS" | wc -l) labels."
 
-          echo "$RESPONSE" | jq -c '.[]' | while read -r label; do
+          printf '%s\n' "$LABELS" | while read -r label; do
             NAME=$(echo "$label" | jq -r '.name')
             COLOR=$(echo "$label" | jq -r '.color')
             DESCRIPTION=$(echo "$label" | jq -r '.description // ""')
