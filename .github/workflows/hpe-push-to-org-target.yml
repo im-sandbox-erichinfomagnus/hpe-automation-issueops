@@ -158,11 +158,13 @@ jobs:
             "https://x-access-token:${TOKEN}@github.com/$TARGET_ORG/$TARGET_REPO.git" \
             target-repo
 
+      # Branch name embeds run_id AND run_attempt so a re-run of a failed run
+      # never collides (non-fast-forward) with a branch pushed by an earlier attempt.
       - name: Create delivery branch
         id: branch
         if: ${{ inputs.push_code == true }}
         run: |
-          BRANCH="${DELIVERY_BRANCH_PREFIX}-${GITHUB_RUN_ID}"
+          BRANCH="${DELIVERY_BRANCH_PREFIX}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           if ! git check-ref-format --branch "$BRANCH" >/dev/null 2>&1; then
             echo "::error::Derived delivery branch name is invalid: $BRANCH"
             exit 1
@@ -241,12 +243,15 @@ jobs:
           git push "https://x-access-token:${TOKEN}@github.com/$TARGET_ORG/$TARGET_REPO.git" \
             "$DELIVERY_BRANCH"
 
+      # PR creation fails the job on unexpected errors; the only tolerated
+      # "failure" is an already-open PR for this exact head branch.
       - name: Open pull request
         if: ${{ inputs.push_code == true && inputs.dry_run == false && steps.commit.outputs.committed == 'true' }}
         env:
           GH_TOKEN: ${{ secrets.SYNC_DESTINATION_PAT }}
           DELIVERY_BRANCH: ${{ steps.branch.outputs.name }}
         run: |
+          set -euo pipefail
           cd target-repo
           PR_REPO="$TARGET_ORG/$TARGET_REPO"
           PR_TITLE="IssueOps delivery $SOURCE_REF"
@@ -255,13 +260,24 @@ jobs:
             "Source ref: $SOURCE_REF" \
             "Run: $GITHUB_RUN_ID" \
             "Review, required scans (code + secret scanning), tests and merge remain with the receiving side.")
-          gh pr create \
+          if gh pr create \
             --repo "$PR_REPO" \
             --base "$TARGET_BASE_BRANCH" \
             --head "$DELIVERY_BRANCH" \
             --title "$PR_TITLE" \
-            --body "$PR_BODY" \
-          || echo "PR may already exist."
+            --body "$PR_BODY"; then
+            echo "PR created."
+          else
+            echo "gh pr create failed — checking for an existing open PR for $DELIVERY_BRANCH..."
+            EXISTING=$(gh pr list --repo "$PR_REPO" \
+              --head "$DELIVERY_BRANCH" --state open --json number --jq 'length')
+            if [ "${EXISTING:-0}" -ge 1 ]; then
+              echo "Open PR already exists for $DELIVERY_BRANCH — continuing."
+            else
+              echo "::error::PR creation failed and no open PR exists for $DELIVERY_BRANCH."
+              exit 1
+            fi
+          fi
 
       # ==================================================================
       # LABEL PUSH  (push_labels == true) — logic mirrors hpe-push-labels.yml
@@ -282,19 +298,20 @@ jobs:
           if [ -z "${SRC_GH_TOKEN:-}" ]; then echo "::error::SYNC_SOURCE_PAT is not set."; exit 1; fi
           if [ -z "${DEST_GH_TOKEN:-}" ]; then echo "::error::SYNC_DESTINATION_PAT is not set."; exit 1; fi
           api_base="https://api.github.com"
-          src_auth="Authorization: Bearer $SRC_GH_TOKEN"
           dest_auth="Authorization: Bearer $DEST_GH_TOKEN"
           accept="Accept: application/vnd.github+json"
           ctype="Content-Type: application/json"
 
-          echo "Fetching labels from $SRC_OWNER/$SRC_REPO..."
-          RESPONSE=$(curl -fsSL -H "$src_auth" -H "$accept" \
-            "$api_base/repos/$SRC_OWNER/$SRC_REPO/labels?per_page=100")
-          if [ "$(echo "$RESPONSE" | jq 'length')" -eq 0 ]; then
+          echo "Fetching labels from $SRC_OWNER/$SRC_REPO (all pages)..."
+          # gh api --paginate follows Link headers so >100 labels sync too.
+          LABELS=$(GH_TOKEN="$SRC_GH_TOKEN" gh api --paginate \
+            "repos/$SRC_OWNER/$SRC_REPO/labels?per_page=100" --jq '.[]')
+          if [ -z "$LABELS" ]; then
             echo "No labels found in source repository."; exit 0
           fi
+          echo "Found $(printf '%s\n' "$LABELS" | wc -l) labels."
 
-          echo "$RESPONSE" | jq -c '.[]' | while read -r label; do
+          printf '%s\n' "$LABELS" | while read -r label; do
             NAME=$(echo "$label" | jq -r '.name')
             COLOR=$(echo "$label" | jq -r '.color')
             DESCRIPTION=$(echo "$label" | jq -r '.description // ""')
