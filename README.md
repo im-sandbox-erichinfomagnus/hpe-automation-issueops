@@ -1,143 +1,304 @@
-# HPE Tenant IssueOps
+# issueops-speckit
 
-This repository provides GitHub IssueOps workflows for managing HPE tenant
-resources. Operators submit requests through GitHub issue forms, and GitHub
-Actions validates authorization, plans the requested changes, waits for
-approval, applies the changes, and records the result.
+## Spec-kit Developer Onboarding
 
-GitHub organization state is the live system of record. The
-[tenant registry](tenant-registry/) records the canonical tenant boundary,
-team topology, and ownership used to authorize tenant-scoped operations.
+This repository is initialized for Spec-kit with the GitHub Copilot integration.
+The checked-in project state lives under [`.specify/`](.specify/). Some Copilot
+integration files, especially [`.github/agents/`](.github/agents/), are generated
+locally and must not be committed in this repository because GitHub push rules
+reject them.
 
-## Run an Operation
+### One-Time Local Setup
 
-1. Open the [new request menu](../../issues/new/choose).
-2. Choose the form for the operation you need.
-3. Complete the request and provide the spreadsheet data required by the form.
-   Start with a file from [sample-input-csvs](sample-input-csvs/).
-4. Submit the issue and wait for the validation result.
-5. Keep dry-run enabled for the first pass. A dry-run validates and plans the
-   request without changing GitHub organization state.
-6. After validation succeeds, the designated active approver comments exactly
-   `approved` on the issue.
-7. Review the per-row result, Actions step summary, and JSON audit artifact.
-   Submit a live request only after the dry-run output is correct.
+1. Install the official Spec Kit CLI.
 
-When a form supports `csv_attachment`, submit the issue with its manual input
-field empty. The requester must then add an issue comment containing exactly one
-`.csv` attachment. The request remains in a waiting state until the attachment
-is accepted.
+	PowerShell example:
 
-## Supported Operations
+	```powershell
+	uv tool install specify-cli --from git+https://github.com/github/spec-kit.git@v0.8.11
+	```
 
-| Area | Issue form | What it manages |
-|---|---|---|
-| Organization teams | [Create organization teams](.github/ISSUE_TEMPLATE/create-org-teams.yml) | Creates one or more empty teams |
-| Organization teams | [Add team members](.github/ISSUE_TEMPLATE/add-team-members.yml) | Adds users to an existing team |
-| Organization teams | [Add child teams](.github/ISSUE_TEMPLATE/add-child-teams.yml) | Attaches existing child teams to an existing parent |
-| Repository access | [Add team repository access](.github/ISSUE_TEMPLATE/add-team-repo-access.yml) | Grants a team access to one or more repositories |
-| Repository access | [Remove team repository access](.github/ISSUE_TEMPLATE/remove-team-repo-access.yml) | Removes a team's access from one or more repositories |
-| Tenant bootstrap | [Create tenant model](.github/ISSUE_TEMPLATE/create-tenant-model.yml) | Creates the canonical tenant teams, hierarchy, maintainers, and registry record |
-| Tenant repositories | [Create tenant repositories](.github/ISSUE_TEMPLATE/create-tenant-repos.yml) | Creates repositories inside an authorized tenant boundary |
-| Repository rulesets | [Create repository ruleset](.github/ISSUE_TEMPLATE/create-repository-ruleset.yml) | Creates repository-level rulesets in spreadsheet batches |
-| Repository rulesets | [Delete repository ruleset](.github/ISSUE_TEMPLATE/delete-repository-ruleset.yml) | Deletes named repository-level rulesets |
-| Actions variables | [Manage tenant variables](.github/ISSUE_TEMPLATE/manage-tenant-variables.yml) | Creates, updates, or deletes tenant-prefixed organization variables |
-| Actions runners | [Create tenant runner group](.github/ISSUE_TEMPLATE/create-tenant-runner-groups.yml) | Creates an isolated tenant runner group |
-| Actions runners | [Create tenant hosted runner](.github/ISSUE_TEMPLATE/create-tenant-hosted-runner.yml) | Creates a tenant-scoped GitHub-hosted runner |
-| Actions runners | [Move tenant hosted runner](.github/ISSUE_TEMPLATE/move-tenant-hosted-runner.yml) | Moves a hosted runner into an existing tenant runner group |
-| Actions runners | [Delete tenant hosted runner](.github/ISSUE_TEMPLATE/delete-tenant-hosted-runner.yml) | Deletes a tenant-scoped hosted runner |
+2. Verify the installation.
 
-The [Tenant IssueOps runbook](docs/tenant-issueops-runbook.md) lists the
-spreadsheet schema and authorization path for each operation. The
-[requirements matrix](docs/tenant-issueops-requirements-matrix.md) maps the
-seven acceptance scenarios to their implementation, tests, sample files, and
-recording guides.
+	```powershell
+	specify version
+	```
 
-## Request and Approval Rules
+3. From the repository root, install the Copilot integration files locally.
 
-- Spreadsheet input is the primary path for tenant operations. Create-tenant
-  and runner lifecycle forms accept one data row. Batch operations accept the
-  shape documented in the form and sample file.
-- Privileged requests fail closed when the requester, approver, target
-  organization, tenant, team, or repository cannot be verified.
-- Authorization is checked during validation and checked again immediately
-  before mutation.
-- Tenant-scoped operations resolve their authorization boundary from
-  [tenant-registry](tenant-registry/).
-- Repository ruleset batches authorize each row independently. A rejected row
-  does not prevent authorized rows from being evaluated.
-- Re-running a completed request converges on current GitHub state. Operations
-  that are already satisfied are reported as no-ops instead of being applied
-  again.
+	```powershell
+	specify integration install copilot --script ps
+	```
 
-## Results and Audit Evidence
+4. Open the repository in VS Code with GitHub Copilot enabled.
 
-Each request produces evidence in three places:
+After installation, the local Spec-kit slash commands should be available,
+including:
 
-1. Issue comments show validation, approval, and per-row execution results.
-2. The GitHub Actions step summary shows the planned and completed work.
-3. A machine-readable JSON artifact records request details, authorization,
-   reconciliation, retry, and execution outcomes.
+- /speckit.constitution
+- /speckit.specify
+- /speckit.plan
+- /speckit.tasks
+- /speckit.implement
 
-Retry behavior is bounded and uses GitHub rate-limit response data. Partial
-failures remain visible in the issue result and audit artifact so operators can
-correct only the failed rows.
+### Refresh After a Spec Kit Upgrade
 
-## Repository Configuration
+If Spec Kit is already installed and you only need to refresh the repo-managed
+Copilot files, run:
 
-The repository requires GitHub Issues, issue forms, and GitHub Actions. Configure
-an Actions secret named `ISSUEOPS_GITHUB_TOKEN` with the target-organization
-permissions required by the supported operations. Do not place tokens in an
-issue form, CSV file, repository variable, or committed file.
+```powershell
+specify integration upgrade copilot --script ps
+```
 
-The optional `TEAM_HIERARCHY_POLICY_JSON` organization or repository variable
-can provide team hierarchy policy used by the child-team workflow.
+### Repository Rules For Spec-kit Files
+
+- Commit the shared project state under [`.specify/`](.specify/).
+- Commit shared repo guidance such as [`.github/copilot-instructions.md`](.github/copilot-instructions.md).
+- Do not commit generated files under [`.github/agents/`](.github/agents/).
+- If generated agent files appear in your working tree, leave them uncommitted.
+
+### Troubleshooting
+
+If the slash commands do not appear:
+
+1. Confirm GitHub Copilot is enabled in VS Code.
+2. Run:
+
+	```powershell
+	specify integration list
+	```
+
+3. Confirm that `copilot` is installed for this project.
+4. Re-run:
+
+	```powershell
+	specify integration upgrade copilot --script ps
+	```
+
+This repository already enables the main Spec-kit prompt files in
+[`.vscode/settings.json`](.vscode/settings.json), so teammates normally only need
+the local integration install step after cloning.
+
+## Using This Repository
+
+This repository hosts GitHub IssueOps administration workflows. Operators use
+issue forms and GitHub Actions to request, validate, approve, and execute
+administrative operations against GitHub organizations without treating this
+repository as the source of truth.
+
+### What You Need
+
+- GitHub Issues with issue forms enabled in this repository.
+- A repository or organization Actions secret named `ISSUEOPS_GITHUB_TOKEN`
+	with the permissions required by the supported operation.
+- An organization owner available to approve privileged operations when the
+	workflow requires approval.
+
+### How To Use It
+
+1. Open a supported issue form under [`.github/ISSUE_TEMPLATE/`](.github/ISSUE_TEMPLATE/).
+2. Submit the request with the required target and justification details.
+3. Let the workflow validate the request and publish an audit artifact plus a
+	 GitHub Actions step summary.
+4. If the request requires approval, have an organization owner comment exactly
+	 `approved` on the issue.
+5. Review the final workflow summary and uploaded artifact for validation,
+	 approval, reconciliation, and execution results.
+
+### Where To Look During A Run
+
+- Workflow entrypoints: [`.github/workflows/`](.github/workflows/)
+- Issue forms: [`.github/ISSUE_TEMPLATE/`](.github/ISSUE_TEMPLATE/)
+- Shared implementation code: [`src/`](src/)
+- Feature specs and contracts: [`specs/`](specs/)
+
+## Supported Administration Operations
+
+This list should be updated as new IssueOps workflows are added.
+
+- `add-team-members`: Request, validate, approve, and reconcile adding one or
+	more GitHub users to a team in a GitHub organization.
+- `create-org-teams`: Request, validate, approve, and reconcile creating one or
+	more empty GitHub teams in a target organization for a shared intended owner.
+- `add-child-teams`: Request, validate, approve, and reconcile attaching one or
+	more existing child teams under an existing parent team in a target
+	organization.
+- `add-team-repo-access`: Request, validate, approve, and reconcile granting
+	one existing GitHub team access to one or more existing repositories in a
+	target organization.
+- `cost-center-reallocation`: Request, validate, approve, and reconcile creating
+	enterprise cost centers and adding or removing user assignments from a
+	spreadsheet, with dry-run by default. See
+	[`docs/cost-center-reallocation.md`](docs/cost-center-reallocation.md).
+- `manage-cost-centers`: Request, validate, approve, and reconcile bulk
+	create/rename/delete of GitHub Enterprise billing cost centers from a CSV
+	spreadsheet, with delete blocked on non-empty cost centers unless forced.
+- `create-tenant-model`: Spreadsheet-first tenant bootstrap. An active
+	organization owner creates the canonical root, admin, RepoAdmin, and
+	CICDAdmin teams and assigns the designated tenant admin as maintainer on all
+	four teams.
+- `create-tenant-repos`: Spreadsheet batch creation of tenant repositories,
+	authorized through the tenant RepoAdmin or tenant-admin path.
+- `create-tenant-hosted-runner`: Request, validate, approve, and reconcile
+	creating one tenant-prefixed GitHub-hosted runner from one spreadsheet row,
+	at organization level,
+	authorized by active membership in the canonical tenant topology admin team.
+- `delete-tenant-hosted-runner`: Request, validate, approve, and reconcile
+	deleting one tenant-prefixed GitHub-hosted runner from one spreadsheet row,
+	at organization level,
+	with no-op convergence when the runner is already absent.
+- `create-tenant-runner-groups`: Request, validate, approve, and reconcile
+	creating one tenant-prefixed Actions runner group from one spreadsheet row
+	at organization level
+	with isolation-preserving defaults.
+- `move-tenant-hosted-runner`: Request, validate, approve, and reconcile moving
+	one existing tenant-prefixed GitHub-hosted runner from one spreadsheet row
+	into one existing
+	tenant-prefixed runner group, with optional runner-id disambiguation.
+- `manage-tenant-variables`: Request, validate, approve, and reconcile create,
+	update, or delete of tenant-prefixed organization Actions variables,
+	authorized by active maintainership of the tenant top team.
+- `create-repository-ruleset`: Spreadsheet-first batch. Request, validate,
+	approve, and reconcile creation of repository-level rulesets across many
+	repositories from a CSV textarea (single-item form fields are the secondary
+	path), idempotent per row by ruleset name. Each row is authorized
+	independently by admin permission on that row's repository, or, when the
+	repository resolves to a tenant, an active member/maintainer of that tenant's
+	repo-admin team or an active maintainer of the tenant top team. Works on
+	imported repositories that are not in the tenant model; an unauthorized or
+	failing row never aborts the others.
+- `delete-repository-ruleset`: Spreadsheet-first batch. Request, validate,
+	approve, and reconcile deletion of repository-level rulesets across many
+	repositories from a CSV textarea (single-item form fields are the secondary
+	path), a no-op per row when the named ruleset is absent, with the same
+	per-row authorization and per-row audit as the create op.
+
+Detailed design and operator guidance for the current operation live in:
+
+- [`specs/001-add-team-members/quickstart.md`](specs/001-add-team-members/quickstart.md)
+- [`specs/001-add-team-members/contracts/add-team-members-workflow.yaml`](specs/001-add-team-members/contracts/add-team-members-workflow.yaml)
+- [`specs/003-create-org-teams/quickstart.md`](specs/003-create-org-teams/quickstart.md)
+- [`specs/003-create-org-teams/contracts/create-org-teams-workflow.yaml`](specs/003-create-org-teams/contracts/create-org-teams-workflow.yaml)
+- [`specs/004-add-child-teams/quickstart.md`](specs/004-add-child-teams/quickstart.md)
+- [`specs/004-add-child-teams/contracts/add-child-teams-workflow.yaml`](specs/004-add-child-teams/contracts/add-child-teams-workflow.yaml)
+- [`specs/005-add-team-repo-access/quickstart.md`](specs/005-add-team-repo-access/quickstart.md)
+- [`specs/005-add-team-repo-access/contracts/add-team-repo-access-workflow.yaml`](specs/005-add-team-repo-access/contracts/add-team-repo-access-workflow.yaml)
+- [`docs/tenant-issueops-runbook.md`](docs/tenant-issueops-runbook.md)
+- [`docs/tenant-issueops-requirements-matrix.md`](docs/tenant-issueops-requirements-matrix.md)
+
+## Repository Standards
+
+This repository follows a reconciliation-first IssueOps model:
+
+- GitHub is the system of record; workflows read current state before mutation.
+- Workflow YAML under [`.github/workflows/`](.github/workflows/) stays thin and
+	delegates business logic to code under [`src/`](src/).
+- Requests are parsed from GitHub issue forms with `issue-ops/parser`.
+- Validation, approval, reconciliation, retry handling, and audit generation
+	are implemented as shared logic rather than ad hoc workflow steps.
+- Re-runs should converge safely by treating already-satisfied state as no-op.
+
+## Security Model
+
+These workflows are designed for privileged administration and fail closed when
+their preconditions are not met.
+
+- Approval gate: privileged mutation requires explicit approval from an
+	organization owner when the workflow defines an approval step.
+- Least privilege: workflows use a PAT-backed Actions secret and should request
+	only the GitHub permissions required by the operation.
+- Dry-run support: validation and approval can complete without mutation.
+- Reconciliation before mutation: workflows add or change only the missing or
+	required state instead of blindly rewriting targets.
+- Auditability: every run is expected to emit a GitHub Actions summary and a
+	machine-readable JSON artifact.
+- Rate-limit awareness: retry behavior is bounded and based on GitHub response
+	headers rather than unbounded polling.
+- Partial-failure handling: workflows surface rollback status and follow-up
+	guidance when full success is not possible.
 
 ## Repository Layout
 
 ```text
 .github/
-  ISSUE_TEMPLATE/   Issue forms used by operators
-  workflows/        Workflow entrypoints and repository checks
-
-sample-input-csvs/  Operator-ready spreadsheet examples
-tenant-registry/    Canonical tenant topology and ownership records
+	ISSUE_TEMPLATE/   # Issue forms used to request IssueOps operations
+	workflows/        # Thin GitHub Actions entrypoints
 
 src/
-  actions/          Operation-specific policy helpers
-  scripts/          Validation, approval, execution, and audit entrypoints
-  workflow-support/ Shared parsing, authorization, API, and reconciliation code
+	actions/          # Shared policy and action helpers
+	scripts/          # Workflow runners and summary emitters
+	workflow-support/ # Parsing, validation, reconciliation, retry, and audit code
 
-specs/              Feature specifications, contracts, and quickstarts
+specs/
+	001-add-team-members/  # Team membership workflow spec and contract
+	003-create-org-teams/  # Empty team creation workflow spec and contract
+	004-add-child-teams/   # Team hierarchy workflow spec and contract
+	005-add-team-repo-access/ # Team repository-access workflow spec and contract
+
 tests/
-  contract/         Parser, validation, policy, and audit tests
-  fixtures/         Issue, CSV, registry, and GitHub API fixtures
-  integration/      End-to-end workflow behavior tests with mocked APIs
+	contract/         # Contract and parsing regression tests
+	fixtures/         # Test fixtures and mocked API payloads
+	integration/      # Workflow behavior and execution-path tests
 ```
 
-## Local Validation
+## Current Feature Status
 
-The implementation and test suite use Node's built-in test runner. From the
-repository root, run:
+The `add-team-members` workflow is implemented and validated for:
 
-```shell
-node --test tests/contract/*.test.js tests/integration/*.test.js
-```
+- request intake through GitHub issue forms
+- validation of team existence and requested users
+- org-owner approval by exact `approved` issue comment
+- execution that adds only missing users
+- no-op handling for already-satisfied memberships
+- bounded retry for retryable rate-limit responses
+- auditable summaries and JSON artifact output
 
-Pull requests that change issue forms or workflows also run
-[actionlint](.github/workflows/lint-workflows.yml).
+The `create-org-teams` workflow is implemented and validated for:
 
-## Contributing
+- request intake for creating empty teams only
+- validation of organization visibility, intended-owner membership, and
+	duplicate or conflicting team names
+- intended-owner approval by exact `approved` issue comment
+- execution that creates only missing teams
+- no-op handling for already-existing teams on rerun
+- bounded retry for retryable rate-limit responses
+- auditable summaries and JSON artifact output
 
-Create a branch from the latest `origin/main`, make the change, push the branch
-to this repository, and open a pull request. Do not push directly to `main`.
+The `add-child-teams` workflow is implemented and validated for:
 
-For a new operation:
+- request intake for one existing parent team and one or more existing child
+	teams
+- validation of parent-team existence, child-team existence, designated
+	approver authorization, duplicate child-team input, re-parenting rejection,
+	and cycle rejection
+- designated-approver approval by exact `approved` issue comment
+- execution that attaches only missing child-team links under the requested
+	parent team
+- no-op handling for already-satisfied hierarchy links on rerun
+- bounded retry for retryable rate-limit responses
+- auditable summaries and JSON artifact output
 
-1. Add the issue form and thin workflow entrypoint under [.github](.github/).
-2. Put shared parsing, validation, authorization, reconciliation, and audit
-   behavior under [src](src/).
-3. Add or update the feature documents under [specs](specs/).
-4. Add contract fixtures and integration coverage under [tests](tests/).
-5. Add a sample spreadsheet and update this README and the
-   [runbook](docs/tenant-issueops-runbook.md).
+The `add-team-repo-access` workflow is implemented and validated for:
+
+- request intake for one existing team, one shared permission level, and one or
+	more existing target repositories
+- validation of organization visibility, team existence, designated approver
+	authorization, duplicate or conflicting repository input, archived-repository
+	rejection, and weaker-existing-permission rejection
+- designated-approver approval by exact `approved` issue comment
+- execution that grants only missing eligible repository access
+- no-op handling for exact or stronger already-satisfied repository access on
+	rerun
+- bounded retry for retryable rate-limit responses
+- auditable summaries and JSON artifact output
+
+## Contributing New Operations
+
+When adding a new administration workflow, keep the repository conventions the
+same:
+
+1. Add the issue form and workflow shim under [`.github/`](.github/).
+2. Put reusable implementation logic under [`src/`](src/).
+3. Generate and maintain the feature documents under [`specs/`](specs/).
+4. Add contract and integration coverage under [`tests/`](tests/).
+5. Update the supported operations list in this README.

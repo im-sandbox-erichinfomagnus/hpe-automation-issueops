@@ -1,0 +1,167 @@
+name: cost-center-reallocation-workflow-contract
+version: 1
+purpose: >-
+  Contract for the IssueOps workflow that requests approval for, validates, and
+  reconciles creating enterprise cost centers and adding or removing user
+  resources from them, driven by a pasted CSV, from the central administration
+  repository.
+
+issue_form:
+  path: .github/ISSUE_TEMPLATE/cost-center-reallocation.yml
+  required_fields:
+    - id: enterprise
+      type: input
+      description: Target enterprise slug.
+    - id: intended_approver
+      type: input
+      description: GitHub login of the named intended approver who must approve the request.
+    - id: assignments_csv
+      type: textarea
+      description: CSV with header cost_center,login,action where action is add or remove and defaults to add.
+    - id: business_justification
+      type: textarea
+      description: Reason for the cost center reallocation request.
+    - id: dry_run
+      type: dropdown
+      description: Whether to run validation and planning only or allow mutation after approval. Defaults to true.
+
+parser:
+  action: issue-ops/parser@v5
+  inputs:
+    body: ${{ github.event.issue.body }}
+    issue-form-template: cost-center-reallocation.yml
+  outputs:
+    json: Parsed request payload as JSON string.
+    parsed_enterprise: Normalized enterprise field.
+    parsed_intended_approver: Normalized intended-approver field.
+    parsed_assignments_csv: Raw assignments CSV before downstream normalization.
+    parsed_dry_run: Parsed dry-run selection.
+
+workflow_inputs:
+  validation:
+    - name: enterprise
+      required: true
+    - name: intended_approver
+      required: true
+    - name: assignments_csv
+      required: true
+    - name: requester_login
+      required: true
+    - name: dry_run
+      required: true
+  approval_gate:
+    - name: approver_login
+      required: true
+    - name: intended_approver
+      required: true
+  reconciliation:
+    - name: execution_token_source
+      required: true
+      description: PAT-backed workflow token source with enterprise billing access.
+    - name: audit_artifact_path
+      required: true
+      description: Persisted validation and approval artifact used by the execution runner.
+  workflow_env:
+    - name: ISSUEOPS_GITHUB_TOKEN
+      required: true
+      description: PAT-backed organization secret with enterprise billing or admin access used for cost center state reads, creation, and user-resource changes.
+    - name: GITHUB_TOKEN
+      required: true
+      description: Default GitHub Actions repository token used for standard workflow context operations.
+
+authorization:
+  requester_identity: github.event.issue.user.login
+  allowed_approvers:
+    - single named intended approver recorded on the request
+  execution_identity:
+    model: personal access token supplied to the workflow from ISSUEOPS_GITHUB_TOKEN
+    bootstrap: repository or organization Actions secret injection
+    required_permissions:
+      enterprise_billing: write
+      metadata: read
+      issues: write
+
+validation_rules:
+  - The enterprise slug must be present and well formed.
+  - The assignments CSV header must be cost_center,login,action and at least one row must be well formed.
+  - The action value must be add or remove, defaulting to add when omitted.
+  - Duplicate or conflicting assignment rows must be rejected before reconciliation.
+  - Live cost center existence and membership must be checked only when an enterprise billing token is available, otherwise live state is marked unverified.
+  - Approval must be present as an issue comment containing exactly `approved` and must be granted by the named intended approver.
+  - Organization and repository resource inputs must not be accepted by this workflow.
+
+cost_center_api:
+  base: /enterprises/{enterprise}/settings/billing/cost-centers
+  operations:
+    - name: create_cost_center
+      method: POST
+      path: /enterprises/{enterprise}/settings/billing/cost-centers
+      body:
+        name: Requested cost center name.
+    - name: add_resource
+      method: POST
+      path: /enterprises/{enterprise}/settings/billing/cost-centers/{id}/resource
+      body_keys:
+        - users
+        - organizations
+        - repositories
+    - name: remove_resource
+      method: DELETE
+      path: /enterprises/{enterprise}/settings/billing/cost-centers/{id}/resource
+      body_keys:
+        - users
+        - organizations
+        - repositories
+  scope_note: v1 sends the users key only; organizations and repositories are deferred.
+
+reconciliation:
+  current_state_reads:
+    - enterprise cost center listing when a billing token is available
+    - existing cost-center-by-name lookup for each requested cost center
+    - current user-resource membership lookup per cost center
+  mutation_rule: Create only missing cost centers and add or remove only the required user resources, and only when not a dry run.
+  no_op_rule: Report already-satisfied rows without reapplying them.
+  partial_success_rule: Persist per-row success or failure and surface required follow-up.
+  degraded_rule: When no enterprise billing token is available, run structural CSV checks, mark live state unverified, and produce a dry-run plan only.
+
+rate_limit_handling:
+  inspect_headers:
+    - x-ratelimit-remaining
+    - x-ratelimit-reset
+    - retry-after
+  retry_policy:
+    strategy: bounded exponential backoff
+    retryable_conditions:
+      - transient secondary rate limit
+      - explicit retry-after guidance
+    non_retryable_conditions:
+      - invalid approval
+      - malformed assignment row
+      - unknown action value
+      - missing enterprise slug
+
+observability:
+  outputs:
+    - GitHub step summary
+    - JSON audit artifact
+    - requester-facing workflow summary in the Actions run
+  required_fields:
+    - issue_number
+    - run_id
+    - requester_login
+    - approver_login
+    - enterprise
+    - intended_approver
+    - dry_run
+    - live_state_verified
+    - created_cost_centers
+    - added_resources
+    - removed_resources
+    - noop_rows
+    - failed_rows
+    - rollback_status
+    - reconciliation.cost_centers_to_create
+    - reconciliation.cost_centers_already_present
+  operator_notes:
+    - The enterprise billing token is the known blocker, so the default is dry-run until it is available.
+    - Audit output must clearly distinguish dry-run plans from applied mutations and mark when live cost center state was unverified.
