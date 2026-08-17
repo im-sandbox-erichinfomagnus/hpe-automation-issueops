@@ -1,0 +1,97 @@
+name: Add CICD Admin to Tenant
+description: Request adding one or more org members to the tenant's dedicated CI/CD admin team, authorized by active tenant top-team maintainership.
+title: "[add-cicd-admin-to-tenant] <org>/<tenant>: <summary>"
+labels:
+  - issueops
+  - add-cicd-admin-to-tenant
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this request to validate and, after approval, add one or more organization
+        members to the tenant's dedicated CI/CD admin team. If the team does not exist
+        yet it is created as a child of the tenant root team and every active tenant
+        root-team maintainer is assigned as its Team Maintainer.
+
+  - type: input
+    id: organization
+    attributes:
+      label: Target organization
+      description: GitHub organization that owns the tenant.
+      placeholder: octo-org
+    validations:
+      required: true
+
+  - type: input
+    id: tenant_name
+    attributes:
+      label: Tenant name
+      description: Human-readable tenant name exactly as defined in tenant-registry for the target organization.
+      placeholder: ContosoUK
+    validations:
+      required: true
+
+  - type: dropdown
+    id: cicd_admin_operation
+    attributes:
+      label: CI/CD admin operation
+      description: Membership operation to perform on the tenant CI/CD admin team.
+      options:
+        - add
+      default: 0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: intake_mode
+    attributes:
+      label: Intake mode
+      description: Choose whether to enter usernames directly or upload a CSV in a follow-up issue comment.
+      options:
+        - manual
+        - csv_attachment
+      default: 0
+    validations:
+      required: true
+
+  - type: textarea
+    id: requested_people
+    attributes:
+      label: Requested people
+      description: Manual input path. Enter one GitHub username per line, or use comma-separated values. Leave this blank when intake mode is csv_attachment.
+      placeholder: |
+        octocat
+        hubot
+      render: text
+    validations:
+      required: false
+
+  - type: input
+    id: designated_approver
+    attributes:
+      label: Designated approver
+      description: GitHub login for the authorized approver who will post the approval comment (must be an active organization owner).
+      placeholder: org-owner-user
+    validations:
+      required: true
+
+  - type: dropdown
+    id: dry_run
+    attributes:
+      label: Dry-run mode
+      description: Dry-run validates tenant context and planned mutation without changing any team or membership.
+      options:
+        - "true"
+        - "false"
+      default: 1
+    validations:
+      required: true
+
+  - type: textarea
+    id: business_justification
+    attributes:
+      label: Business justification
+      description: Explain why this CI/CD admin membership is needed.
+      placeholder: These engineers manage the tenant runner fleet and CI variables.
+    validations:
+      required: true
