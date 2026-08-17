@@ -1,0 +1,17 @@
+{
+  "tenantId": "cicd26",
+  "tenantName": "Cicd26",
+  "tenantType": "application",
+  "organization": "im-sandbox-erichinfomagnus",
+  "topology": {
+    "organization": { "orgName": "im-sandbox-erichinfomagnus" },
+    "teams": {
+      "tenantRootTeam": "cicd26-root",
+      "structure": [
+        { "team": "cicd26-root", "parent": null, "type": "root" },
+        { "team": "cicd26-admin", "parent": "cicd26-root", "type": "admin" },
+        { "team": "cicd26-repo-admin", "parent": "cicd26-root", "type": "repo-admin" }
+      ]
+    }
+  }
+}
