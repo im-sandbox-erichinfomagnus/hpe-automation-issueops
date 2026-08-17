@@ -167,7 +167,7 @@ function buildTenantRegistryRecord(input = {}) {
     cicd_capability_status: cicdExtension.cicd_capability_status,
     cicd_capability_reason_code: cicdExtension.cicd_capability_reason_code,
     cicd_capability_evidence_ref: cicdExtension.cicd_capability_evidence_ref,
-    bootstrap_tenant_admin_login: request.requester_login,
+    bootstrap_tenant_admin_login: request.tenant_admin_login || null,
     requester_login: request.requester_login,
     approver_login: input.approver_login || '',
     lifecycle_status: input.lifecycle_status || 'active',

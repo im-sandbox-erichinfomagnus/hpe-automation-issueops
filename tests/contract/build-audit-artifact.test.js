@@ -87,6 +87,37 @@ test('buildAuditArtifact preserves tenant repo visibility intent and actual visi
   assert.equal(artifact.reconciliation.visibility_conflict, false);
 });
 
+test('buildAuditArtifact preserves tenant admin login for tenant creation execution', () => {
+  const artifact = buildAuditArtifact({
+    request: {
+      request_id: 'octo-org/issueops#10/123.1',
+      issue_number: 10,
+      repository: 'octo-org/issueops',
+      requester_login: 'requester-user',
+      organization: 'octo-org',
+      tenant_display_name: 'Tenant A',
+      tenant_key: 'tenant-a',
+      tenant_type: 'platform',
+      tenant_admin_login: 'tenant-admin-user',
+      tenant_team_slug: 'tenant-a-root',
+      repo_admin_team_slug: 'tenant-a-repo-admin',
+      requested_teams: [
+        { requested_name: 'tenant-a-root', normalized_slug: 'tenant-a-root' },
+      ],
+      requested_child_links: [],
+      request_status: 'awaiting_approval',
+      dry_run: false,
+    },
+    runContext: {
+      operation: 'tenant_creation',
+      run_id: '123',
+      run_attempt: '1',
+    },
+  });
+
+  assert.equal(artifact.request.tenant_admin_login, 'tenant-admin-user');
+});
+
 test('determineOperation infers team_repo_access_removal from removal payload when metadata operation is absent', () => {
   const operation = determineOperation({
     organization: 'octo-org',

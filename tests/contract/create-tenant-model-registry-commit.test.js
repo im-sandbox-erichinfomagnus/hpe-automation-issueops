@@ -59,6 +59,7 @@ test('T030: buildTenantRegistryRecord includes CICD admin team fields', () => {
       repo_admin_team_slug: 'acme-repo-admin',
       cicd_admin_team_name: 'acme-cicd-admin',
       cicd_admin_team_slug: 'acme-cicd-admin',
+      tenant_admin_login: 'tenant-admin-user',
       organization: 'octo-org',
       requester_login: 'requester-user',
       topology: {
@@ -84,7 +85,24 @@ test('T030: buildTenantRegistryRecord includes CICD admin team fields', () => {
   assert.equal(record.cicd_admin_team_name, 'acme-cicd-admin');
   assert.equal(record.cicd_admin_team_slug, 'acme-cicd-admin');
   assert.equal(record.cicd_capability_status, 'applied');
+  assert.equal(record.bootstrap_tenant_admin_login, 'tenant-admin-user');
   assert.ok(record.cicd_topology_relation);
+});
+
+test('buildTenantRegistryRecord keeps bootstrap admin empty when tenant admin is missing', () => {
+  const record = buildTenantRegistryRecord({
+    request: {
+      tenant_key: 'acme',
+      tenant_display_name: 'Acme Platform',
+      tenant_type: 'application',
+      tenant_team_slug: 'acme-root',
+      repo_admin_team_slug: 'acme-repo-admin',
+      organization: 'octo-org',
+      requester_login: 'requester-user',
+    },
+  });
+
+  assert.equal(record.bootstrap_tenant_admin_login, null);
 });
 
 test('T030A: buildTenantRegistryRecord persists CICD topology parent-child relation', () => {

@@ -56,6 +56,30 @@ test('create tenant CSV overrides manual fields and captures the designated tena
   assert.equal(request.external_mappings.cost_center, 'CC-100');
 });
 
+test('create tenant CSV parser ignores preface lines before header and preserves tenant admin', () => {
+  const request = parseTenantCreationRequest({
+    ...context,
+    parsedRequest: {
+      organization: 'octo-org',
+      tenant_name: 'Manual Tenant',
+      tenant_admin_login: 'manual-admin',
+      tenant_csv: [
+        'Example input:',
+        'tenant_name,tenant_admin_login,tenant_type,cmdb_id,cost_center,business_unit,environment,primary_contact,secondary_contact,code_scanning_enabled,secret_scanning_enabled,dependabot_enabled',
+        'tenant-a,tenant-admin-user,platform,CMDB-1001,CC-1001,platform,nonprod,owner@example.com,,true,true,true',
+      ].join('\n'),
+      designated_approver: 'org-owner',
+      dry_run: 'true',
+    },
+  });
+
+  assert.equal(request.intake_mode, 'csv');
+  assert.equal(request.csv_row_count, 1);
+  assert.deepEqual(request.csv_input_errors, []);
+  assert.equal(request.tenant_display_name, 'tenant-a');
+  assert.equal(request.tenant_admin_login, 'tenant-admin-user');
+});
+
 test('runner lifecycle parsers accept spreadsheet input', () => {
   const common = {
     ...context,

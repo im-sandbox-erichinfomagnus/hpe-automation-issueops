@@ -48,10 +48,13 @@ const { validateHostedRunnerDeletionRequest } = require('../workflow-support/val
 const { validateHostedRunnerMoveRequest } = require('../workflow-support/validate-hosted-runner-move-request');
 const { validateRunnerGroupRequest } = require('../workflow-support/validate-runner-group-request');
 const { validateTenantVariablesRequest } = require('../workflow-support/validate-tenant-variables-request');
+const { validateCicdAdminMembershipRequest } = require('../workflow-support/validate-cicd-admin-membership-request');
+const { persistCicdAdminTeamTopology, reconcileCicdAdminMembership } = require('../workflow-support/reconcile-cicd-admin-membership');
 const { createGitHubOrgVariablesApi } = require('../workflow-support/github-org-variables-api');
 const { validateRepositoryRulesetRequest } = require('../workflow-support/validate-repository-ruleset-request');
 const { createGitHubRepoRulesetsApi } = require('../workflow-support/github-repo-rulesets-api');
 const { assertRunnerGroupCreationAllowed: assertTenantVariablesMutationAllowed } = require('../actions/runner-group-policy');
+const { assertRunnerGroupCreationAllowed: assertCicdAdminMembershipMutationAllowed } = require('../actions/runner-group-policy');
 const { assertRunnerGroupCreationAllowed: assertRepositoryRulesetMutationAllowed } = require('../actions/runner-group-policy');
 const { emitAuditSummary } = require('./emit-audit-summary');
 
@@ -68,6 +71,7 @@ function terminalStateLabelPrefix(operation) {
     hosted_runner_move: 'issueops:move-tenant-hosted-runner:',
     runner_group_creation: 'issueops:create-tenant-runner-groups:',
     tenant_variable_management: 'issueops:manage-tenant-variables:',
+    cicd_admin_membership: 'issueops:add-cicd-admin-to-tenant:',
     repository_ruleset_creation: 'issueops:create-repository-ruleset:',
     repository_ruleset_deletion: 'issueops:delete-repository-ruleset:',
   };
@@ -107,6 +111,41 @@ function writeGitHubOutput(key, value, outputPath = process.env.GITHUB_OUTPUT) {
   }
 
   fs.appendFileSync(outputPath, `${key}=${value}\n`, 'utf8');
+}
+
+function normalizeRequesterMaintainerPolicy(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized || normalized === 'keep' || normalized === 'keep_maintainer') {
+    return 'keep_maintainer';
+  }
+  if (['member', 'downgrade_to_member', 'downgrade'].includes(normalized)) {
+    return 'downgrade_to_member';
+  }
+  if (['remove', 'remove_membership', 'remove_requester'].includes(normalized)) {
+    return 'remove';
+  }
+  return 'keep_maintainer';
+}
+
+function summarizeMaintainerNormalizationActions(actions = [], policy = 'keep_maintainer') {
+  const requesterActions = actions.filter((entry) => String(entry.action || '').startsWith('normalize_requester'));
+  const mutated = requesterActions.filter((entry) => ['added', 'mutated', 'removed'].includes(entry.execution_result)).length;
+  const failed = requesterActions.filter((entry) => entry.execution_result === 'failed').length;
+  const noop = requesterActions.filter((entry) => entry.execution_result === 'noop').length;
+
+  if (policy === 'keep_maintainer') {
+    return 'Requester maintainership retained by policy (keep_maintainer).';
+  }
+
+  if (requesterActions.length === 0) {
+    return `No requester maintainership normalization was required (policy=${policy}).`;
+  }
+
+  if (failed > 0) {
+    return `Requester maintainership normalization attempted with policy ${policy}: changed=${mutated}, noop=${noop}, failed=${failed}.`;
+  }
+
+  return `Requester maintainership normalization applied with policy ${policy}: changed=${mutated}, noop=${noop}, failed=0.`;
 }
 
 function buildValidatedPeople(auditArtifact = {}) {
@@ -727,6 +766,408 @@ async function executeTenantVariableManagement(context = {}) {
   return updatedArtifact;
 }
 
+async function executeCicdAdminMembership(context = {}) {
+  const auditArtifact = context.auditArtifact;
+  const artifactPath = context.artifactPath;
+  const env = context.env || process.env;
+  const mutationDecision = context.mutationDecision;
+  const options = context.options || {};
+  const operation = context.operation || 'cicd_admin_membership';
+  const shouldSetExitCode = context.shouldSetExitCode === true;
+
+  const teamApi = options.teamApi || createGitHubTeamApi({ token: mutationDecision.tokenInfo.token });
+
+  // Re-validate against live state so a requester who lost tenant root-team
+  // maintainership (or a context change) fails closed before any mutation.
+  const revalidation = await validateCicdAdminMembershipRequest(auditArtifact.request, {
+    getOrganization: ({ organization }) => teamApi.getOrganization({ organization }),
+    getTeamBySlug: ({ organization, teamSlug }) => teamApi.getTeamBySlug({ organization, teamSlug }),
+    getMembershipForUser: ({ organization, teamSlug, username }) =>
+      teamApi.getMembershipForUser({ organization, teamSlug, username }),
+    getOrganizationMembership: ({ organization, username }) =>
+      teamApi.getOrganizationMembership({ organization, username }),
+    registryRef: env.TENANT_REGISTRY_REF || 'main',
+    registryDirectory: env.TENANT_REGISTRY_DIR || 'tenant-registry',
+  });
+
+  auditArtifact.validation = {
+    ...auditArtifact.validation,
+    ...revalidation,
+  };
+
+  const boundaryStatus = revalidation.is_valid ? 'matched' : 'mismatched';
+  const executionResults = [];
+  let reconciliationPlan = {
+    boundary_revalidation_status: boundaryStatus,
+    dry_run: false,
+    state: 'failed',
+  };
+
+  if (!revalidation.is_valid) {
+    executionResults.push({
+      team_slug: auditArtifact.request.cicd_admin_team_slug || null,
+      result_kind: 'boundary_revalidation',
+      execution_result: 'failed',
+      failure_reason: 'boundary_revalidation_failed',
+    });
+  } else {
+    const liveRequest = revalidation.request;
+    const organization = liveRequest.organization;
+    const cicdTeamSlug = liveRequest.cicd_admin_team_slug;
+    const rootTeamSlug = liveRequest.tenant_team_slug;
+    const rootTeamId = revalidation.root_team_id;
+    const cicdTeamExists = revalidation.cicd_admin_team_exists;
+
+    // Active maintainers of the tenant root team are the Tenant Admins that
+    // must become Team Maintainers of a newly created CI/CD admin team.
+    const rootTeamMaintainers = [];
+    if (!cicdTeamExists) {
+      const rootMembers = await teamApi.listTeamMembers({ organization, teamSlug: rootTeamSlug });
+      for (const member of rootMembers) {
+        const membership = await teamApi.getMembershipForUser({
+          organization,
+          teamSlug: rootTeamSlug,
+          username: member.username,
+        });
+        const state = membership && membership.state ? String(membership.state).toLowerCase() : 'absent';
+        const role = membership && membership.membership && membership.membership.role
+          ? String(membership.membership.role).toLowerCase()
+          : '';
+        if (state === 'active' && role === 'maintainer') {
+          rootTeamMaintainers.push(member.username);
+        }
+      }
+    }
+
+    const currentMembers = cicdTeamExists
+      ? await teamApi.listTeamMembers({ organization, teamSlug: cicdTeamSlug })
+      : [];
+
+    reconciliationPlan = reconcileCicdAdminMembership({
+      request: liveRequest,
+      validatedPeople: revalidation.requested_people,
+      cicd_admin_team_exists: cicdTeamExists,
+      currentMembers,
+      rootTeamMaintainers,
+      cicd_admin_team_slug: cicdTeamSlug,
+      tenant_root_team_slug: rootTeamSlug,
+      tenant_root_team_id: rootTeamId,
+      dry_run: false,
+    });
+    reconciliationPlan.boundary_revalidation_status = boundaryStatus;
+
+    let teamCreated = false;
+    if (reconciliationPlan.team_action === 'create_team') {
+      const createAttempt = await executeWithBoundedRetry(
+        () => teamApi.createTeam({ organization, name: cicdTeamSlug }),
+        { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+      );
+
+      if (createAttempt.ok) {
+        teamCreated = true;
+        const createdTeam = createAttempt.value || {};
+        executionResults.push({
+          team_slug: cicdTeamSlug,
+          result_kind: 'cicd_admin_team_creation',
+          execution_result: 'created',
+          created_team_id: createdTeam.id || null,
+          failure_reason: null,
+        });
+
+        if (rootTeamId) {
+          const parentAttempt = await executeWithBoundedRetry(
+            () => teamApi.updateTeamParent({
+              organization,
+              teamSlug: createdTeam.slug || cicdTeamSlug,
+              parentTeamId: rootTeamId,
+            }),
+            { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+          );
+          executionResults.push({
+            team_slug: cicdTeamSlug,
+            result_kind: 'cicd_admin_team_parent_link',
+            execution_result: parentAttempt.ok ? 'linked' : 'failed',
+            failure_reason: parentAttempt.ok ? null : classifyFailureReason(parentAttempt.error),
+          });
+        } else {
+          executionResults.push({
+            team_slug: cicdTeamSlug,
+            result_kind: 'cicd_admin_team_parent_link',
+            execution_result: 'failed',
+            failure_reason: 'root_team_id_unresolved',
+          });
+        }
+
+        for (const maintainer of reconciliationPlan.maintainers_to_assign) {
+          const maintainerAttempt = await executeWithBoundedRetry(
+            () => teamApi.addOrUpdateTeamMembership({
+              organization,
+              teamSlug: cicdTeamSlug,
+              username: maintainer,
+              role: 'maintainer',
+            }),
+            { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+          );
+          executionResults.push({
+            username: maintainer,
+            result_kind: 'cicd_admin_maintainer_assignment',
+            execution_result: maintainerAttempt.ok ? 'added' : 'failed',
+            failure_reason: maintainerAttempt.ok ? null : classifyFailureReason(maintainerAttempt.error),
+          });
+        }
+      } else {
+        executionResults.push({
+          team_slug: cicdTeamSlug,
+          result_kind: 'cicd_admin_team_creation',
+          execution_result: 'failed',
+          failure_reason: classifyFailureReason(createAttempt.error),
+        });
+      }
+    } else {
+      executionResults.push({
+        team_slug: cicdTeamSlug,
+        result_kind: 'cicd_admin_team_creation',
+        execution_result: 'noop',
+        failure_reason: null,
+      });
+    }
+
+    const teamAvailable = cicdTeamExists || teamCreated;
+    for (const person of reconciliationPlan.people_to_add) {
+      if (!teamAvailable) {
+        executionResults.push({
+          username: person.username,
+          source_row_number: person.source_row_number || null,
+          source_comment_id: person.source_comment_id || null,
+          result_kind: 'cicd_admin_member_addition',
+          execution_result: 'failed',
+          failure_reason: 'cicd_admin_team_unavailable',
+        });
+        continue;
+      }
+
+      const attemptResult = await executeWithBoundedRetry(
+        () => teamApi.addOrUpdateTeamMembership({
+          organization,
+          teamSlug: cicdTeamSlug,
+          username: person.username,
+        }),
+        { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+      );
+
+      if (attemptResult.ok) {
+        executionResults.push({
+          username: person.username,
+          source_row_number: person.source_row_number || null,
+          source_comment_id: person.source_comment_id || null,
+          result_kind: 'cicd_admin_member_addition',
+          execution_result: attemptResult.value.state === 'pending' ? 'pending' : 'added',
+          failure_reason: null,
+        });
+        continue;
+      }
+
+      executionResults.push({
+        username: person.username,
+        source_row_number: person.source_row_number || null,
+        source_comment_id: person.source_comment_id || null,
+        result_kind: 'cicd_admin_member_addition',
+        execution_result: 'failed',
+        failure_reason: classifyFailureReason(attemptResult.error),
+      });
+    }
+
+    for (const person of reconciliationPlan.people_already_present) {
+      executionResults.push({
+        username: person.username,
+        source_row_number: person.source_row_number || null,
+        source_comment_id: person.source_comment_id || null,
+        result_kind: 'cicd_admin_member_addition',
+        execution_result: 'noop',
+        failure_reason: null,
+      });
+    }
+
+    for (const person of reconciliationPlan.people_rejected) {
+      executionResults.push({
+        username: person.username,
+        source_row_number: person.source_row_number || null,
+        source_comment_id: person.source_comment_id || null,
+        result_kind: 'cicd_admin_member_addition',
+        execution_result: 'failed',
+        failure_reason: person.failure_reason || 'person_rejected',
+      });
+    }
+
+    if (teamCreated) {
+      const topologyResult = persistCicdAdminTeamTopology({
+        tenantKey: liveRequest.tenant_key,
+        teamSlug: cicdTeamSlug,
+        parentTeamSlug: rootTeamSlug,
+        registryDirectory: env.TENANT_REGISTRY_DIR || 'tenant-registry',
+      });
+      reconciliationPlan.topology_persistence_result = topologyResult;
+
+      if (topologyResult.status === 'appended') {
+        const shouldCommitTopology =
+          options.commitRegistryTopology === true ||
+          (options.commitRegistryTopology !== false && String(env.GITHUB_ACTIONS || '').toLowerCase() === 'true');
+
+        if (shouldCommitTopology) {
+          const commitResult = commitRegistryRecord({
+            registryFilePath: topologyResult.registry_path,
+            tenantKey: liveRequest.tenant_key,
+            issueNumber: liveRequest.issue_number,
+            repoRoot: process.cwd(),
+          }, {
+            env,
+          });
+          reconciliationPlan.registry_commit_result = commitResult;
+          if (commitResult.status === 'failed') {
+            console.warn(`[warn] Registry topology commit failed: ${commitResult.message}`);
+          }
+        }
+      } else if (topologyResult.status === 'failed') {
+        executionResults.push({
+          team_slug: cicdTeamSlug,
+          result_kind: 'registry_topology',
+          execution_result: 'failed',
+          failure_reason: topologyResult.failure_reason || 'registry_topology_update_failed',
+        });
+      }
+    }
+  }
+
+  const executionOutcome = buildExecutionOutcome({
+    executionResults,
+    operationLabel: 'cicd_admin_membership',
+    runContext: {
+      run_id: env.GITHUB_RUN_ID,
+      run_attempt: env.GITHUB_RUN_ATTEMPT,
+    },
+    intake_mode: auditArtifact.request && auditArtifact.request.intake_mode,
+    approved_context_marker: auditArtifact.approval && auditArtifact.approval.approved_context_marker || null,
+    latest_context_marker: auditArtifact.approval && auditArtifact.approval.latest_context_marker || null,
+    execution_context_marker: auditArtifact.request && auditArtifact.request.context_marker || null,
+    audit_persistence_result: 'pending',
+    mutation_token_source: mutationDecision.tokenInfo && mutationDecision.tokenInfo.source || null,
+    mutation_token_kind: mutationDecision.tokenInfo && mutationDecision.tokenInfo.token_kind || null,
+    mutation_token_is_pat_backed: Boolean(mutationDecision.tokenInfo && mutationDecision.tokenInfo.is_pat_backed),
+    artifact_path: artifactPath,
+  });
+
+  const requestStatus = deriveApprovedExecutionTerminalState(executionOutcome, {
+    operation,
+    intakeMode: auditArtifact.request && auditArtifact.request.intake_mode,
+    approvalStatus: auditArtifact.approval && auditArtifact.approval.approval_status,
+  });
+  const isExecutedNoMutationOutcome =
+    requestStatus === 'executed' &&
+    executionOutcome.mutation_count === 0 &&
+    executionOutcome.pending_count === 0 &&
+    executionOutcome.failure_count === 0;
+  const summaryPrefix = isExecutedNoMutationOutcome
+    ? 'Request is already satisfied. Additional approval comments do not trigger a new CI/CD admin membership run.'
+    : requestStatus === 'executed'
+      ? 'Approved CI/CD admin membership execution completed.'
+      : requestStatus === 'partially_executed'
+        ? 'Approved CI/CD admin membership execution completed with partial failure.'
+        : 'Approved CI/CD admin membership execution failed.';
+
+  auditArtifact.request.request_status = requestStatus;
+  auditArtifact.reconciliation = {
+    ...(auditArtifact.reconciliation || {}),
+    ...reconciliationPlan,
+    dry_run: false,
+  };
+  auditArtifact.execution = {
+    ...executionOutcome,
+    summary: `${summaryPrefix} ${executionOutcome.summary}`,
+  };
+
+  const updatedArtifact = buildAuditArtifact({
+    request: auditArtifact.request,
+    validation: auditArtifact.validation,
+    assignment: auditArtifact.assignment,
+    approval: auditArtifact.approval,
+    reconciliationPlan: auditArtifact.reconciliation,
+    executionOutcome: auditArtifact.execution,
+    runContext: {
+      run_id: env.GITHUB_RUN_ID || auditArtifact.metadata && auditArtifact.metadata.run_id,
+      run_attempt: env.GITHUB_RUN_ATTEMPT || auditArtifact.metadata && auditArtifact.metadata.run_attempt,
+      operation,
+      artifact_name: path.basename(artifactPath),
+      artifact_retention_days: env.AUDIT_ARTIFACT_RETENTION_DAYS || '',
+    },
+  });
+
+  let auditPersistenceResult = 'persisted';
+  try {
+    fs.writeFileSync(artifactPath, toAuditArtifactJson({
+      request: updatedArtifact.request,
+      validation: updatedArtifact.validation,
+      assignment: updatedArtifact.assignment,
+      approval: updatedArtifact.approval,
+      reconciliationPlan: updatedArtifact.reconciliation,
+      executionOutcome: updatedArtifact.execution,
+      runContext: updatedArtifact.metadata,
+    }), 'utf8');
+  } catch (error) {
+    auditPersistenceResult = 'failed';
+    updatedArtifact.execution.failure_count = (updatedArtifact.execution.failure_count || 0) + 1;
+    updatedArtifact.execution.rollback_status = 'manual_remediation_required';
+    updatedArtifact.request.request_status = updatedArtifact.request.request_status === 'executed'
+      ? 'partially_executed'
+      : 'failed';
+    updatedArtifact.execution.summary = `${updatedArtifact.execution.summary} Audit artifact persistence failed: ${error.message}.`;
+  }
+  updatedArtifact.execution.audit_persistence_result = auditPersistenceResult;
+
+  if (
+    updatedArtifact.request &&
+    updatedArtifact.request.issue_number != null &&
+    typeof teamApi.addIssueLabels === 'function'
+  ) {
+    const labelPrefix = terminalStateLabelPrefix(operation);
+    const targetLabel = `${labelPrefix}${updatedArtifact.request.request_status}`;
+    try {
+      if (typeof teamApi.listIssueLabels === 'function' && typeof teamApi.removeIssueLabel === 'function') {
+        const existingLabels = await teamApi.listIssueLabels({
+          repository: updatedArtifact.request.repository,
+          issueNumber: updatedArtifact.request.issue_number,
+        });
+        const managedTerminalLabels = new Set(buildTerminalStateLabels(buildTerminalLabelPrefixes(operation)));
+        const staleTerminalLabels = existingLabels
+          .filter((label) => managedTerminalLabels.has(label) && label !== targetLabel);
+        for (const staleLabel of staleTerminalLabels) {
+          await teamApi.removeIssueLabel({
+            repository: updatedArtifact.request.repository,
+            issueNumber: updatedArtifact.request.issue_number,
+            label: staleLabel,
+          });
+        }
+      }
+      await teamApi.addIssueLabels({
+        repository: updatedArtifact.request.repository,
+        issueNumber: updatedArtifact.request.issue_number,
+        labels: [targetLabel],
+      });
+    } catch (labelError) {
+      console.warn(`[warn] Failed to add terminal state label: ${labelError.message}`);
+    }
+  }
+
+  writeGitHubOutput('execution-status', updatedArtifact.request.request_status, env.GITHUB_OUTPUT);
+  writeGitHubOutput('audit-artifact-path', artifactPath, env.GITHUB_OUTPUT);
+  emitAuditSummary(updatedArtifact, { summaryPath: env.GITHUB_STEP_SUMMARY, overwrite: true });
+
+  if (shouldSetExitCode && updatedArtifact.request.request_status !== 'executed') {
+    process.exitCode = 1;
+  }
+
+  return updatedArtifact;
+}
+
 async function executeRepositoryRulesetManagement(context = {}) {
   const auditArtifact = context.auditArtifact;
   const artifactPath = context.artifactPath;
@@ -1170,6 +1611,7 @@ async function runApprovedExecution(options = {}) {
   const isHostedRunnerMove = auditArtifact.metadata && auditArtifact.metadata.operation === 'hosted_runner_move';
   const isRunnerGroupCreation = auditArtifact.metadata && auditArtifact.metadata.operation === 'runner_group_creation';
   const isTenantVariableManagement = auditArtifact.metadata && auditArtifact.metadata.operation === 'tenant_variable_management';
+  const isCicdAdminMembership = auditArtifact.metadata && auditArtifact.metadata.operation === 'cicd_admin_membership';
   const isRepositoryRulesetCreation = auditArtifact.metadata && auditArtifact.metadata.operation === 'repository_ruleset_creation';
   const isRepositoryRulesetDeletion = auditArtifact.metadata && auditArtifact.metadata.operation === 'repository_ruleset_deletion';
   const isRepositoryRulesetOperation = isRepositoryRulesetCreation || isRepositoryRulesetDeletion;
@@ -1283,6 +1725,16 @@ async function runApprovedExecution(options = {}) {
             dry_run: auditArtifact.request.dry_run,
             tokenInfo: options.tokenInfo,
           })
+      : isCicdAdminMembership
+        ? assertCicdAdminMembershipMutationAllowed({
+            approval_status: auditArtifact.approval.approval_status,
+            approver_login: auditArtifact.approval.approver_login,
+            designated_approver_login: auditArtifact.request.designated_approver_login,
+            approver_role: auditArtifact.approval.approver_role,
+            approver_authorization_state: auditArtifact.approval.approver_authorization_state,
+            dry_run: auditArtifact.request.dry_run,
+            tokenInfo: options.tokenInfo,
+          })
       : isRepositoryRulesetOperation
         ? assertRepositoryRulesetMutationAllowed({
             approval_status: auditArtifact.approval.approval_status,
@@ -1319,7 +1771,7 @@ async function runApprovedExecution(options = {}) {
     });
     auditArtifact.execution.failure_count = 1;
     auditArtifact.execution.rollback_status = 'manual_follow_up_required';
-    auditArtifact.execution.summary = `${error.message}. No ${isTenantCreation ? 'tenant bootstrap mutation' : isTeamCreation ? 'team creation' : isTeamHierarchy ? 'child-team mutation' : isTenantRepoCreation ? 'tenant repository mutation' : isHostedRunnerCreation ? 'tenant hosted-runner mutation' : isHostedRunnerMove ? 'tenant hosted-runner move' : isHostedRunnerDeletion ? 'tenant hosted-runner deletion' : isRunnerGroupCreation ? 'tenant runner-group mutation' : isTenantVariableManagement ? 'tenant variable mutation' : isRepositoryRulesetOperation ? 'repository ruleset mutation' : (isTeamRepoAccess || isTeamRepoAccessRemoval) ? 'repository-access mutation' : 'membership mutation'} was attempted.`;
+    auditArtifact.execution.summary = `${error.message}. No ${isTenantCreation ? 'tenant bootstrap mutation' : isTeamCreation ? 'team creation' : isTeamHierarchy ? 'child-team mutation' : isTenantRepoCreation ? 'tenant repository mutation' : isHostedRunnerCreation ? 'tenant hosted-runner mutation' : isHostedRunnerMove ? 'tenant hosted-runner move' : isHostedRunnerDeletion ? 'tenant hosted-runner deletion' : isRunnerGroupCreation ? 'tenant runner-group mutation' : isTenantVariableManagement ? 'tenant variable mutation' : isCicdAdminMembership ? 'CI/CD admin team or membership mutation' : isRepositoryRulesetOperation ? 'repository ruleset mutation' : (isTeamRepoAccess || isTeamRepoAccessRemoval) ? 'repository-access mutation' : 'membership mutation'} was attempted.`;
     fs.writeFileSync(artifactPath, toAuditArtifactJson({
       request: auditArtifact.request,
       validation: auditArtifact.validation,
@@ -1338,7 +1790,7 @@ async function runApprovedExecution(options = {}) {
   }
 
   if (!mutationDecision.allowed) {
-    auditArtifact.execution.summary = `Approved execution remains blocked because the request is dry-run only. No ${isTenantCreation ? 'tenant bootstrap mutation' : isTeamCreation ? 'team creation' : isTeamHierarchy ? 'child-team mutation' : isTenantRepoCreation ? 'tenant repository mutation' : isHostedRunnerCreation ? 'tenant hosted-runner mutation' : isHostedRunnerMove ? 'tenant hosted-runner move' : isHostedRunnerDeletion ? 'tenant hosted-runner deletion' : isRunnerGroupCreation ? 'tenant runner-group mutation' : isTenantVariableManagement ? 'tenant variable mutation' : isRepositoryRulesetOperation ? 'repository ruleset mutation' : (isTeamRepoAccess || isTeamRepoAccessRemoval) ? 'repository-access mutation' : 'membership mutation'} was attempted.`;
+    auditArtifact.execution.summary = `Approved execution remains blocked because the request is dry-run only. No ${isTenantCreation ? 'tenant bootstrap mutation' : isTeamCreation ? 'team creation' : isTeamHierarchy ? 'child-team mutation' : isTenantRepoCreation ? 'tenant repository mutation' : isHostedRunnerCreation ? 'tenant hosted-runner mutation' : isHostedRunnerMove ? 'tenant hosted-runner move' : isHostedRunnerDeletion ? 'tenant hosted-runner deletion' : isRunnerGroupCreation ? 'tenant runner-group mutation' : isTenantVariableManagement ? 'tenant variable mutation' : isCicdAdminMembership ? 'CI/CD admin team or membership mutation' : isRepositoryRulesetOperation ? 'repository ruleset mutation' : (isTeamRepoAccess || isTeamRepoAccessRemoval) ? 'repository-access mutation' : 'membership mutation'} was attempted.`;
     auditArtifact.execution.rollback_status = auditArtifact.execution.rollback_status || 'not_needed';
     writeGitHubOutput('execution-status', mutationDecision.reason, env.GITHUB_OUTPUT);
     emitAuditSummary(auditArtifact, { summaryPath: env.GITHUB_STEP_SUMMARY, overwrite: true });
@@ -1384,6 +1836,18 @@ async function runApprovedExecution(options = {}) {
 
   if (isTenantVariableManagement) {
     return await executeTenantVariableManagement({
+      auditArtifact,
+      artifactPath,
+      env,
+      mutationDecision,
+      options,
+      operation,
+      shouldSetExitCode,
+    });
+  }
+
+  if (isCicdAdminMembership) {
+    return await executeCicdAdminMembership({
       auditArtifact,
       artifactPath,
       env,
@@ -1609,13 +2073,31 @@ async function runApprovedExecution(options = {}) {
     typeof api.getMembershipForUser === 'function' &&
     auditArtifact.request &&
     auditArtifact.request.tenant_team_slug &&
-    (auditArtifact.request.tenant_admin_login || auditArtifact.request.requester_login)
+    auditArtifact.request.tenant_admin_login
   ) {
-    tenantAdminMembership = await api.getMembershipForUser({
-      organization: auditArtifact.request.organization,
-      teamSlug: auditArtifact.request.tenant_team_slug,
-      username: auditArtifact.request.tenant_admin_login || auditArtifact.request.requester_login,
-    });
+    try {
+      tenantAdminMembership = await api.getMembershipForUser({
+        organization: auditArtifact.request.organization,
+        teamSlug: auditArtifact.request.tenant_team_slug,
+        username: auditArtifact.request.tenant_admin_login,
+      });
+    } catch (error) {
+      return failPreMutationExecution({
+        auditArtifact,
+        artifactPath,
+        env,
+        error,
+        operationLabel: 'tenant_bootstrap',
+        rateLimitSnapshot:
+          tenantValidationRateLimitSnapshot ||
+          auditArtifact.reconciliation && auditArtifact.reconciliation.rate_limit_snapshot,
+        rateLimitOperation: 'tenant_admin_membership_read',
+        maxRetries: options.maxRetries || 2,
+        shouldSetExitCode,
+        failureMessage: ({ failureReason }) =>
+          `Execution stopped before tenant bootstrap mutation because tenant admin membership could not be read safely (${failureReason}). No tenant bootstrap mutation was attempted.`,
+      });
+    }
   }
   let latestRateLimitSnapshot = tenantValidationRateLimitSnapshot || auditArtifact.reconciliation && auditArtifact.reconciliation.rate_limit_snapshot || null;
   let currentMembers = [];
@@ -2388,44 +2870,74 @@ async function runApprovedExecution(options = {}) {
         });
       }
     } else if (isTenantCreation || isTeamCreation) {
-      for (const team of reconciliationPlan.teams_to_create) {
-        const attemptResult = await executeWithBoundedRetry(
-          () => api.createTeam({
-            organization: auditArtifact.request.organization,
-            name: team.requested_name,
-          }),
-          {
-            maxRetries: options.maxRetries || 2,
-            sleep: options.sleep,
+      let tenantBootstrapPreflightError = null;
+      if (isTenantCreation) {
+        const tenantAdminLogin = auditArtifact.request && auditArtifact.request.tenant_admin_login
+          ? String(auditArtifact.request.tenant_admin_login).trim().toLowerCase()
+          : '';
+        const requesterLogin = auditArtifact.request && auditArtifact.request.requester_login
+          ? String(auditArtifact.request.requester_login).trim().toLowerCase()
+          : '';
+        const requesterMaintainerPolicy = normalizeRequesterMaintainerPolicy(env.TENANT_BOOTSTRAP_REQUESTER_POLICY);
+
+        if (!tenantAdminLogin) {
+          tenantBootstrapPreflightError = 'Tenant bootstrap policy blocked because tenant_admin_login is missing before team creation; requester fallback is disabled.';
+        } else if (
+          requesterMaintainerPolicy === 'remove' &&
+          requesterLogin &&
+          requesterLogin !== tenantAdminLogin &&
+          typeof api.removeTeamMembership !== 'function'
+        ) {
+          tenantBootstrapPreflightError = 'Tenant bootstrap policy blocked because strict requester removal is required but removeTeamMembership is unavailable before team creation.';
+        }
+      }
+
+      if (tenantBootstrapPreflightError) {
+        executionResults.push({
+          execution_result: 'failed',
+          failure_reason: 'tenant_policy_blocked',
+          detail: tenantBootstrapPreflightError,
+        });
+      } else {
+        for (const team of reconciliationPlan.teams_to_create) {
+          const attemptResult = await executeWithBoundedRetry(
+            () => api.createTeam({
+              organization: auditArtifact.request.organization,
+              name: team.requested_name,
+            }),
+            {
+              maxRetries: options.maxRetries || 2,
+              sleep: options.sleep,
+            }
+          );
+
+          latestRateLimitSnapshot = attemptResult.retry_plan.rate_limit_snapshot || latestRateLimitSnapshot;
+
+          if (attemptResult.ok) {
+            executionResults.push({
+              normalized_slug: team.normalized_slug,
+              requested_name: team.requested_name,
+              source_row_number: team.source_row_number || null,
+              source_comment_id: team.source_comment_id || null,
+              created_team_id: attemptResult.value && attemptResult.value.id || null,
+              execution_result: 'created',
+              failure_reason: null,
+            });
+            continue;
           }
-        );
 
-        latestRateLimitSnapshot = attemptResult.retry_plan.rate_limit_snapshot || latestRateLimitSnapshot;
-
-        if (attemptResult.ok) {
           executionResults.push({
             normalized_slug: team.normalized_slug,
             requested_name: team.requested_name,
             source_row_number: team.source_row_number || null,
             source_comment_id: team.source_comment_id || null,
-            created_team_id: attemptResult.value && attemptResult.value.id || null,
-            execution_result: 'created',
-            failure_reason: null,
+            execution_result: 'failed',
+            failure_reason: classifyFailureReason(attemptResult.error),
           });
-          continue;
         }
-
-        executionResults.push({
-          normalized_slug: team.normalized_slug,
-          requested_name: team.requested_name,
-          source_row_number: team.source_row_number || null,
-          source_comment_id: team.source_comment_id || null,
-          execution_result: 'failed',
-          failure_reason: classifyFailureReason(attemptResult.error),
-        });
       }
 
-      if (isTenantCreation) {
+      if (isTenantCreation && !tenantBootstrapPreflightError) {
         const refreshedTeamsResult = await executeWithBoundedRetry(
           () => api.listOrgTeams({ organization: auditArtifact.request.organization }),
           {
@@ -2730,10 +3242,22 @@ async function runApprovedExecution(options = {}) {
               tokenInfo: mutationDecision.tokenInfo,
             });
 
-            const tenantAdminLogin = auditArtifact.request.tenant_admin_login || auditArtifact.request.requester_login;
+            const tenantAdminLogin = auditArtifact.request.tenant_admin_login || '';
+            const requesterLogin = auditArtifact.request.requester_login || '';
+            const requesterMaintainerPolicy = normalizeRequesterMaintainerPolicy(env.TENANT_BOOTSTRAP_REQUESTER_POLICY);
             const tenantTeamSlugs = [...new Set((auditArtifact.request.requested_teams || [])
               .map((team) => String(team && team.normalized_slug || '').toLowerCase())
               .filter(Boolean))];
+            const tenantBootstrapMaintainerActions = [];
+
+            reconciliationPlan.tenant_admin_bootstrap_action = reconciliationPlan.tenant_admin_bootstrap_action || reconciliationPlan.requester_bootstrap_action || 'ensure_maintainer';
+            reconciliationPlan.tenant_admin_intended_login = tenantAdminLogin;
+            reconciliationPlan.requester_maintainer_normalization_policy = requesterMaintainerPolicy;
+            reconciliationPlan.creator_maintainer_behavior = 'github_auto_adds_creator_as_maintainer';
+
+            if (!tenantAdminLogin) {
+              throw new Error('Tenant bootstrap policy blocked because tenant_admin_login is missing; requester fallback is disabled.');
+            }
 
             for (const teamSlug of tenantTeamSlugs) {
               const currentMembership = typeof api.getMembershipForUser === 'function'
@@ -2754,6 +3278,13 @@ async function runApprovedExecution(options = {}) {
                 executionResults.push({
                   team_slug: teamSlug,
                   username: tenantAdminLogin,
+                  execution_result: 'noop',
+                  failure_reason: null,
+                });
+                tenantBootstrapMaintainerActions.push({
+                  team_slug: teamSlug,
+                  username: tenantAdminLogin,
+                  action: 'ensure_intended_admin_maintainer',
                   execution_result: 'noop',
                   failure_reason: null,
                 });
@@ -2780,7 +3311,176 @@ async function runApprovedExecution(options = {}) {
                 execution_result: membershipResult.ok ? 'added' : 'failed',
                 failure_reason: membershipResult.ok ? null : classifyFailureReason(membershipResult.error),
               });
+              tenantBootstrapMaintainerActions.push({
+                team_slug: teamSlug,
+                username: tenantAdminLogin,
+                action: 'ensure_intended_admin_maintainer',
+                execution_result: membershipResult.ok ? 'added' : 'failed',
+                failure_reason: membershipResult.ok ? null : classifyFailureReason(membershipResult.error),
+              });
             }
+
+            if (
+              requesterLogin &&
+              tenantAdminLogin &&
+              requesterLogin !== tenantAdminLogin &&
+              requesterMaintainerPolicy !== 'keep_maintainer'
+            ) {
+              for (const teamSlug of tenantTeamSlugs) {
+                const requesterMembership = typeof api.getMembershipForUser === 'function'
+                  ? await api.getMembershipForUser({
+                      organization: auditArtifact.request.organization,
+                      teamSlug,
+                      username: requesterLogin,
+                    })
+                  : null;
+                const requesterState = requesterMembership && requesterMembership.state
+                  ? String(requesterMembership.state || '').toLowerCase()
+                  : 'absent';
+                const requesterRole = requesterMembership && requesterMembership.membership
+                  ? String(requesterMembership.membership.role || '').toLowerCase()
+                  : '';
+
+                if (requesterMaintainerPolicy === 'downgrade_to_member') {
+                  if (requesterState !== 'active') {
+                    tenantBootstrapMaintainerActions.push({
+                      team_slug: teamSlug,
+                      username: requesterLogin,
+                      action: 'normalize_requester_to_member',
+                      execution_result: 'noop',
+                      failure_reason: null,
+                      detail: 'requester_membership_absent',
+                    });
+                    continue;
+                  }
+
+                  if (requesterRole === 'member') {
+                    tenantBootstrapMaintainerActions.push({
+                      team_slug: teamSlug,
+                      username: requesterLogin,
+                      action: 'normalize_requester_to_member',
+                      execution_result: 'noop',
+                      failure_reason: null,
+                    });
+                    continue;
+                  }
+
+                  const downgradeResult = await executeWithBoundedRetry(
+                    () => api.addOrUpdateTeamMembership({
+                      organization: auditArtifact.request.organization,
+                      teamSlug,
+                      username: requesterLogin,
+                      role: 'member',
+                    }),
+                    {
+                      maxRetries: options.maxRetries || 2,
+                      sleep: options.sleep,
+                    }
+                  );
+
+                  latestRateLimitSnapshot = downgradeResult.retry_plan.rate_limit_snapshot || latestRateLimitSnapshot;
+                  executionResults.push({
+                    team_slug: teamSlug,
+                    username: requesterLogin,
+                    execution_result: downgradeResult.ok ? 'mutated' : 'failed',
+                    failure_reason: downgradeResult.ok ? null : classifyFailureReason(downgradeResult.error),
+                  });
+                  tenantBootstrapMaintainerActions.push({
+                    team_slug: teamSlug,
+                    username: requesterLogin,
+                    action: 'normalize_requester_to_member',
+                    execution_result: downgradeResult.ok ? 'mutated' : 'failed',
+                    failure_reason: downgradeResult.ok ? null : classifyFailureReason(downgradeResult.error),
+                  });
+                  continue;
+                }
+
+                if (requesterState !== 'active') {
+                  tenantBootstrapMaintainerActions.push({
+                    team_slug: teamSlug,
+                    username: requesterLogin,
+                    action: 'normalize_requester_remove_membership',
+                    execution_result: 'noop',
+                    failure_reason: null,
+                    detail: 'requester_membership_absent',
+                  });
+                  continue;
+                }
+
+                if (typeof api.removeTeamMembership === 'function') {
+                  const removalResult = await executeWithBoundedRetry(
+                    () => api.removeTeamMembership({
+                      organization: auditArtifact.request.organization,
+                      teamSlug,
+                      username: requesterLogin,
+                    }),
+                    {
+                      maxRetries: options.maxRetries || 2,
+                      sleep: options.sleep,
+                    }
+                  );
+
+                  latestRateLimitSnapshot = removalResult.retry_plan.rate_limit_snapshot || latestRateLimitSnapshot;
+                  const removed = Boolean(removalResult.ok && removalResult.value && removalResult.value.removed);
+                  const removalExecutionResult = !removalResult.ok
+                    ? 'failed'
+                    : removed ? 'removed' : 'noop';
+                  const removalFailureReason = removalResult.ok ? null : classifyFailureReason(removalResult.error);
+
+                  executionResults.push({
+                    team_slug: teamSlug,
+                    username: requesterLogin,
+                    execution_result: removalExecutionResult,
+                    failure_reason: removalFailureReason,
+                  });
+                  tenantBootstrapMaintainerActions.push({
+                    team_slug: teamSlug,
+                    username: requesterLogin,
+                    action: 'normalize_requester_remove_membership',
+                    execution_result: removalExecutionResult,
+                    failure_reason: removalFailureReason,
+                    detail: removed ? null : 'requester_membership_already_absent',
+                  });
+                  continue;
+                }
+
+                // Fallback when explicit remove is unavailable: downgrade to member (currently unreachable because tenant bootstrap preflight blocks when removeTeamMembership is unavailable).
+                const fallbackResult = await executeWithBoundedRetry(
+                  () => api.addOrUpdateTeamMembership({
+                    organization: auditArtifact.request.organization,
+                    teamSlug,
+                    username: requesterLogin,
+                    role: 'member',
+                  }),
+                  {
+                    maxRetries: options.maxRetries || 2,
+                    sleep: options.sleep,
+                  }
+                );
+
+                latestRateLimitSnapshot = fallbackResult.retry_plan.rate_limit_snapshot || latestRateLimitSnapshot;
+                executionResults.push({
+                  team_slug: teamSlug,
+                  username: requesterLogin,
+                  execution_result: fallbackResult.ok ? 'mutated' : 'failed',
+                  failure_reason: fallbackResult.ok ? null : classifyFailureReason(fallbackResult.error),
+                });
+                tenantBootstrapMaintainerActions.push({
+                  team_slug: teamSlug,
+                  username: requesterLogin,
+                  action: 'normalize_requester_remove_membership_fallback_to_member',
+                  execution_result: fallbackResult.ok ? 'mutated' : 'failed',
+                  failure_reason: fallbackResult.ok ? null : classifyFailureReason(fallbackResult.error),
+                  detail: 'remove_team_membership_unavailable',
+                });
+              }
+            }
+
+            reconciliationPlan.tenant_bootstrap_maintainer_actions = tenantBootstrapMaintainerActions;
+            reconciliationPlan.tenant_bootstrap_final_maintainer_action = summarizeMaintainerNormalizationActions(
+              tenantBootstrapMaintainerActions,
+              requesterMaintainerPolicy
+            );
           }
         } catch (error) {
           const rateContext = buildTenantBootstrapRateLimitContext(error, {
@@ -3200,9 +3900,18 @@ async function runApprovedExecution(options = {}) {
     requestStatus === 'executed' &&
     executionOutcome.mutation_count === 0 &&
     executionOutcome.pending_count === 0 &&
-    executionOutcome.failure_count === 0;
-  if ((isTenantCreation || isTeamCreation) && executionOutcome.created_count > 0) {
+    executionOutcome.failure_count === 0 &&
+    executionOutcome.rejected_count === 0;
+  if (isTeamCreation && executionOutcome.created_count > 0) {
     executionOutcome.summary = `${executionOutcome.summary} Note: GitHub automatically makes the authenticated creator a team maintainer when a new team is created, so the creator becomes a team maintainer as an operational constraint of this workflow.`;
+  }
+  if (isTenantCreation) {
+    const intendedTenantAdmin = reconciliationPlan.tenant_admin_intended_login || auditArtifact.request.tenant_admin_login || 'n/a';
+    const creatorMaintainerBehavior = reconciliationPlan.creator_maintainer_behavior
+      ? 'GitHub automatically makes the authenticated creator a team maintainer when a new team is created.'
+      : 'Creator maintainership behavior not recorded.';
+    const finalMaintainerAction = reconciliationPlan.tenant_bootstrap_final_maintainer_action || 'Final maintainer list action not recorded.';
+    executionOutcome.summary = `${executionOutcome.summary} Intended tenant admin: ${intendedTenantAdmin}. Auto-added creator maintainer behavior: ${creatorMaintainerBehavior} Final maintainer list action taken: ${finalMaintainerAction}`;
   }
   const operationExecutionLabel = isTenantCreation
     ? 'tenant bootstrap execution'
