@@ -1,0 +1,4 @@
+name,value,operation,visibility
+PLATFORM_API_BASE_URL,https://api.platform.example.com,create,all
+DEPLOY_CHANNEL,stable,update,
+RETIRED_FLAG,,delete,
