@@ -45,7 +45,6 @@ function buildRepoAdminMembershipContextMarker(input = {}) {
     tenant_key: normalizeLogin(input.tenant_key),
     tenant_team_slug: normalizeLogin(input.tenant_team_slug),
     repo_admin_team_slug: normalizeLogin(input.repo_admin_team_slug),
-    designated_approver_login: normalizeLogin(input.designated_approver_login),
     requested_people: [...(input.requested_people || [])].sort(),
     registry_ref: String(input.registry_ref || 'main'),
   });
@@ -56,6 +55,11 @@ function buildRepoAdminMembershipContextMarker(input = {}) {
 
 async function validateRepoAdminMembershipRequest(input = {}, options = {}) {
   const request = input.request_id ? input : parseRepoAdminMembershipRequest(input);
+  // Audit-artifact request payloads do not persist validation_findings, so
+  // approved-execution revalidation must re-initialize it before any mutation.
+  request.validation_findings = request.validation_findings && typeof request.validation_findings === 'object'
+    ? request.validation_findings
+    : {};
   const errors = [];
   const warnings = [];
 
@@ -79,10 +83,6 @@ async function validateRepoAdminMembershipRequest(input = {}, options = {}) {
 
   if (!ALLOWED_REPO_ADMIN_OPERATIONS.includes(request.repo_admin_operation)) {
     errors.push(`Repo admin operation '${request.repo_admin_operation || ''}' is invalid. Allowed values are: ${ALLOWED_REPO_ADMIN_OPERATIONS.join(', ')}.`);
-  }
-
-  if (!request.designated_approver_login) {
-    errors.push('A designated approver is required.');
   }
 
   const manualPopulated = hasPopulatedInput(request.requested_people_input);
@@ -427,32 +427,7 @@ async function validateRepoAdminMembershipRequest(input = {}, options = {}) {
     }
   }
 
-  let designatedApproverAuthorization = {
-    state: 'unknown',
-    role: 'other',
-  };
-  if (request.organization && request.designated_approver_login && typeof options.getOrganizationMembership === 'function') {
-    const approverMembership = await options.getOrganizationMembership({
-      organization: request.organization,
-      username: request.designated_approver_login,
-    });
-
-    const approverState = approverMembership && approverMembership.membership && approverMembership.membership.state
-      ? String(approverMembership.membership.state).toLowerCase()
-      : 'absent';
-    const approverRole = approverMembership && approverMembership.membership && approverMembership.membership.role
-      ? String(approverMembership.membership.role).toLowerCase()
-      : 'other';
-
-    designatedApproverAuthorization = {
-      state: approverState === 'active' && approverRole === 'admin' ? 'authorized' : 'unauthorized',
-      role: approverRole,
-    };
-
-    if (designatedApproverAuthorization.state !== 'authorized') {
-      errors.push('Designated approver must be an active target organization owner.');
-    }
-  }
+  let designatedApproverAuthorization = null;
 
   const requestedPeople = [];
   const requestedPeopleDetailMap = new Map(
@@ -508,7 +483,6 @@ async function validateRepoAdminMembershipRequest(input = {}, options = {}) {
         tenant_key: tenantKey,
         tenant_team_slug: tenantTeamSlug,
         repo_admin_team_slug: repoAdminTeamSlug,
-        designated_approver_login: request.designated_approver_login,
         requested_people: request.requested_people,
         registry_ref: registryRef,
       })

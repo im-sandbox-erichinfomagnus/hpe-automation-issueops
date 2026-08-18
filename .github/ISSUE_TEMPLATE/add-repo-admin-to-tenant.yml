@@ -8,10 +8,12 @@ body:
   - type: markdown
     attributes:
       value: |
-        Use this request to validate and, after approval, add one or more organization
-        members to the tenant's RepoAdmin team (created at tenant bootstrap). If the
-        team is missing it is created as a child of the tenant root team and every
-        active tenant root-team maintainer is assigned as its Team Maintainer.
+        Use this request to add one or more organization members to the tenant's
+        RepoAdmin team (created at tenant bootstrap). Tenant self-serve: once the
+        requester passes the caller gate the request executes directly — there is
+        no separate approval step. If the team is missing it is created as a child
+        of the tenant root team and every active tenant root-team maintainer is
+        assigned as its Team Maintainer.
 
   - type: input
     id: organization
@@ -65,15 +67,6 @@ body:
       render: text
     validations:
       required: false
-
-  - type: input
-    id: designated_approver
-    attributes:
-      label: Designated approver
-      description: GitHub login for the authorized approver who will post the approval comment (must be an active organization owner).
-      placeholder: org-owner-user
-    validations:
-      required: true
 
   - type: dropdown
     id: dry_run

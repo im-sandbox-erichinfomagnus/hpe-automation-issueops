@@ -163,9 +163,6 @@ function parseRepoAdminMembershipRequest(input = {}) {
     ? manualNormalization
     : createEmptyManualNormalization();
   const bulkCsvNormalization = createEmptyBulkCsvNormalization('');
-  const designatedApproverLogin = normalizeLogin(
-    readField(parsed, ['designated_approver', 'parsed_designated_approver']) || input.designatedApprover
-  );
   const dryRun = normalizeBoolean(
     readField(parsed, ['dry_run', 'parsed_dry_run']) ?? input.dryRun,
     true
@@ -221,7 +218,6 @@ function parseRepoAdminMembershipRequest(input = {}) {
     invalid_people: selectedNormalization.invalidPeople,
     csv_row_findings: bulkCsvNormalization.csv_row_findings,
     csv_row_numbering_convention: CSV_ROW_NUMBERING_CONVENTION,
-    designated_approver_login: designatedApproverLogin,
     request_status: 'submitted',
     business_justification: justification || '',
     dry_run: dryRun,
