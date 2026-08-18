@@ -81,6 +81,10 @@ function buildAssignmentNote(operation) {
     return 'Central issue assignment is for queue ownership only and does not authorize CI/CD admin team or membership mutation.';
   }
 
+  if (operation === 'repo_admin_membership') {
+    return 'Central issue assignment is for queue ownership only and does not authorize repo admin team or membership mutation.';
+  }
+
   if (operation === 'repository_ruleset_creation') {
     return 'Central issue assignment is for queue ownership only and does not authorize repository ruleset creation mutation.';
   }
@@ -104,7 +108,7 @@ async function runApprovalGate(options = {}) {
   const operation = auditArtifact.metadata && auditArtifact.metadata.operation;
 
   if (
-    (operation === 'team_membership' || operation === 'team_creation' || operation === 'team_hierarchy' || operation === 'team_repo_access' || operation === 'team_repo_access_removal' || operation === 'tenant_creation' || operation === 'tenant_repo_creation' || operation === 'cicd_admin_membership') &&
+    (operation === 'team_membership' || operation === 'team_creation' || operation === 'team_hierarchy' || operation === 'team_repo_access' || operation === 'team_repo_access_removal' || operation === 'tenant_creation' || operation === 'tenant_repo_creation' || operation === 'cicd_admin_membership' || operation === 'repo_admin_membership') &&
     auditArtifact.request &&
     auditArtifact.request.intake_mode === 'csv_attachment' &&
     ['executed', 'partially_executed', 'failed', 'failed_after_approved_execution'].includes(auditArtifact.request.request_status)
@@ -203,7 +207,7 @@ async function runApprovalGate(options = {}) {
                 ? 'tenant_repo_creation'
               : auditArtifact.metadata && auditArtifact.metadata.operation === 'tenant_creation'
                 ? 'tenant_creation'
-              : auditArtifact.metadata && ['hosted_runner_creation', 'hosted_runner_deletion', 'hosted_runner_move', 'runner_group_creation', 'tenant_variable_management', 'cicd_admin_membership', 'repository_ruleset_creation', 'repository_ruleset_deletion'].includes(auditArtifact.metadata.operation)
+              : auditArtifact.metadata && ['hosted_runner_creation', 'hosted_runner_deletion', 'hosted_runner_move', 'runner_group_creation', 'tenant_variable_management', 'cicd_admin_membership', 'repo_admin_membership', 'repository_ruleset_creation', 'repository_ruleset_deletion'].includes(auditArtifact.metadata.operation)
                 ? auditArtifact.metadata.operation
               : 'team_membership',
         issueComments,
@@ -289,6 +293,16 @@ async function runApprovalGate(options = {}) {
           : auditArtifact.approval.approval_status === 'invalidated'
             ? 'Approval was invalidated after the approval comment was removed. No tenant runner mutation was attempted.'
             : 'Request is validated, centrally routed, and awaiting approval from the designated target organization owner. No tenant runner mutation was attempted.'
+      : auditArtifact.metadata && auditArtifact.metadata.operation === 'repo_admin_membership'
+      ? auditArtifact.approval.approval_status === 'approved'
+        ? 'Request approval was granted by the authorized designated target organization owner. No repo admin team or membership mutation was attempted in this phase.'
+        : auditArtifact.approval.approval_status === 'not_requested'
+          ? 'Request is still waiting for a requester-authored CSV attachment comment before approval can be evaluated. No repo admin team or membership mutation was attempted.'
+        : auditArtifact.approval.approval_status === 'denied'
+          ? 'Approval was denied because the approval comment did not come from the authorized designated target organization owner. No repo admin team or membership mutation was attempted.'
+          : auditArtifact.approval.approval_status === 'invalidated'
+            ? 'Approval was invalidated after the approval comment was removed. No repo admin team or membership mutation was attempted.'
+            : 'Request is validated, centrally routed, and awaiting approval from the designated target organization owner. No repo admin team or membership mutation was attempted.'
       : auditArtifact.metadata && auditArtifact.metadata.operation === 'cicd_admin_membership'
       ? auditArtifact.approval.approval_status === 'approved'
         ? 'Request approval was granted by the authorized designated target organization owner. No CI/CD admin team or membership mutation was attempted in this phase.'
