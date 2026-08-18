@@ -49,7 +49,6 @@ function buildRequestInput(overrides = {}) {
       subteam_operation: 'create',
       intake_mode: 'manual',
       requested_subteams: 'Payments\nPortal Web',
-      designated_approver: 'org-owner-user',
       dry_run: 'false',
       business_justification: 'Split the tenant delivery group.',
       ...overrides.parsedRequest,
@@ -205,21 +204,6 @@ test('a missing explicit parent team is rejected', async () => {
   assert.equal(result.is_valid, false);
   assert.equal(
     result.errors.some((error) => /Parent team 'contosouk-ghost' does not exist/i.test(error)),
-    true,
-    JSON.stringify(result.errors)
-  );
-});
-
-test('a designated approver who is not an org owner is rejected', async () => {
-  const registryDir = buildRegistry();
-  const result = await validateTenantSubteamRequest(
-    buildRequestInput({ parsedRequest: { designated_approver: 'regular-member' } }),
-    buildOptions(registryDir)
-  );
-
-  assert.equal(result.is_valid, false);
-  assert.equal(
-    result.errors.some((error) => /Designated approver must be an active target organization owner/i.test(error)),
     true,
     JSON.stringify(result.errors)
   );

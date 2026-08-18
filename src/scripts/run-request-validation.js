@@ -1566,10 +1566,21 @@ async function runRequestValidation(options = {}) {
           registryRef: env.TENANT_REGISTRY_REF || 'main',
           registryDirectory: env.TENANT_REGISTRY_DIR || 'tenant-registry',
         });
+        // Read-only maintainer preview so the validation plan matches what the
+        // executor will actually assign on the create-team path.
+        const subteamRootMaintainerPreview = validation.is_valid && validation.requested_teams.some((team) => team.desired_action === 'create_team') && typeof api.listTeamMaintainers === 'function'
+          ? await executeGitHubReadWithRetry(
+              () => api.listTeamMaintainers({
+                organization: validation.request.organization,
+                teamSlug: validation.request.tenant_team_slug,
+              }),
+              { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+            )
+          : [];
         reconciliationPlan = reconcileTenantSubteamCreation({
           request: validation.request,
           validatedTeams: validation.requested_teams,
-          rootTeamMaintainers: [],
+          rootTeamMaintainers: subteamRootMaintainerPreview,
           parent_team_slug: validation.request.parent_team_slug,
           parent_team_id: validation.parent_team_id,
           tenant_root_team_slug: validation.request.tenant_team_slug,

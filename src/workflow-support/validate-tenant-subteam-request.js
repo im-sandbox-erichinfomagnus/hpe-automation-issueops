@@ -47,7 +47,6 @@ function buildTenantSubteamContextMarker(input = {}) {
     tenant_key: normalizeLogin(input.tenant_key),
     tenant_team_slug: normalizeLogin(input.tenant_team_slug),
     parent_team_slug: normalizeLogin(input.parent_team_slug),
-    designated_approver_login: normalizeLogin(input.designated_approver_login),
     requested_subteam_slugs: [...(input.requested_subteam_slugs || [])].sort(),
     registry_ref: String(input.registry_ref || 'main'),
   });
@@ -58,6 +57,11 @@ function buildTenantSubteamContextMarker(input = {}) {
 
 async function validateTenantSubteamRequest(input = {}, options = {}) {
   const request = input.request_id ? input : parseTenantSubteamRequest(input);
+  // Audit-artifact request payloads do not persist validation_findings, so
+  // approved-execution revalidation must re-initialize it before any mutation.
+  request.validation_findings = request.validation_findings && typeof request.validation_findings === 'object'
+    ? request.validation_findings
+    : {};
   const errors = [];
   const warnings = [];
 
@@ -81,10 +85,6 @@ async function validateTenantSubteamRequest(input = {}, options = {}) {
 
   if (!ALLOWED_SUBTEAM_OPERATIONS.includes(request.subteam_operation)) {
     errors.push(`Subteam operation '${request.subteam_operation || ''}' is invalid. Allowed values are: ${ALLOWED_SUBTEAM_OPERATIONS.join(', ')}.`);
-  }
-
-  if (!request.designated_approver_login) {
-    errors.push('A designated approver is required.');
   }
 
   const manualPopulated = hasPopulatedInput(request.requested_team_names_input);
@@ -436,32 +436,7 @@ async function validateTenantSubteamRequest(input = {}, options = {}) {
     }
   }
 
-  let designatedApproverAuthorization = {
-    state: 'unknown',
-    role: 'other',
-  };
-  if (request.organization && request.designated_approver_login && typeof options.getOrganizationMembership === 'function') {
-    const approverMembership = await options.getOrganizationMembership({
-      organization: request.organization,
-      username: request.designated_approver_login,
-    });
-
-    const approverState = approverMembership && approverMembership.membership && approverMembership.membership.state
-      ? String(approverMembership.membership.state).toLowerCase()
-      : 'absent';
-    const approverRole = approverMembership && approverMembership.membership && approverMembership.membership.role
-      ? String(approverMembership.membership.role).toLowerCase()
-      : 'other';
-
-    designatedApproverAuthorization = {
-      state: approverState === 'active' && approverRole === 'admin' ? 'authorized' : 'unauthorized',
-      role: approverRole,
-    };
-
-    if (designatedApproverAuthorization.state !== 'authorized') {
-      errors.push('Designated approver must be an active target organization owner.');
-    }
-  }
+  let designatedApproverAuthorization = null;
 
   const requestedTeams = [];
   for (const team of request.requested_teams) {
@@ -504,7 +479,6 @@ async function validateTenantSubteamRequest(input = {}, options = {}) {
         tenant_key: tenantKey,
         tenant_team_slug: tenantTeamSlug,
         parent_team_slug: parentTeamSlug,
-        designated_approver_login: request.designated_approver_login,
         requested_subteam_slugs: requestedTeams.map((team) => team.normalized_slug),
         registry_ref: registryRef,
       })

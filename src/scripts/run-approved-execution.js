@@ -54,7 +54,7 @@ const { createGitHubOrgVariablesApi } = require('../workflow-support/github-org-
 const { validateRepositoryRulesetRequest } = require('../workflow-support/validate-repository-ruleset-request');
 const { createGitHubRepoRulesetsApi } = require('../workflow-support/github-repo-rulesets-api');
 const { assertRunnerGroupCreationAllowed: assertTenantVariablesMutationAllowed } = require('../actions/runner-group-policy');
-const { assertRunnerGroupCreationAllowed: assertTenantSubteamMutationAllowed } = require('../actions/runner-group-policy');
+const { assertTenantSelfServeMutationAllowed } = require('../actions/tenant-self-serve-policy');
 const { assertRunnerGroupCreationAllowed: assertRepositoryRulesetMutationAllowed } = require('../actions/runner-group-policy');
 const { emitAuditSummary } = require('./emit-audit-summary');
 
@@ -819,22 +819,29 @@ async function executeTenantSubteamCreation(context = {}) {
 
     // Active maintainers of the tenant root team are the Tenant Admins that
     // must become Team Maintainers of each newly created subteam.
-    const rootTeamMaintainers = [];
+    let rootTeamMaintainers = [];
     const hasTeamsToCreate = revalidation.requested_teams.some((team) => team.desired_action === 'create_team');
     if (hasTeamsToCreate) {
-      const rootMembers = await teamApi.listTeamMembers({ organization, teamSlug: rootTeamSlug });
-      for (const member of rootMembers) {
-        const membership = await teamApi.getMembershipForUser({
-          organization,
-          teamSlug: rootTeamSlug,
-          username: member.username,
-        });
-        const state = membership && membership.state ? String(membership.state).toLowerCase() : 'absent';
-        const role = membership && membership.membership && membership.membership.role
-          ? String(membership.membership.role).toLowerCase()
-          : '';
-        if (state === 'active' && role === 'maintainer') {
-          rootTeamMaintainers.push(member.username);
+      if (typeof teamApi.listTeamMaintainers === 'function') {
+        const maintainers = await teamApi.listTeamMaintainers({ organization, teamSlug: rootTeamSlug });
+        rootTeamMaintainers = maintainers
+          .filter((member) => String(member.state || 'active').toLowerCase() === 'active')
+          .map((member) => member.username);
+      } else {
+        const rootMembers = await teamApi.listTeamMembers({ organization, teamSlug: rootTeamSlug });
+        for (const member of rootMembers) {
+          const membership = await teamApi.getMembershipForUser({
+            organization,
+            teamSlug: rootTeamSlug,
+            username: member.username,
+          });
+          const state = membership && membership.state ? String(membership.state).toLowerCase() : 'absent';
+          const role = membership && membership.membership && membership.membership.role
+            ? String(membership.membership.role).toLowerCase()
+            : '';
+          if (state === 'active' && role === 'maintainer') {
+            rootTeamMaintainers.push(member.username);
+          }
         }
       }
     }
@@ -1671,12 +1678,8 @@ async function runApprovedExecution(options = {}) {
             tokenInfo: options.tokenInfo,
           })
       : isTenantSubteamCreation
-        ? assertTenantSubteamMutationAllowed({
+        ? assertTenantSelfServeMutationAllowed({
             approval_status: auditArtifact.approval.approval_status,
-            approver_login: auditArtifact.approval.approver_login,
-            designated_approver_login: auditArtifact.request.designated_approver_login,
-            approver_role: auditArtifact.approval.approver_role,
-            approver_authorization_state: auditArtifact.approval.approver_authorization_state,
             dry_run: auditArtifact.request.dry_run,
             tokenInfo: options.tokenInfo,
           })

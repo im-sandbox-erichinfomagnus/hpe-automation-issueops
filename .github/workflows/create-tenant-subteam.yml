@@ -106,7 +106,6 @@ jobs:
           PARSED_PARENT_TEAM: ${{ steps.parse_request.outputs.parsed_parent_team }}
           PARSED_INTAKE_MODE: ${{ steps.parse_request.outputs.parsed_intake_mode }}
           PARSED_REQUESTED_SUBTEAMS: ${{ steps.parse_request.outputs.parsed_requested_subteams }}
-          PARSED_DESIGNATED_APPROVER: ${{ steps.parse_request.outputs.parsed_designated_approver }}
           PARSED_DRY_RUN: ${{ steps.parse_request.outputs.parsed_dry_run }}
           PARSED_BUSINESS_JUSTIFICATION: ${{ steps.parse_request.outputs.parsed_business_justification }}
           COMMENT_ID: ${{ github.event.comment.id || '' }}
