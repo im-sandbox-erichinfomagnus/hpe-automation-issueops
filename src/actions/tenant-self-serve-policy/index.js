@@ -8,6 +8,7 @@ const TENANT_SELF_SERVE_OPERATIONS = [
   'cicd_admin_membership',
   'repo_admin_membership',
   'tenant_subteam_creation',
+  'org_variable_management',
 ];
 
 function isTenantSelfServeOperation(operation) {

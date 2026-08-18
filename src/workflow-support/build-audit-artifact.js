@@ -293,6 +293,8 @@ function buildAuditArtifact(input = {}) {
       variable_operation: request.variable_operation || null,
       variable_prefix: request.variable_prefix || '',
       variable_entries: request.variable_entries || [],
+      org_variable_operation: request.org_variable_operation || null,
+      org_variable_entries: request.org_variable_entries || [],
       cicd_admin_operation: request.cicd_admin_operation || null,
       repo_admin_operation: request.repo_admin_operation || null,
       ruleset_operation: request.ruleset_operation || null,
