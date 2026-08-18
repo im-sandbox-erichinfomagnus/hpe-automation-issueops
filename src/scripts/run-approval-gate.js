@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 
 const { evaluateApprovalGate } = require('../workflow-support/approval-gate');
+const { isTenantSelfServeOperation } = require('../actions/tenant-self-serve-policy');
 const { buildAuditArtifact, toAuditArtifactJson } = require('../workflow-support/build-audit-artifact');
 const { createGitHubTeamApi } = require('../workflow-support/github-team-api');
 const { loadWorkflowToken } = require('../workflow-support/load-workflow-token');
@@ -77,14 +78,6 @@ function buildAssignmentNote(operation) {
     return 'Central issue assignment is for queue ownership only and does not authorize tenant variable mutation.';
   }
 
-  if (operation === 'cicd_admin_membership') {
-    return 'Central issue assignment is for queue ownership only and does not authorize CI/CD admin team or membership mutation.';
-  }
-
-  if (operation === 'repo_admin_membership') {
-    return 'Central issue assignment is for queue ownership only and does not authorize repo admin team or membership mutation.';
-  }
-
   if (operation === 'repository_ruleset_creation') {
     return 'Central issue assignment is for queue ownership only and does not authorize repository ruleset creation mutation.';
   }
@@ -122,6 +115,60 @@ async function runApprovalGate(options = {}) {
     writeGitHubOutput('approval-status', auditArtifact.approval && auditArtifact.approval.approval_status || 'not_requested', env.GITHUB_OUTPUT);
     emitAuditSummary(auditArtifact, { summaryPath: env.GITHUB_STEP_SUMMARY, overwrite: true });
     return auditArtifact;
+  }
+
+  if (isTenantSelfServeOperation(operation)) {
+    // Approval step removed per tenant self-serve policy: the caller gate at
+    // validation is the authorization.
+    auditArtifact.assignment = auditArtifact.assignment || {
+      assignment_status: 'not_attempted',
+      assigned_login: '',
+      assignment_note: 'Central issue assignment is skipped for tenant self-serve operations.',
+      assigned_at: null,
+    };
+    auditArtifact.approval = {
+      approval_status: 'approved',
+      approver_login: auditArtifact.request.requester_login || '',
+      approver_role: 'tenant_self_serve',
+      approver_authorization_state: 'authorized',
+      approved_at: new Date().toISOString(),
+      decision_source: 'policy',
+      decision_note: 'No approval step is required for tenant self-serve operations; requester authorization was validated at intake.',
+    };
+    auditArtifact.request.request_status = 'approved';
+    auditArtifact.execution.summary = 'Request is validated and proceeds directly to execution under the tenant self-serve policy. No mutation was attempted in this phase.';
+
+    const selfServeArtifact = buildAuditArtifact({
+      request: auditArtifact.request,
+      validation: auditArtifact.validation,
+      assignment: auditArtifact.assignment,
+      approval: auditArtifact.approval,
+      reconciliationPlan: auditArtifact.reconciliation,
+      executionOutcome: auditArtifact.execution,
+      runContext: {
+        run_id: env.GITHUB_RUN_ID || auditArtifact.metadata && auditArtifact.metadata.run_id,
+        run_attempt: env.GITHUB_RUN_ATTEMPT || auditArtifact.metadata && auditArtifact.metadata.run_attempt,
+        operation: auditArtifact.metadata && auditArtifact.metadata.operation,
+      },
+    });
+
+    fs.writeFileSync(artifactPath, toAuditArtifactJson({
+      request: selfServeArtifact.request,
+      validation: selfServeArtifact.validation,
+      assignment: selfServeArtifact.assignment,
+      approval: selfServeArtifact.approval,
+      executionOutcome: selfServeArtifact.execution,
+      runContext: selfServeArtifact.metadata,
+      reconciliationPlan: selfServeArtifact.reconciliation,
+    }), 'utf8');
+
+    emitAuditSummary(selfServeArtifact, { summaryPath: env.GITHUB_STEP_SUMMARY, overwrite: true });
+    writeGitHubOutput('approval-status', 'approved', env.GITHUB_OUTPUT);
+    writeGitHubOutput('assigned-login', selfServeArtifact.assignment.assigned_login || '', env.GITHUB_OUTPUT);
+    writeGitHubOutput('audit-artifact-path', artifactPath, env.GITHUB_OUTPUT);
+    writeGitHubOutput('audit-artifact-name', path.basename(artifactPath), env.GITHUB_OUTPUT);
+    writeGitHubOutput('audit-artifact-retention-days', env.AUDIT_ARTIFACT_RETENTION_DAYS || '', env.GITHUB_OUTPUT);
+    return selfServeArtifact;
   }
 
   auditArtifact.assignment = auditArtifact.assignment || {
@@ -207,7 +254,7 @@ async function runApprovalGate(options = {}) {
                 ? 'tenant_repo_creation'
               : auditArtifact.metadata && auditArtifact.metadata.operation === 'tenant_creation'
                 ? 'tenant_creation'
-              : auditArtifact.metadata && ['hosted_runner_creation', 'hosted_runner_deletion', 'hosted_runner_move', 'runner_group_creation', 'tenant_variable_management', 'cicd_admin_membership', 'repo_admin_membership', 'repository_ruleset_creation', 'repository_ruleset_deletion'].includes(auditArtifact.metadata.operation)
+              : auditArtifact.metadata && ['hosted_runner_creation', 'hosted_runner_deletion', 'hosted_runner_move', 'runner_group_creation', 'tenant_variable_management', 'repository_ruleset_creation', 'repository_ruleset_deletion'].includes(auditArtifact.metadata.operation)
                 ? auditArtifact.metadata.operation
               : 'team_membership',
         issueComments,
@@ -293,26 +340,6 @@ async function runApprovalGate(options = {}) {
           : auditArtifact.approval.approval_status === 'invalidated'
             ? 'Approval was invalidated after the approval comment was removed. No tenant runner mutation was attempted.'
             : 'Request is validated, centrally routed, and awaiting approval from the designated target organization owner. No tenant runner mutation was attempted.'
-      : auditArtifact.metadata && auditArtifact.metadata.operation === 'repo_admin_membership'
-      ? auditArtifact.approval.approval_status === 'approved'
-        ? 'Request approval was granted by the authorized designated target organization owner. No repo admin team or membership mutation was attempted in this phase.'
-        : auditArtifact.approval.approval_status === 'not_requested'
-          ? 'Request is still waiting for a requester-authored CSV attachment comment before approval can be evaluated. No repo admin team or membership mutation was attempted.'
-        : auditArtifact.approval.approval_status === 'denied'
-          ? 'Approval was denied because the approval comment did not come from the authorized designated target organization owner. No repo admin team or membership mutation was attempted.'
-          : auditArtifact.approval.approval_status === 'invalidated'
-            ? 'Approval was invalidated after the approval comment was removed. No repo admin team or membership mutation was attempted.'
-            : 'Request is validated, centrally routed, and awaiting approval from the designated target organization owner. No repo admin team or membership mutation was attempted.'
-      : auditArtifact.metadata && auditArtifact.metadata.operation === 'cicd_admin_membership'
-      ? auditArtifact.approval.approval_status === 'approved'
-        ? 'Request approval was granted by the authorized designated target organization owner. No CI/CD admin team or membership mutation was attempted in this phase.'
-        : auditArtifact.approval.approval_status === 'not_requested'
-          ? 'Request is still waiting for a requester-authored CSV attachment comment before approval can be evaluated. No CI/CD admin team or membership mutation was attempted.'
-        : auditArtifact.approval.approval_status === 'denied'
-          ? 'Approval was denied because the approval comment did not come from the authorized designated target organization owner. No CI/CD admin team or membership mutation was attempted.'
-          : auditArtifact.approval.approval_status === 'invalidated'
-            ? 'Approval was invalidated after the approval comment was removed. No CI/CD admin team or membership mutation was attempted.'
-            : 'Request is validated, centrally routed, and awaiting approval from the designated target organization owner. No CI/CD admin team or membership mutation was attempted.'
       : auditArtifact.metadata && auditArtifact.metadata.operation === 'tenant_variable_management'
       ? auditArtifact.approval.approval_status === 'approved'
         ? 'Request approval was granted by the authorized designated target organization owner. No tenant variable mutation was attempted in this phase.'

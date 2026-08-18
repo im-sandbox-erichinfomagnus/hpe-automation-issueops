@@ -103,7 +103,6 @@ jobs:
           PARSED_CICD_ADMIN_OPERATION: ${{ steps.parse_request.outputs.parsed_cicd_admin_operation }}
           PARSED_INTAKE_MODE: ${{ steps.parse_request.outputs.parsed_intake_mode }}
           PARSED_REQUESTED_PEOPLE: ${{ steps.parse_request.outputs.parsed_requested_people }}
-          PARSED_DESIGNATED_APPROVER: ${{ steps.parse_request.outputs.parsed_designated_approver }}
           PARSED_DRY_RUN: ${{ steps.parse_request.outputs.parsed_dry_run }}
           PARSED_BUSINESS_JUSTIFICATION: ${{ steps.parse_request.outputs.parsed_business_justification }}
           COMMENT_ID: ${{ github.event.comment.id || '' }}

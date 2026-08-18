@@ -9,8 +9,6 @@ const { resolveTenantCreationApprover } = require('./resolve-tenant-creation-app
 const { resolveHostedRunnerApprover } = require('./resolve-hosted-runner-approver');
 const { resolveRunnerGroupApprover } = require('./resolve-runner-group-approver');
 const { resolveTenantVariablesApprover } = require('./resolve-tenant-variables-approver');
-const { resolveCicdAdminMembershipApprover } = require('./resolve-cicd-admin-membership-approver');
-const { resolveRepoAdminMembershipApprover } = require('./resolve-repo-admin-membership-approver');
 const { resolveRepositoryRulesetApprover } = require('./resolve-repository-ruleset-approver');
 
 const APPROVAL_COMMAND = 'approved';
@@ -21,8 +19,6 @@ const TENANT_RUNNER_APPROVAL_MODES = [
   'hosted_runner_move',
   'runner_group_creation',
   'tenant_variable_management',
-  'cicd_admin_membership',
-  'repo_admin_membership',
   'repository_ruleset_creation',
   'repository_ruleset_deletion',
 ];
@@ -42,14 +38,6 @@ function describeTenantRunnerMutation(approvalMode) {
 
   if (approvalMode === 'tenant_variable_management') {
     return 'tenant variable management';
-  }
-
-  if (approvalMode === 'cicd_admin_membership') {
-    return 'tenant CI/CD admin membership';
-  }
-
-  if (approvalMode === 'repo_admin_membership') {
-    return 'tenant repo admin membership';
   }
 
   if (approvalMode === 'repository_ruleset_creation') {
@@ -201,14 +189,6 @@ async function evaluateApprovalGate(input = {}, options = {}) {
 
     if (approvalMode === 'tenant_variable_management') {
       return resolveTenantVariablesApprover(args, options);
-    }
-
-    if (approvalMode === 'cicd_admin_membership') {
-      return resolveCicdAdminMembershipApprover(args, options);
-    }
-
-    if (approvalMode === 'repo_admin_membership') {
-      return resolveRepoAdminMembershipApprover(args, options);
     }
 
     if (approvalMode === 'repository_ruleset_creation' || approvalMode === 'repository_ruleset_deletion') {
