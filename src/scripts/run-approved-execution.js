@@ -19,6 +19,10 @@ const { createGitHubTeamApi } = require('../workflow-support/github-team-api');
 const { createGitHubTeamRepoApi } = require('../workflow-support/github-team-repo-api');
 const { createGitHubRunnerApi } = require('../workflow-support/github-runner-api');
 const { executeWithBoundedRetry } = require('../workflow-support/handle-rate-limit');
+const {
+  resolveCallerOrgRoleRequirement,
+  revalidateCallerOrgRole,
+} = require('../workflow-support/revalidate-caller-org-role');
 const { executeCapabilityOperationWithRetry } = require('../workflow-support/handle-rate-limit');
 const { buildTenantBootstrapRateLimitContext } = require('../workflow-support/handle-rate-limit');
 const { buildTopologyRegistryReadRateLimitContext } = require('../workflow-support/handle-rate-limit');
@@ -1378,6 +1382,47 @@ async function runApprovedExecution(options = {}) {
     writeGitHubOutput('execution-status', mutationDecision.reason, env.GITHUB_OUTPUT);
     emitAuditSummary(auditArtifact, { summaryPath: env.GITHUB_STEP_SUMMARY, overwrite: true });
     return auditArtifact;
+  }
+
+  // Approval can be stale by execution time; in automatic mode, re-read the
+  // caller's org role immediately before mutation and fail closed on mismatch.
+  const callerRoleRequirement = resolveCallerOrgRoleRequirement(auditArtifact);
+  const callerMembershipApi = options.callerMembershipApi || createGitHubTeamApi({ token: mutationDecision.tokenInfo.token });
+  let callerRoleRateLimitSnapshot = null;
+  const callerRoleRevalidation = await revalidateCallerOrgRole({
+    auditArtifact,
+    getOrganizationMembership: callerRoleRequirement.required && typeof callerMembershipApi.getOrganizationMembership === 'function'
+      ? ({ organization, username }) => callerMembershipApi.getOrganizationMembership({ organization, username })
+      : null,
+    executeWithRetry: async (operationFn, retryOptions) => {
+      const attempt = await executeWithBoundedRetry(operationFn, retryOptions);
+      callerRoleRateLimitSnapshot = attempt.retry_plan && attempt.retry_plan.rate_limit_snapshot
+        ? attempt.retry_plan.rate_limit_snapshot
+        : callerRoleRateLimitSnapshot;
+      if (!attempt.ok) {
+        throw attempt.error || new Error('Caller organization membership lookup failed.');
+      }
+      return attempt.value;
+    },
+    maxRetries: options.maxRetries || 2,
+    sleep: options.sleep,
+  });
+  callerRoleRevalidation.rate_limit_snapshot = callerRoleRateLimitSnapshot;
+  auditArtifact.validation = {
+    ...(auditArtifact.validation || {}),
+    caller_authorization_revalidation: callerRoleRevalidation,
+  };
+
+  if (callerRoleRevalidation.required && !callerRoleRevalidation.authorized) {
+    return buildPreMutationFailureArtifact({
+      auditArtifact,
+      artifactPath,
+      env,
+      isTenantRepoCreation,
+      operationLabel: isTeamCreation ? 'team' : isTeamHierarchy ? 'child link' : (isTeamRepoAccess || isTeamRepoAccessRemoval || isTenantRepoCreation) ? 'repository' : (isHostedRunnerCreation || isHostedRunnerDeletion || isHostedRunnerMove) ? 'hosted_runner' : isRunnerGroupCreation ? 'runner_group' : isRepositoryRulesetOperation ? 'repository_ruleset' : isTenantCreation ? 'tenant_bootstrap' : 'membership',
+      rateLimitSnapshot: callerRoleRevalidation.rate_limit_snapshot,
+      failureMessage: `Execution stopped before any mutation because the caller organization role could not be reconfirmed (${callerRoleRevalidation.failure_reason}). No ${isTenantCreation ? 'tenant bootstrap mutation' : isTeamCreation ? 'team creation' : isTeamHierarchy ? 'child-team mutation' : isTenantRepoCreation ? 'tenant repository mutation' : isHostedRunnerCreation ? 'tenant hosted-runner mutation' : isHostedRunnerMove ? 'tenant hosted-runner move' : isHostedRunnerDeletion ? 'tenant hosted-runner deletion' : isRunnerGroupCreation ? 'tenant runner-group mutation' : isTenantVariableManagement ? 'tenant variable mutation' : isRepositoryRulesetOperation ? 'repository ruleset mutation' : (isTeamRepoAccess || isTeamRepoAccessRemoval) ? 'repository-access mutation' : 'membership mutation'} was attempted.`,
+    });
   }
 
   if (isTenantCreation) {
