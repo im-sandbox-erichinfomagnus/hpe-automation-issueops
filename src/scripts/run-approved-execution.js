@@ -2502,8 +2502,13 @@ async function runApprovedExecution(options = {}) {
           latestRateLimitSnapshot = attemptResult.retry_plan.rate_limit_snapshot || latestRateLimitSnapshot;
 
           if (attemptResult.ok) {
-            if (team && team.normalized_slug) {
-              createdTeamSlugs.push(String(team.normalized_slug).toLowerCase());
+            const createdTeamSlug = attemptResult.value && attemptResult.value.slug
+              ? String(attemptResult.value.slug).toLowerCase()
+              : team && team.normalized_slug
+                ? String(team.normalized_slug).toLowerCase()
+                : '';
+            if (createdTeamSlug) {
+              createdTeamSlugs.push(createdTeamSlug);
             }
             executionResults.push({
               normalized_slug: team.normalized_slug,

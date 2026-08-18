@@ -112,7 +112,7 @@ test('approval-ready manual summaries surface intake metadata before execution',
   assert.doesNotMatch(summary, /CSV row numbering:/i);
 });
 
-test('manual approval guidance remains the organization-owner workflow path', async () => {
+test('manual approval guidance remains the active organization-member workflow path', async () => {
   const decision = await evaluateApprovalGate(
     {
       approvalMode: 'team_membership',
@@ -125,7 +125,7 @@ test('manual approval guidance remains the organization-owner workflow path', as
   );
 
   assert.equal(decision.approval_status, 'pending');
-  assert.match(decision.decision_note, /organization owner/i);
+  assert.match(decision.decision_note, /active organization member/i);
 });
 
 test('waiting attachment summaries do not present approval-ready manual guidance', () => {
