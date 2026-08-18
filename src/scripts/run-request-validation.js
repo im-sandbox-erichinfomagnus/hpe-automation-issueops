@@ -1573,12 +1573,23 @@ async function runRequestValidation(options = {}) {
               { maxRetries: options.maxRetries || 2, sleep: options.sleep }
             )
           : [];
+        // Read-only maintainer preview so the validation plan matches what the
+        // executor will actually assign on the create-team path.
+        const cicdRootMaintainerPreview = !validation.cicd_admin_team_exists && validation.is_valid && typeof api.listTeamMaintainers === 'function'
+          ? await executeGitHubReadWithRetry(
+              () => api.listTeamMaintainers({
+                organization: validation.request.organization,
+                teamSlug: validation.request.tenant_team_slug,
+              }),
+              { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+            )
+          : [];
         reconciliationPlan = reconcileCicdAdminMembership({
           request: validation.request,
           validatedPeople: validation.requested_people,
           cicd_admin_team_exists: validation.cicd_admin_team_exists,
           currentMembers: currentCicdMembers,
-          rootTeamMaintainers: [],
+          rootTeamMaintainers: cicdRootMaintainerPreview,
           cicd_admin_team_slug: validation.request.cicd_admin_team_slug,
           tenant_root_team_slug: validation.request.tenant_team_slug,
           tenant_root_team_id: validation.root_team_id,

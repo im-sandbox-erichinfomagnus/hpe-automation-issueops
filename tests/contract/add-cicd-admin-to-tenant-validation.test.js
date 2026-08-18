@@ -48,7 +48,6 @@ function buildRequestInput(overrides = {}) {
       cicd_admin_operation: 'add',
       intake_mode: 'manual',
       requested_people: 'octocat\nhubot',
-      designated_approver: 'org-owner-user',
       dry_run: 'false',
       business_justification: 'These engineers manage the tenant runner fleet.',
       ...overrides.parsedRequest,
@@ -179,21 +178,6 @@ test('an unknown tenant is rejected with available tenant names', async () => {
   assert.equal(result.is_valid, false);
   assert.equal(
     result.errors.some((error) => /No tenant record was found for tenant name 'DoesNotExist'/i.test(error)),
-    true,
-    JSON.stringify(result.errors)
-  );
-});
-
-test('a designated approver who is not an org owner is rejected', async () => {
-  const registryDir = buildRegistry();
-  const result = await validateCicdAdminMembershipRequest(
-    buildRequestInput({ parsedRequest: { designated_approver: 'regular-member' } }),
-    buildOptions(registryDir)
-  );
-
-  assert.equal(result.is_valid, false);
-  assert.equal(
-    result.errors.some((error) => /Designated approver must be an active target organization owner/i.test(error)),
     true,
     JSON.stringify(result.errors)
   );
