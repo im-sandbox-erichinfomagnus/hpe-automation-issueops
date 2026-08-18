@@ -1,0 +1,37 @@
+name: zz-sandbox-create-test-issue
+
+# Sandbox-only helper: files an issue as github-actions[bot] so reject-path
+# gates can be tested with a requester that has no org/team roles.
+on:
+  workflow_dispatch:
+    inputs:
+      title:
+        description: Issue title
+        required: true
+        type: string
+      body-file:
+        description: Path (in repo) to a file containing the issue body
+        required: true
+        type: string
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  create-issue:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Create issue as github-actions bot
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh issue create \
+            --repo "${{ github.repository }}" \
+            --title "${{ inputs.title }}" \
+            --body-file "${{ inputs['body-file'] }}"
