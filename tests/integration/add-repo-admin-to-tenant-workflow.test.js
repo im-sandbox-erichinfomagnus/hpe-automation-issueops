@@ -32,7 +32,7 @@ test('add-repo-admin-to-tenant issue form exposes the routing anchor and people 
   assert.match(form, /id:\s+repo_admin_operation/);
   assert.match(form, /id:\s+intake_mode/);
   assert.match(form, /id:\s+requested_people/);
-  assert.match(form, /id:\s+designated_approver/);
+  assert.doesNotMatch(form, /id:\s+designated_approver/);
   assert.match(form, /id:\s+dry_run/);
 });
 
@@ -73,7 +73,6 @@ function buildValidationEnv(artifactPath, registryDir, overrides = {}) {
     PARSED_REPO_ADMIN_OPERATION: 'add',
     PARSED_INTAKE_MODE: 'manual',
     PARSED_REQUESTED_PEOPLE: 'octocat\nhubot',
-    PARSED_DESIGNATED_APPROVER: 'org-owner-user',
     PARSED_DRY_RUN: 'false',
     PARSED_BUSINESS_JUSTIFICATION: 'These engineers manage repository creation for the tenant.',
     ISSUEOPS_GITHUB_TOKEN: 'pat-token',
@@ -185,14 +184,8 @@ async function runValidatedAndApprovedFlow({ artifactPath, registryDir, teamApi,
     api: {
       getAssignableOwners: async () => ['queue-owner'],
       addIssueAssignees: async () => ({ status: 'assigned' }),
-      listIssueComments: async () => [
-        {
-          id: 2601,
-          body: 'approved',
-          created_at: '2026-08-18T12:00:00Z',
-          user: { login: 'org-owner-user' },
-        },
-      ],
+      // No approval comment exists: self-serve ops auto-approve at the gate.
+      listIssueComments: async () => [],
       getOrganizationMembership: async () => ({
         exists: true,
         membership: { role: 'admin', state: 'active' },
@@ -228,7 +221,7 @@ test('US1 validation routes the request to the repo_admin_membership operation',
   assert.equal(artifact.reconciliation.team_action, 'noop');
 });
 
-test('US2 approval gate approves only via the designated org-owner approver', async () => {
+test('US2 approval gate auto-approves self-serve requests without an approver comment', async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'repo-admin-us2-'));
   const artifactPath = path.join(workspace, 'audit.json');
   const registryDir = buildRegistry(workspace);
@@ -237,7 +230,8 @@ test('US2 approval gate approves only via the designated org-owner approver', as
 
   const artifact = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
   assert.equal(artifact.approval.approval_status, 'approved');
-  assert.equal(artifact.approval.approver_role, 'target_org_owner');
+  assert.equal(artifact.approval.approver_role, 'tenant_self_serve');
+  assert.equal(artifact.approval.decision_source, 'policy');
   assert.equal(artifact.request.request_status, 'approved');
 });
 
