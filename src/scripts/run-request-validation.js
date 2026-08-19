@@ -1723,6 +1723,10 @@ async function runRequestValidation(options = {}) {
             () => api.getOrganization({ organization }),
             { maxRetries: options.maxRetries || 2, sleep: options.sleep }
           ),
+          getOrganizationMembership: ({ organization, username }) => executeGitHubReadWithRetry(
+            () => api.getOrganizationMembership({ organization, username }),
+            { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+          ),
           listTeams: ({ organization }) => executeGitHubReadWithRetry(
             () => api.listOrgTeams({ organization }),
             { maxRetries: options.maxRetries || 2, sleep: options.sleep }

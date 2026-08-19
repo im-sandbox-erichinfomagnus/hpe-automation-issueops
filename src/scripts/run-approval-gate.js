@@ -357,12 +357,12 @@ async function runApprovalGate(options = {}) {
             ? 'Approval was invalidated after the approval comment was removed. No repository ruleset mutation was attempted.'
             : 'Request is validated, centrally routed, and awaiting approval from the designated target organization owner. No repository ruleset mutation was attempted.'
       : auditArtifact.approval.approval_status === 'approved'
-        ? 'Request approval was granted by an organization owner. No membership mutation was attempted in this phase.'
+        ? 'Request approval was granted by an active organization member. No membership mutation was attempted in this phase.'
         : auditArtifact.approval.approval_status === 'denied'
-          ? 'Approval was denied because the approval comment did not come from an organization owner. No membership mutation was attempted.'
+          ? 'Approval was denied because the approval comment did not come from an active organization member. No membership mutation was attempted.'
           : auditArtifact.approval.approval_status === 'invalidated'
             ? 'Approval was invalidated after the approval comment was removed. No membership mutation was attempted.'
-            : 'Request is validated and awaiting approval from an organization owner. No membership mutation was attempted.';
+            : 'Request is validated and awaiting approval from an active organization member. No membership mutation was attempted.';
 
   const updatedArtifact = buildAuditArtifact({
     request: auditArtifact.request,

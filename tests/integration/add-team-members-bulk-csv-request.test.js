@@ -97,7 +97,7 @@ test('approved bulk CSV requests execute through the existing membership flow an
       approver_role: 'org_owner',
       approved_at: '2026-05-19T10:15:00Z',
       decision_source: 'comment',
-      decision_note: 'The approval comment approved was added by an organization owner.',
+      decision_note: 'The approval comment approved was added by an active organization member.',
     },
     reconciliation: {
       current_members: [],
@@ -113,7 +113,7 @@ test('approved bulk CSV requests execute through the existing membership flow an
       pending_count: 0,
       failure_count: 0,
       rollback_status: 'not_needed',
-      summary: 'Request approval was granted by an organization owner. No membership mutation was attempted in this phase.',
+      summary: 'Request approval was granted by an active organization member. No membership mutation was attempted in this phase.',
     },
     metadata: {
       operation: 'team_membership',

@@ -19,6 +19,10 @@ const { createGitHubTeamApi } = require('../workflow-support/github-team-api');
 const { createGitHubTeamRepoApi } = require('../workflow-support/github-team-repo-api');
 const { createGitHubRunnerApi } = require('../workflow-support/github-runner-api');
 const { executeWithBoundedRetry } = require('../workflow-support/handle-rate-limit');
+const {
+  resolveCallerOrgRoleRequirement,
+  revalidateCallerOrgRole,
+} = require('../workflow-support/revalidate-caller-org-role');
 const { executeCapabilityOperationWithRetry } = require('../workflow-support/handle-rate-limit');
 const { buildTenantBootstrapRateLimitContext } = require('../workflow-support/handle-rate-limit');
 const { buildTopologyRegistryReadRateLimitContext } = require('../workflow-support/handle-rate-limit');
@@ -1596,6 +1600,47 @@ async function runApprovedExecution(options = {}) {
     return auditArtifact;
   }
 
+  // Approval can be stale by execution time; in automatic mode, re-read the
+  // caller's org role immediately before mutation and fail closed on mismatch.
+  const callerRoleRequirement = resolveCallerOrgRoleRequirement(auditArtifact);
+  const callerMembershipApi = options.callerMembershipApi || createGitHubTeamApi({ token: mutationDecision.tokenInfo.token });
+  let callerRoleRateLimitSnapshot = null;
+  const callerRoleRevalidation = await revalidateCallerOrgRole({
+    auditArtifact,
+    getOrganizationMembership: callerRoleRequirement.required && typeof callerMembershipApi.getOrganizationMembership === 'function'
+      ? ({ organization, username }) => callerMembershipApi.getOrganizationMembership({ organization, username })
+      : null,
+    executeWithRetry: async (operationFn, retryOptions) => {
+      const attempt = await executeWithBoundedRetry(operationFn, retryOptions);
+      callerRoleRateLimitSnapshot = attempt.retry_plan && attempt.retry_plan.rate_limit_snapshot
+        ? attempt.retry_plan.rate_limit_snapshot
+        : callerRoleRateLimitSnapshot;
+      if (!attempt.ok) {
+        throw attempt.error || new Error('Caller organization membership lookup failed.');
+      }
+      return attempt.value;
+    },
+    maxRetries: options.maxRetries || 2,
+    sleep: options.sleep,
+  });
+  callerRoleRevalidation.rate_limit_snapshot = callerRoleRateLimitSnapshot;
+  auditArtifact.validation = {
+    ...(auditArtifact.validation || {}),
+    caller_authorization_revalidation: callerRoleRevalidation,
+  };
+
+  if (callerRoleRevalidation.required && !callerRoleRevalidation.authorized) {
+    return buildPreMutationFailureArtifact({
+      auditArtifact,
+      artifactPath,
+      env,
+      isTenantRepoCreation,
+      operationLabel: isTeamCreation ? 'team' : isTeamHierarchy ? 'child link' : (isTeamRepoAccess || isTeamRepoAccessRemoval || isTenantRepoCreation) ? 'repository' : (isHostedRunnerCreation || isHostedRunnerDeletion || isHostedRunnerMove) ? 'hosted_runner' : isRunnerGroupCreation ? 'runner_group' : isRepositoryRulesetOperation ? 'repository_ruleset' : isTenantCreation ? 'tenant_bootstrap' : 'membership',
+      rateLimitSnapshot: callerRoleRevalidation.rate_limit_snapshot,
+      failureMessage: `Execution stopped before any mutation because the caller organization role could not be reconfirmed (${callerRoleRevalidation.failure_reason}). No ${isTenantCreation ? 'tenant bootstrap mutation' : isTeamCreation ? 'team creation' : isTeamHierarchy ? 'child-team mutation' : isTenantRepoCreation ? 'tenant repository mutation' : isHostedRunnerCreation ? 'tenant hosted-runner mutation' : isHostedRunnerMove ? 'tenant hosted-runner move' : isHostedRunnerDeletion ? 'tenant hosted-runner deletion' : isRunnerGroupCreation ? 'tenant runner-group mutation' : isTenantVariableManagement ? 'tenant variable mutation' : isRepositoryRulesetOperation ? 'repository ruleset mutation' : (isTeamRepoAccess || isTeamRepoAccessRemoval) ? 'repository-access mutation' : 'membership mutation'} was attempted.`,
+    });
+  }
+
   if (isTenantCreation) {
     const tenantBoundaryGuard = validateTenantBoundaryGuardrails(auditArtifact.request || {});
     if (!tenantBoundaryGuard.valid) {
@@ -2670,6 +2715,8 @@ async function runApprovedExecution(options = {}) {
       }
     } else if (isTenantCreation || isTeamCreation) {
       let tenantBootstrapPreflightError = null;
+      let teamCreationPreflightError = null;
+      const createdTeamSlugs = [];
       if (isTenantCreation) {
         const tenantAdminLogin = auditArtifact.request && auditArtifact.request.tenant_admin_login
           ? String(auditArtifact.request.tenant_admin_login).trim().toLowerCase()
@@ -2691,11 +2738,26 @@ async function runApprovedExecution(options = {}) {
         }
       }
 
-      if (tenantBootstrapPreflightError) {
+      if (isTeamCreation) {
+        const intendedOwnerLogin = auditArtifact.request && auditArtifact.request.intended_owner_login
+          ? String(auditArtifact.request.intended_owner_login).trim().toLowerCase()
+          : '';
+        if (!intendedOwnerLogin) {
+          teamCreationPreflightError = 'Team creation policy blocked because intended_owner_login is missing; unable to enforce creator-only maintainer policy.';
+        } else if (
+          typeof api.addOrUpdateTeamMembership !== 'function' ||
+          typeof api.listTeamMembers !== 'function' ||
+          typeof api.removeTeamMembership !== 'function'
+        ) {
+          teamCreationPreflightError = 'Team creation policy blocked because required membership-normalization APIs are unavailable; creator-only maintainer policy cannot be enforced.';
+        }
+      }
+
+      if (tenantBootstrapPreflightError || teamCreationPreflightError) {
         executionResults.push({
           execution_result: 'failed',
-          failure_reason: 'tenant_policy_blocked',
-          detail: tenantBootstrapPreflightError,
+          failure_reason: isTeamCreation ? 'team_policy_blocked' : 'tenant_policy_blocked',
+          detail: teamCreationPreflightError || tenantBootstrapPreflightError,
         });
       } else {
         for (const team of reconciliationPlan.teams_to_create) {
@@ -2713,6 +2775,14 @@ async function runApprovedExecution(options = {}) {
           latestRateLimitSnapshot = attemptResult.retry_plan.rate_limit_snapshot || latestRateLimitSnapshot;
 
           if (attemptResult.ok) {
+            const createdTeamSlug = attemptResult.value && attemptResult.value.slug
+              ? String(attemptResult.value.slug).toLowerCase()
+              : team && team.normalized_slug
+                ? String(team.normalized_slug).toLowerCase()
+                : '';
+            if (createdTeamSlug) {
+              createdTeamSlugs.push(createdTeamSlug);
+            }
             executionResults.push({
               normalized_slug: team.normalized_slug,
               requested_name: team.requested_name,
@@ -2733,6 +2803,85 @@ async function runApprovedExecution(options = {}) {
             execution_result: 'failed',
             failure_reason: classifyFailureReason(attemptResult.error),
           });
+        }
+
+        if (isTeamCreation && createdTeamSlugs.length > 0) {
+          const maintainerLogin = auditArtifact.request && auditArtifact.request.intended_owner_login
+            ? String(auditArtifact.request.intended_owner_login).trim().toLowerCase()
+            : '';
+
+          if (maintainerLogin) {
+            for (const teamSlug of createdTeamSlugs) {
+              const membershipResult = await executeWithBoundedRetry(
+                () => api.addOrUpdateTeamMembership({
+                  organization: auditArtifact.request.organization,
+                  teamSlug,
+                  username: maintainerLogin,
+                  role: 'maintainer',
+                }),
+                {
+                  maxRetries: options.maxRetries || 2,
+                  sleep: options.sleep,
+                }
+              );
+
+              latestRateLimitSnapshot = membershipResult.retry_plan.rate_limit_snapshot || latestRateLimitSnapshot;
+              if (!membershipResult.ok) {
+                executionResults.push({
+                  team_slug: teamSlug,
+                  username: maintainerLogin,
+                  execution_result: 'failed',
+                  failure_reason: classifyFailureReason(membershipResult.error),
+                  detail: 'creator_maintainer_assignment_failed',
+                });
+              }
+
+              // GitHub auto-adds the authenticated creator as a team maintainer.
+              // For create-org-teams, keep only the requested org member as maintainer.
+              const teamMembersResult = await executeWithBoundedRetry(
+                () => api.listTeamMembers({
+                  organization: auditArtifact.request.organization,
+                  teamSlug,
+                }),
+                {
+                  maxRetries: options.maxRetries || 2,
+                  sleep: options.sleep,
+                }
+              );
+
+              latestRateLimitSnapshot = teamMembersResult.retry_plan.rate_limit_snapshot || latestRateLimitSnapshot;
+              if (teamMembersResult.ok) {
+                const removableMembers = (teamMembersResult.value || [])
+                  .map((member) => String(member.username || '').trim().toLowerCase())
+                  .filter((username) => username && username !== maintainerLogin);
+
+                for (const username of removableMembers) {
+                  const removalResult = await executeWithBoundedRetry(
+                    () => api.removeTeamMembership({
+                      organization: auditArtifact.request.organization,
+                      teamSlug,
+                      username,
+                    }),
+                    {
+                      maxRetries: options.maxRetries || 2,
+                      sleep: options.sleep,
+                    }
+                  );
+
+                  latestRateLimitSnapshot = removalResult.retry_plan.rate_limit_snapshot || latestRateLimitSnapshot;
+                  if (!removalResult.ok) {
+                    executionResults.push({
+                      team_slug: teamSlug,
+                      username,
+                      execution_result: 'failed',
+                      failure_reason: classifyFailureReason(removalResult.error),
+                      detail: 'creator_membership_normalization_failed',
+                    });
+                  }
+                }
+              }
+            }
+          }
         }
       }
 
@@ -3702,7 +3851,7 @@ async function runApprovedExecution(options = {}) {
     executionOutcome.failure_count === 0 &&
     executionOutcome.rejected_count === 0;
   if (isTeamCreation && executionOutcome.created_count > 0) {
-    executionOutcome.summary = `${executionOutcome.summary} Note: GitHub automatically makes the authenticated creator a team maintainer when a new team is created, so the creator becomes a team maintainer as an operational constraint of this workflow.`;
+    executionOutcome.summary = `${executionOutcome.summary} Membership normalization enforced: only the requested org member remains as team maintainer for newly created teams.`;
   }
   if (isTenantCreation) {
     const intendedTenantAdmin = reconciliationPlan.tenant_admin_intended_login || auditArtifact.request.tenant_admin_login || 'n/a';
