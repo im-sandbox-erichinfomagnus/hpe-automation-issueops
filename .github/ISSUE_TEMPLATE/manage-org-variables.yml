@@ -1,0 +1,90 @@
+name: Manage org variables
+description: Request create, update, or delete of org-wide organization Actions variables, authorized by active target organization ownership.
+title: "[manage-org-variables] <org>: <summary>"
+labels:
+  - issueops
+  - manage-org-variables
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this request to manage organization-wide GitHub Actions variables on
+        the target organization (org settings > actions variables). This is NOT
+        the tenant-scoped variables op: names are used as-is with no tenant
+        prefix. Only active owners of the target organization may request this
+        operation. Tenant self-serve: once the requester passes the caller gate
+        the request executes directly — there is no separate approval step.
+
+  - type: input
+    id: organization
+    attributes:
+      label: Target organization
+      description: GitHub organization whose org-wide Actions variables should be managed.
+      placeholder: octo-org
+    validations:
+      required: true
+
+  - type: dropdown
+    id: org_variable_operation
+    attributes:
+      label: Org variable operation
+      description: Default operation applied to every row that does not carry its own operation column.
+      options:
+        - create
+        - update
+        - delete
+      default: 0
+    validations:
+      required: true
+
+  - type: input
+    id: org_variable_name
+    attributes:
+      label: Variable name (optional)
+      description: Name for a single variable, used org-wide as-is (no tenant prefix). Provide either this or the batch CSV below.
+      placeholder: PLATFORM_API_BASE_URL
+    validations:
+      required: false
+
+  - type: input
+    id: org_variable_value
+    attributes:
+      label: Variable value (optional)
+      description: Value for the single variable. Required for create and update. Ignored for delete.
+      placeholder: https://api.example.com
+    validations:
+      required: false
+
+  - type: textarea
+    id: org_variables_csv
+    attributes:
+      label: Variables CSV (optional)
+      description: Batch input, one "name,value,operation,visibility" per line. Operation (create/update/delete) and visibility (all/private) columns are optional; rows without them use the operation selected above and visibility "all". An optional header row is allowed. Omit the value for delete rows. Values must not contain commas.
+      placeholder: |
+        name,value,operation,visibility
+        PLATFORM_API_BASE_URL,https://api.example.com,create,all
+        DEPLOY_CHANNEL,stable,update,
+        RETIRED_FLAG,,delete,
+    validations:
+      required: false
+
+  - type: dropdown
+    id: dry_run
+    attributes:
+      label: Dry-run mode
+      description: Dry-run validates the caller gate and planned mutation without changing any Actions variable.
+      options:
+        - "true"
+        - "false"
+      default: 1
+    validations:
+      required: true
+
+  - type: textarea
+    id: justification
+    attributes:
+      label: Business justification
+      description: Explain why these org-wide variables are needed.
+      placeholder: Provide shared platform endpoint metadata for all repositories.
+    validations:
+      required: true
