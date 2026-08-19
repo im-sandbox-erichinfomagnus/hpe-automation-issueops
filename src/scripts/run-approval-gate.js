@@ -101,7 +101,7 @@ async function runApprovalGate(options = {}) {
   const operation = auditArtifact.metadata && auditArtifact.metadata.operation;
 
   if (
-    (operation === 'team_membership' || operation === 'team_creation' || operation === 'team_hierarchy' || operation === 'team_repo_access' || operation === 'team_repo_access_removal' || operation === 'tenant_creation' || operation === 'tenant_repo_creation') &&
+    (operation === 'team_membership' || operation === 'team_creation' || operation === 'team_hierarchy' || operation === 'team_repo_access' || operation === 'team_repo_access_removal' || operation === 'tenant_creation' || operation === 'tenant_repo_creation' || operation === 'cicd_admin_membership') &&
     auditArtifact.request &&
     auditArtifact.request.intake_mode === 'csv_attachment' &&
     ['executed', 'partially_executed', 'failed', 'failed_after_approved_execution'].includes(auditArtifact.request.request_status)
