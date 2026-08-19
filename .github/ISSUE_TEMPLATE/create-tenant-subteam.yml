@@ -1,0 +1,99 @@
+name: Create Tenant Subteam
+description: Request creation of one or more tenant subteams under the tenant root team (or an existing tenant child team), authorized by target org ownership or active tenant top-team maintainership.
+title: "[create-tenant-subteam] <org>/<tenant>: <summary>"
+labels:
+  - issueops
+  - create-tenant-subteam
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this request to create one or more tenant subteams. Tenant self-serve:
+        once the requester passes the caller gate the request executes directly —
+        there is no separate approval step. Each subteam is named with the tenant
+        prefix (`<tenantKey>-<subteam>`), parented under the tenant root team (or a
+        chosen tenant child team), and every active tenant root-team maintainer is
+        assigned as its Team Maintainer.
+
+  - type: input
+    id: organization
+    attributes:
+      label: Target organization
+      description: GitHub organization that owns the tenant.
+      placeholder: octo-org
+    validations:
+      required: true
+
+  - type: input
+    id: tenant_name
+    attributes:
+      label: Tenant name
+      description: Human-readable tenant name exactly as defined in tenant-registry for the target organization.
+      placeholder: ContosoUK
+    validations:
+      required: true
+
+  - type: dropdown
+    id: subteam_operation
+    attributes:
+      label: Subteam operation
+      description: Operation to perform for the tenant subteams.
+      options:
+        - create
+      default: 0
+    validations:
+      required: true
+
+  - type: input
+    id: parent_team
+    attributes:
+      label: Parent team (optional)
+      description: Slug of the tenant team to parent the subteams under. Leave blank for the tenant root team. Must be the root team or a tenant-prefixed child team.
+      placeholder: contosouk-platform
+    validations:
+      required: false
+
+  - type: dropdown
+    id: intake_mode
+    attributes:
+      label: Intake mode
+      description: Choose whether to enter subteam names directly or upload a CSV in a follow-up issue comment.
+      options:
+        - manual
+        - csv_attachment
+      default: 0
+    validations:
+      required: true
+
+  - type: textarea
+    id: requested_subteams
+    attributes:
+      label: Requested subteams
+      description: Manual input path. Enter one subteam name per line (tenant prefix is added automatically). Leave this blank when intake mode is csv_attachment.
+      placeholder: |
+        Payments
+        Portal Web
+      render: text
+    validations:
+      required: false
+
+  - type: dropdown
+    id: dry_run
+    attributes:
+      label: Dry-run mode
+      description: Dry-run validates tenant context and planned mutation without creating any team.
+      options:
+        - "true"
+        - "false"
+      default: 1
+    validations:
+      required: true
+
+  - type: textarea
+    id: business_justification
+    attributes:
+      label: Business justification
+      description: Explain why these tenant subteams are needed.
+      placeholder: Split the tenant engineering group into payment and portal delivery teams.
+    validations:
+      required: true
