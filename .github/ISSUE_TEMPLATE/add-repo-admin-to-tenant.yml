@@ -1,0 +1,90 @@
+name: Add Repo Admin to Tenant
+description: Request adding one or more org members to the tenant's RepoAdmin team, authorized by target org ownership or active tenant top-team maintainership.
+title: "[add-repo-admin-to-tenant] <org>/<tenant>: <summary>"
+labels:
+  - issueops
+  - add-repo-admin-to-tenant
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this request to add one or more organization members to the tenant's
+        RepoAdmin team (created at tenant bootstrap). Tenant self-serve: once the
+        requester passes the caller gate the request executes directly — there is
+        no separate approval step. If the team is missing it is created as a child
+        of the tenant root team and every active tenant root-team maintainer is
+        assigned as its Team Maintainer.
+
+  - type: input
+    id: organization
+    attributes:
+      label: Target organization
+      description: GitHub organization that owns the tenant.
+      placeholder: octo-org
+    validations:
+      required: true
+
+  - type: input
+    id: tenant_name
+    attributes:
+      label: Tenant name
+      description: Human-readable tenant name exactly as defined in tenant-registry for the target organization.
+      placeholder: ContosoUK
+    validations:
+      required: true
+
+  - type: dropdown
+    id: repo_admin_operation
+    attributes:
+      label: Repo admin operation
+      description: Membership operation to perform on the tenant RepoAdmin team.
+      options:
+        - add
+      default: 0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: intake_mode
+    attributes:
+      label: Intake mode
+      description: Choose whether to enter usernames directly or upload a CSV in a follow-up issue comment.
+      options:
+        - manual
+        - csv_attachment
+      default: 0
+    validations:
+      required: true
+
+  - type: textarea
+    id: requested_people
+    attributes:
+      label: Requested people
+      description: Manual input path. Enter one GitHub username per line, or use comma-separated values. Leave this blank when intake mode is csv_attachment.
+      placeholder: |
+        octocat
+        hubot
+      render: text
+    validations:
+      required: false
+
+  - type: dropdown
+    id: dry_run
+    attributes:
+      label: Dry-run mode
+      description: Dry-run validates tenant context and planned mutation without changing any team or membership.
+      options:
+        - "true"
+        - "false"
+      default: 1
+    validations:
+      required: true
+
+  - type: textarea
+    id: business_justification
+    attributes:
+      label: Business justification
+      description: Explain why this repo admin membership is needed.
+      placeholder: These engineers manage repository creation and access for the tenant.
+    validations:
+      required: true
