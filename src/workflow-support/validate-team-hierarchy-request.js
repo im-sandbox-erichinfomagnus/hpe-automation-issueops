@@ -194,6 +194,7 @@ async function validateTeamHierarchyRequest(input = {}, options = {}) {
   const errors = [];
   const warnings = [];
   const getOrganization = options.getOrganization;
+  const getOrganizationMembership = options.getOrganizationMembership;
   const listTeams = options.listTeams;
   const resolveTeamMembership = options.resolveTeamMembership;
   const issueComments = options.issueComments || input.issueComments || input.issue_comments || [];
@@ -480,54 +481,38 @@ async function validateTeamHierarchyRequest(input = {}, options = {}) {
   if (
     request.organization &&
     request.designated_approver_login &&
-    parentTeamExists &&
-    typeof resolveTeamMembership === 'function'
+    typeof getOrganizationMembership === 'function'
   ) {
-    const parentMembership = await resolveTeamMembership({
+    const orgMembership = await getOrganizationMembership({
       organization: request.organization,
-      teamSlug: parentTeam.slug,
       username: request.designated_approver_login,
     });
 
-    designatedApproverAuthorization.parent_team_role =
-      parentMembership && parentMembership.membership
-        ? parentMembership.membership.role || 'member'
-        : 'absent';
+    const orgMembershipState = orgMembership && orgMembership.membership
+      ? String(orgMembership.membership.state || 'active').toLowerCase()
+      : 'absent';
 
-    let hasMembershipAuthorizationFailure = designatedApproverAuthorization.parent_team_role !== 'maintainer';
-    for (const childLink of request.requested_child_links) {
-      const childTeam = resolveChildTeamFromLookup(
-        childLink.child_team_slug,
-        requestParentCanonicalSlug,
-        teamLookupMaps
-      );
-      if (!childTeam) {
-        designatedApproverAuthorization.child_team_roles.push({
-          child_team_slug: childLink.child_team_slug,
-          role: 'missing_team',
+    designatedApproverAuthorization.state = orgMembership && orgMembership.exists && orgMembershipState === 'active'
+      ? 'authorized'
+      : 'unauthorized';
+
+    if (typeof resolveTeamMembership === 'function' && request.parent_team_slug) {
+      try {
+        const parentMembership = await resolveTeamMembership({
+          organization: request.organization,
+          teamSlug: request.parent_team_slug,
+          username: request.designated_approver_login,
         });
-        continue;
-      }
-
-      const membership = await resolveTeamMembership({
-        organization: request.organization,
-        teamSlug: childTeam.slug,
-        username: request.designated_approver_login,
-      });
-      const role =
-        membership && membership.membership ? membership.membership.role || 'member' : 'absent';
-      designatedApproverAuthorization.child_team_roles.push({
-        child_team_slug: childLink.child_team_slug,
-        role,
-      });
-      if (role !== 'maintainer') {
-        hasMembershipAuthorizationFailure = true;
+        designatedApproverAuthorization.parent_team_role = parentMembership && parentMembership.membership
+          ? parentMembership.membership.role || 'member'
+          : 'absent';
+      } catch (error) {
+        designatedApproverAuthorization.parent_team_role = 'unknown';
       }
     }
 
-    designatedApproverAuthorization.state = hasMembershipAuthorizationFailure ? 'unauthorized' : 'authorized';
-    if (hasMembershipAuthorizationFailure) {
-      errors.push('The designated hierarchy approver is not a current maintainer of the requested parent team and every requested child team.');
+    if (designatedApproverAuthorization.state !== 'authorized') {
+      errors.push('The designated hierarchy approver must be an active member of the target organization.');
     }
   }
 
@@ -641,6 +626,41 @@ async function validateTeamHierarchyRequest(input = {}, options = {}) {
     .map((childLink) => childLink.requested_name);
   if (cycleBlocked.length > 0) {
     errors.push(`The request would create a team hierarchy cycle: ${cycleBlocked.join(', ')}`);
+  }
+
+  if (
+    !skipDesignatedApproverValidation &&
+    request.organization &&
+    request.designated_approver_login &&
+    typeof resolveTeamMembership === 'function'
+  ) {
+    const childRoleSlugs = [...new Set(
+      requestedChildLinks
+        .map((childLink) => normalizeTeamSlug(childLink.resolved_child_team_slug || childLink.child_team_slug))
+        .filter(Boolean)
+    )];
+
+    for (const childTeamSlug of childRoleSlugs) {
+      try {
+        const membership = await resolveTeamMembership({
+          organization: request.organization,
+          teamSlug: childTeamSlug,
+          username: request.designated_approver_login,
+        });
+        const role = membership && membership.membership
+          ? membership.membership.role || 'member'
+          : 'absent';
+        designatedApproverAuthorization.child_team_roles.push({
+          child_team_slug: childTeamSlug,
+          role,
+        });
+      } catch (error) {
+        designatedApproverAuthorization.child_team_roles.push({
+          child_team_slug: childTeamSlug,
+          role: 'unknown',
+        });
+      }
+    }
   }
 
   return {

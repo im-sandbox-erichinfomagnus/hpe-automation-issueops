@@ -102,7 +102,7 @@ function buildPendingApprovalNote(approvalMode, approvalCommand) {
     return `Add an issue comment containing exactly '${approvalCommand}' from the designated active target organization owner to authorize ${describeTenantRunnerMutation(approvalMode)} execution.`;
   }
 
-  return `Add an issue comment containing exactly '${approvalCommand}' as an organization owner to authorize execution.`;
+  return `Add an issue comment containing exactly '${approvalCommand}' as an active organization member to authorize execution.`;
 }
 
 function buildPendingAttachmentApprovalNote(approvalMode, approvalCommand) {
@@ -130,7 +130,7 @@ function buildPendingAttachmentApprovalNote(approvalMode, approvalCommand) {
     return `Add an issue comment containing exactly '${approvalCommand}' from the designated active target organization owner after the accepted CSV attachment comment to authorize repository creation execution.`;
   }
 
-  return `Add an issue comment containing exactly '${approvalCommand}' as an organization owner after the accepted CSV attachment comment to authorize execution.`;
+  return `Add an issue comment containing exactly '${approvalCommand}' as an active organization member after the accepted CSV attachment comment to authorize execution.`;
 }
 
 function hasContextMismatch(approvalMode, latestContextMarker, priorApprovedContextMarker) {
@@ -415,7 +415,7 @@ async function evaluateApprovalGate(input = {}, options = {}) {
     };
   }
 
-  if (approver.approver_role !== 'org_owner') {
+  if (!['org_owner', 'org_member'].includes(approver.approver_role)) {
     return {
       approval_status: 'denied',
       approver_login: approverLogin,
@@ -423,7 +423,7 @@ async function evaluateApprovalGate(input = {}, options = {}) {
       approver_membership_state: approver.approver_membership_state || 'unknown',
       approved_at: approvalComment.created_at || null,
       decision_source: 'comment',
-      decision_note: `The approval comment '${approvalCommand}' was added by a non-organization-owner and does not authorize mutation.`,
+      decision_note: `The approval comment '${approvalCommand}' was added by a non-active-organization-member and does not authorize mutation.`,
     };
   }
 
@@ -434,7 +434,7 @@ async function evaluateApprovalGate(input = {}, options = {}) {
     approver_membership_state: approver.approver_membership_state || 'active',
     approved_at: approvalComment.created_at || null,
     decision_source: 'comment',
-    decision_note: `The approval comment '${approvalCommand}' was added by an organization owner.`,
+    decision_note: `The approval comment '${approvalCommand}' was added by an active organization member.`,
   };
 }
 
