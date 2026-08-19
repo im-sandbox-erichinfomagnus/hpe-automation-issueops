@@ -267,6 +267,14 @@ function createGitHubTeamApi(options = {}) {
       return (result.payload || []).map(mapMemberState);
     },
 
+    async listTeamMaintainers({ organization, teamSlug }) {
+      const result = await request(`/orgs/${organization}/teams/${teamSlug}/members?role=maintainer&per_page=100`);
+      if (!result.ok) {
+        throw Object.assign(new Error('Failed to list team maintainers'), result);
+      }
+      return (result.payload || []).map(mapMemberState);
+    },
+
     async getMembershipForUser({ organization, teamSlug, username }) {
       const result = await request(
         `/orgs/${organization}/teams/${teamSlug}/memberships/${username}`
