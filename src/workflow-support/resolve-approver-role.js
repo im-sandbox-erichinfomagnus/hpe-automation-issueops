@@ -28,14 +28,29 @@ async function resolveApproverRole(input = {}, options = {}) {
     return {
       approver_login: input.approverLogin,
       approver_role: 'other',
+      approver_membership_state: 'absent',
+    };
+  }
+
+  const membershipState = membership.membership && membership.membership.state
+    ? String(membership.membership.state || '').toLowerCase()
+    : 'active';
+  const membershipRole = membership.membership && membership.membership.role
+    ? String(membership.membership.role || '').toLowerCase()
+    : 'member';
+
+  if (membershipState !== 'active') {
+    return {
+      approver_login: input.approverLogin,
+      approver_role: 'other',
+      approver_membership_state: membershipState,
     };
   }
 
   return {
     approver_login: input.approverLogin,
-    approver_role: membership.membership && membership.membership.role === 'admin'
-      ? 'org_owner'
-      : 'other',
+    approver_role: membershipRole === 'admin' ? 'org_owner' : 'org_member',
+    approver_membership_state: membershipState,
   };
 }
 

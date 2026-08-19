@@ -2,7 +2,7 @@
 
 const { loadWorkflowToken } = require('../../workflow-support/load-workflow-token');
 
-const DEFAULT_ALLOWED_APPROVER_ROLES = ['org_owner'];
+const DEFAULT_ALLOWED_APPROVER_ROLES = ['org_owner', 'org_member'];
 
 function isEligibleApproverRole(role, options = {}) {
   const allowedApproverRoles = options.allowedApproverRoles || DEFAULT_ALLOWED_APPROVER_ROLES;

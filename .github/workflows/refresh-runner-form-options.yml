@@ -26,11 +26,11 @@ jobs:
         run: |
           set -euo pipefail
           if git diff --quiet; then
-            echo "No catalog changes."
+            echo "No template refresh changes."
           else
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add .github/ISSUE_TEMPLATE/create-tenant-hosted-runner.yml
-            git commit -m "refresh runner form image and machine-size options from GitHub catalog"
+            git add .github/ISSUE_TEMPLATE/*.yml
+            git commit -m "refresh issue form organization defaults and runner catalog options"
             git push
           fi
