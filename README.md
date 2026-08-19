@@ -30,22 +30,22 @@ is accepted.
 
 ## Supported Operations
 
-| Area | Issue form | What it manages |
-|---|---|---|
-| Organization teams | [Create organization teams](.github/ISSUE_TEMPLATE/create-org-teams.yml) | Creates one or more empty teams |
-| Organization teams | [Add team members](.github/ISSUE_TEMPLATE/add-team-members.yml) | Adds users to an existing team |
-| Organization teams | [Add child teams](.github/ISSUE_TEMPLATE/add-child-teams.yml) | Attaches existing child teams to an existing parent |
-| Repository access | [Add team repository access](.github/ISSUE_TEMPLATE/add-team-repo-access.yml) | Grants a team access to one or more repositories |
-| Repository access | [Remove team repository access](.github/ISSUE_TEMPLATE/remove-team-repo-access.yml) | Removes a team's access from one or more repositories |
-| Tenant bootstrap | [Create tenant model](.github/ISSUE_TEMPLATE/create-tenant-model.yml) | Creates the canonical tenant teams, hierarchy, maintainers, and registry record |
-| Tenant repositories | [Create tenant repositories](.github/ISSUE_TEMPLATE/create-tenant-repos.yml) | Creates repositories inside an authorized tenant boundary |
-| Repository rulesets | [Create repository ruleset](.github/ISSUE_TEMPLATE/create-repository-ruleset.yml) | Creates repository-level rulesets in spreadsheet batches |
-| Repository rulesets | [Delete repository ruleset](.github/ISSUE_TEMPLATE/delete-repository-ruleset.yml) | Deletes named repository-level rulesets |
-| Actions variables | [Manage tenant variables](.github/ISSUE_TEMPLATE/manage-tenant-variables.yml) | Creates, updates, or deletes tenant-prefixed organization variables |
-| Actions runners | [Create tenant runner group](.github/ISSUE_TEMPLATE/create-tenant-runner-groups.yml) | Creates an isolated tenant runner group |
-| Actions runners | [Create tenant hosted runner](.github/ISSUE_TEMPLATE/create-tenant-hosted-runner.yml) | Creates a tenant-scoped GitHub-hosted runner |
-| Actions runners | [Move tenant hosted runner](.github/ISSUE_TEMPLATE/move-tenant-hosted-runner.yml) | Moves a hosted runner into an existing tenant runner group |
-| Actions runners | [Delete tenant hosted runner](.github/ISSUE_TEMPLATE/delete-tenant-hosted-runner.yml) | Deletes a tenant-scoped hosted runner |
+| Area                | Issue form                                                                           | What it manages                                                                 |
+| ------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------- |
+| Organization teams  | [Create organization teams](.github/ISSUE_TEMPLATE/create-org-teams.yml)              | Creates one or more empty teams                                                 |
+| Organization teams  | [Add team members](.github/ISSUE_TEMPLATE/add-team-members.yml)                       | Adds users to an existing team                                                  |
+| Organization teams  | [Add child teams](.github/ISSUE_TEMPLATE/add-child-teams.yml)                         | Attaches existing child teams to an existing parent                             |
+| Repository access   | [Add team repository access](.github/ISSUE_TEMPLATE/add-team-repo-access.yml)         | Grants a team access to one or more repositories                                |
+| Repository access   | [Remove team repository access](.github/ISSUE_TEMPLATE/remove-team-repo-access.yml)   | Removes a team's access from one or more repositories                           |
+| Tenant bootstrap    | [Create tenant model](.github/ISSUE_TEMPLATE/create-tenant-model.yml)                 | Creates the canonical tenant teams, hierarchy, maintainers, and registry record |
+| Tenant repositories | [Create tenant repositories](.github/ISSUE_TEMPLATE/create-tenant-repos.yml)          | Creates repositories inside an authorized tenant boundary                       |
+| Repository rulesets | [Create repository ruleset](.github/ISSUE_TEMPLATE/create-repository-ruleset.yml)     | Creates repository-level rulesets in spreadsheet batches                        |
+| Repository rulesets | [Delete repository ruleset](.github/ISSUE_TEMPLATE/delete-repository-ruleset.yml)     | Deletes named repository-level rulesets                                         |
+| Actions variables   | [Manage tenant variables](.github/ISSUE_TEMPLATE/manage-tenant-variables.yml)         | Creates, updates, or deletes tenant-prefixed organization variables             |
+| Actions runners     | [Create tenant runner group](.github/ISSUE_TEMPLATE/create-tenant-runner-groups.yml)  | Creates an isolated tenant runner group                                         |
+| Actions runners     | [Create tenant hosted runner](.github/ISSUE_TEMPLATE/create-tenant-hosted-runner.yml) | Creates a tenant-scoped GitHub-hosted runner                                    |
+| Actions runners     | [Move tenant hosted runner](.github/ISSUE_TEMPLATE/move-tenant-hosted-runner.yml)     | Moves a hosted runner into an existing tenant runner group                      |
+| Actions runners     | [Delete tenant hosted runner](.github/ISSUE_TEMPLATE/delete-tenant-hosted-runner.yml) | Deletes a tenant-scoped hosted runner                                           |
 
 The [Tenant IssueOps runbook](docs/tenant-issueops-runbook.md) lists the
 spreadsheet schema and authorization path for each operation. The
