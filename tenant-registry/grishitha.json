@@ -79,7 +79,7 @@
     "primaryContact": "grishitha.vinta@infomagnus.com",
     "secondaryContact": null,
     "createdBy": "umamaheswarb-infomagnus",
-    "createdDate": "2026-08-24T15:26:55.384Z"
+    "createdDate": "2026-08-24T15:27:20.209Z"
   },
   "lifecycleStatus": "active",
   "tenant_key": "grishitha",
@@ -107,7 +107,7 @@
   "approver_login": "umamaheswarb-infomagnus",
   "lifecycle_status": "active",
   "created_at": "2026-08-24T15:26:34.831Z",
-  "updated_at": "2026-08-24T15:27:02.224Z",
+  "updated_at": "2026-08-24T15:27:25.662Z",
   "source_issue_number": 62,
-  "source_run_id": "32744885099"
+  "source_run_id": "32744930953"
 }
