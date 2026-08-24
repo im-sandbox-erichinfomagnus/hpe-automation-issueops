@@ -52,9 +52,27 @@ body:
       label: Runner image id
       description: Image for the hosted runner, from the organization's GitHub-owned image list.
       options:
-        - "2295"
         - "2294"
+        - "5287"
+        - "2295"
+        - "5289"
+        - "4951"
+        - "5000"
+        - "2306"
+        - "2364"
+        - "2365"
+        - "2370"
+        - "2371"
+        - "3348"
+        - "4091"
+        - "4799"
+        - "4800"
+        - "5291"
+        - "4959"
+        - "2307"
         - "2298"
+        - "4021"
+        - "5379"
       default: 0
     validations:
       required: false
@@ -78,13 +96,24 @@ body:
       label: Runner machine size
       description: Machine size from the organization's machine-size list.
       options:
-        - 4-core
         - 2-core
+        - 4-core
         - 8-core
         - 16-core
         - 32-core
+        - 64-core
+        - 96-core
+        - arm-2-core
         - arm-4-core
         - arm-8-core
+        - arm-16-core
+        - arm-32-core
+        - arm-64-core
+        - gpu-t4-4-core
+        - intel-4-core
+        - intel-12-core
+        - m1-3-core
+        - m2-5-core
       default: 0
     validations:
       required: false
