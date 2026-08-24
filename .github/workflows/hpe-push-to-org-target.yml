@@ -188,7 +188,6 @@ jobs:
             --exclude='/.github/workflows/.github/' \
             --exclude='/.github/workflows/hpe-repo-sync.yml' \
             --exclude='/.github/workflows/hpe-push-labels.yml' \
-            --exclude='/.github/workflows/hpe-push-to-org-target.yml' \
             --exclude='/tenant-registry/*.json' \
             --include='/.github/' \
             --include='/.github/workflows/***' \
