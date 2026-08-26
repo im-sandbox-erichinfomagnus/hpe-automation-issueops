@@ -3609,7 +3609,18 @@ async function runApprovedExecution(options = {}) {
 
         latestRateLimitSnapshot = refreshedTeamsResult.retry_plan.rate_limit_snapshot || latestRateLimitSnapshot;
         const refreshedTeams = refreshedTeamsResult.ok ? refreshedTeamsResult.value : currentTeams;
-        const parentTeam = (refreshedTeams || []).find((team) => String(team.slug || '').toLowerCase() === String(auditArtifact.request.tenant_team_slug || '').toLowerCase());
+        const tenantRootSlug = String(auditArtifact.request.tenant_team_slug || '').toLowerCase();
+        const parentTeam = (refreshedTeams || []).find((team) => String(team.slug || '').toLowerCase() === tenantRootSlug);
+        // The refreshed listing can lag behind teams created in this run; fall back to the creation results.
+        const parentCreationOrNoopResult = executionResults.find((result) =>
+          String(result.normalized_slug || '').toLowerCase() === tenantRootSlug &&
+          (result.created_team_id || result.current_team_id)
+        );
+        const parentTeamId = parentTeam && parentTeam.id
+          ? parentTeam.id
+          : parentCreationOrNoopResult
+            ? (parentCreationOrNoopResult.created_team_id || parentCreationOrNoopResult.current_team_id)
+            : null;
         const requestedChildLinks = Array.isArray(auditArtifact.request.requested_child_links)
           ? auditArtifact.request.requested_child_links
           : [];
@@ -3835,7 +3846,7 @@ async function runApprovedExecution(options = {}) {
         }
 
         try {
-          if (parentTeam && requestedChildLinks.length > 0) {
+          if (requestedChildLinks.length > 0) {
             assertTenantBootstrapHierarchyAllowed({
               approval_status: auditArtifact.approval.approval_status,
               approver_login: auditArtifact.approval.approver_login,
@@ -3847,23 +3858,29 @@ async function runApprovedExecution(options = {}) {
             });
 
             for (const childLink of requestedChildLinks) {
+              const childTeamSlug = String(childLink.child_team_slug || '').toLowerCase();
               const childTeam = (refreshedTeams || []).find((team) =>
-                String(team.slug || '').toLowerCase() === String(childLink.child_team_slug || '').toLowerCase()
+                String(team.slug || '').toLowerCase() === childTeamSlug
               );
-              if (!childTeam) {
-                continue;
-              }
+              const childTeamRequestedName = childLink.requested_name || childLink.requested_child_name || childTeamSlug;
 
-              const childParentSlug = childTeam.parent && childTeam.parent.slug
+              const childParentSlug = childTeam && childTeam.parent && childTeam.parent.slug
                 ? String(childTeam.parent.slug).toLowerCase()
                 : null;
 
-              if (!childParentSlug) {
+              if (!parentTeamId) {
+                executionResults.push({
+                  team_slug: childTeamSlug,
+                  requested_name: childTeamRequestedName,
+                  execution_result: 'failed',
+                  failure_reason: 'parent_team_id_unresolved',
+                });
+              } else if (!childParentSlug) {
                 const linkResult = await executeWithBoundedRetry(
                   () => api.updateTeamParent({
                     organization: auditArtifact.request.organization,
-                    teamSlug: childTeam.slug,
-                    parentTeamId: parentTeam.id,
+                    teamSlug: childTeamSlug,
+                    parentTeamId,
                   }),
                   {
                     maxRetries: options.maxRetries || 2,
@@ -3873,22 +3890,22 @@ async function runApprovedExecution(options = {}) {
 
                 latestRateLimitSnapshot = linkResult.retry_plan.rate_limit_snapshot || latestRateLimitSnapshot;
                 executionResults.push({
-                  team_slug: childTeam.slug,
-                  requested_name: childTeam.name,
+                  team_slug: childTeamSlug,
+                  requested_name: childTeamRequestedName,
                   execution_result: linkResult.ok ? 'linked' : 'failed',
                   failure_reason: linkResult.ok ? null : classifyFailureReason(linkResult.error),
                 });
-              } else if (childParentSlug === String(parentTeam.slug || '').toLowerCase()) {
+              } else if (childParentSlug === tenantRootSlug) {
                 executionResults.push({
-                  team_slug: childTeam.slug,
-                  requested_name: childTeam.name,
+                  team_slug: childTeamSlug,
+                  requested_name: childTeamRequestedName,
                   execution_result: 'noop',
                   failure_reason: null,
                 });
               } else {
                 executionResults.push({
-                  team_slug: childTeam.slug,
-                  requested_name: childTeam.name,
+                  team_slug: childTeamSlug,
+                  requested_name: childTeamRequestedName,
                   execution_result: 'failed',
                   failure_reason: 'reparent_blocked',
                 });
@@ -3927,7 +3944,7 @@ async function runApprovedExecution(options = {}) {
                     teamSlug,
                     username: tenantAdminLogin,
                   })
-                : teamSlug === parentTeam.slug
+                : parentTeam && teamSlug === parentTeam.slug
                   ? tenantAdminMembership
                   : null;
 
