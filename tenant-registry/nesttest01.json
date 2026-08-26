@@ -79,7 +79,7 @@
     "primaryContact": "owner@example.com",
     "secondaryContact": null,
     "createdBy": "harism-infomagnus",
-    "createdDate": "2026-08-26T20:23:10.520Z"
+    "createdDate": "2026-08-26T20:23:31.792Z"
   },
   "lifecycleStatus": "active",
   "tenant_key": "nesttest01",
@@ -107,7 +107,7 @@
   "approver_login": "harism-infomagnus",
   "lifecycle_status": "active",
   "created_at": "2026-08-26T20:22:51.982Z",
-  "updated_at": "2026-08-26T20:23:16.971Z",
+  "updated_at": "2026-08-26T20:23:37.212Z",
   "source_issue_number": 65,
-  "source_run_id": "33010107164"
+  "source_run_id": "33010144549"
 }
