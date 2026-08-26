@@ -2439,3 +2439,245 @@ test('T031: runApprovedExecution for create-tenant-model skips CICD capability o
   assert.equal(result.execution.noop_count, 4);
   assert.equal(result.execution.cicd_capability_status, 'unavailable');
 });
+
+test('runApprovedExecution for create-tenant-model links child teams and assigns maintainers when the refreshed listing includes new teams', async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'create-tenant-model-nesting-happy-'));
+  const artifactPath = path.join(workspace, 'audit.json');
+  const registryDirectory = path.join(workspace, 'tenant-registry');
+  fs.mkdirSync(registryDirectory, { recursive: true });
+  const state = {
+    nextTeamId: 7000,
+    teams: [],
+    memberships: [],
+  };
+
+  await runRequestValidation({
+    env: {
+      GITHUB_REPOSITORY: 'im-sandbox-himanshu/issueops-speckit',
+      ISSUE_NUMBER: '227',
+      REQUESTER_LOGIN: 'himanshu-im',
+      PARSED_ORGANIZATION: 'im-sandbox-himanshu',
+      PARSED_TENANT_NAME: 'Northwind',
+      PARSED_TENANT_TYPE: 'application',
+      PARSED_PRIMARY_CONTACT: 'owner@example.com',
+      PARSED_SECONDARY_CONTACT: 'secondary@example.com',
+      PARSED_CMDB_ID: 'CMDB-001',
+      PARSED_COST_CENTER: 'CC-001',
+      PARSED_BUSINESS_UNIT: 'platform',
+      PARSED_ENVIRONMENT: 'nonprod',
+      PARSED_GOVERNANCE_CODE_SCANNING_ENABLED: 'true',
+      PARSED_GOVERNANCE_SECRET_SCANNING_ENABLED: 'true',
+      PARSED_GOVERNANCE_DEPENDABOT_ENABLED: 'true',
+      PARSED_DESIGNATED_APPROVER: 'himanshu-im',
+      PARSED_TENANT_ADMIN_LOGIN: 'himanshu-im',
+      PARSED_JUSTIFICATION: 'Bootstrap Northwind tenant with nesting',
+      PARSED_DRY_RUN: 'false',
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      AUDIT_ARTIFACT_PATH: artifactPath,
+      GITHUB_RUN_ID: '26559705899',
+      GITHUB_RUN_ATTEMPT: '1',
+    },
+    api: {
+      getOrganization: async () => ({ exists: true }),
+      getOrganizationMembership: async () => ({
+        exists: true,
+        membership: { role: 'admin', state: 'active' },
+      }),
+      listOrgTeams: async () => [],
+    },
+    setProcessExitCode: false,
+  });
+
+  await runApprovalGate({
+    env: {
+      AUDIT_ARTIFACT_PATH: artifactPath,
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      GITHUB_TOKEN: 'repo-token',
+    },
+    api: {
+      getAssignableOwners: async () => ['aeruvakalpanaa'],
+      addIssueAssignees: async () => ({ status: 'assigned' }),
+      listIssueComments: async () => [
+        {
+          id: 331,
+          body: 'approved',
+          created_at: '2026-05-28T12:00:00Z',
+          user: { login: 'himanshu-im' },
+        },
+      ],
+      getOrganizationMembership: async () => ({
+        exists: true,
+        membership: { role: 'admin', state: 'active' },
+      }),
+    },
+    setProcessExitCode: false,
+  });
+
+  const result = await runApprovedExecution({
+    env: {
+      AUDIT_ARTIFACT_PATH: artifactPath,
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      GITHUB_RUN_ID: '26559705899',
+      GITHUB_RUN_ATTEMPT: '1',
+      TENANT_REGISTRY_DIR: registryDirectory,
+      TENANT_REGISTRY_PERSISTENCE_MODE: 'repo',
+      TENANT_REGISTRY_REQUIRE_DIRECTORY: 'true',
+    },
+    createApi: () => ({
+      ...buildExecutionApi(state),
+      addIssueLabels: async () => {},
+    }),
+    tokenInfo: {
+      token: 'pat-token',
+      source: 'ISSUEOPS_GITHUB_TOKEN',
+      token_kind: 'pat',
+      is_pat_backed: true,
+      supports_team_hierarchy_mutation: true,
+    },
+    setProcessExitCode: false,
+  });
+
+  for (const childSlug of ['northwind-admin', 'northwind-repo-admin', 'northwind-cicd-admin']) {
+    const childTeam = state.teams.find((team) => team.slug === childSlug);
+    assert.ok(childTeam, `expected child team ${childSlug} to exist`);
+    assert.equal(childTeam.parent && childTeam.parent.slug, 'northwind-root');
+  }
+
+  const linkedRows = (result.execution.created_teams || []).filter((row) => row.result === 'linked');
+  assert.equal(linkedRows.length, 3);
+
+  for (const teamSlug of ['northwind-root', 'northwind-admin', 'northwind-repo-admin', 'northwind-cicd-admin']) {
+    assert.ok(
+      state.memberships.some((membership) =>
+        membership.teamSlug === teamSlug &&
+        membership.username === 'himanshu-im' &&
+        membership.role === 'maintainer'
+      ),
+      `expected himanshu-im to be maintainer on ${teamSlug}`
+    );
+  }
+
+  assert.ok(!String(result.execution.summary || '').includes('not recorded'));
+});
+
+test('runApprovedExecution for create-tenant-model links child teams when the refreshed listing lags behind teams created in this run', async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'create-tenant-model-nesting-gap-'));
+  const artifactPath = path.join(workspace, 'audit.json');
+  const registryDirectory = path.join(workspace, 'tenant-registry');
+  fs.mkdirSync(registryDirectory, { recursive: true });
+  const state = {
+    nextTeamId: 7100,
+    teams: [],
+    memberships: [],
+  };
+
+  await runRequestValidation({
+    env: {
+      GITHUB_REPOSITORY: 'im-sandbox-himanshu/issueops-speckit',
+      ISSUE_NUMBER: '228',
+      REQUESTER_LOGIN: 'himanshu-im',
+      PARSED_ORGANIZATION: 'im-sandbox-himanshu',
+      PARSED_TENANT_NAME: 'Northwind',
+      PARSED_TENANT_TYPE: 'application',
+      PARSED_PRIMARY_CONTACT: 'owner@example.com',
+      PARSED_SECONDARY_CONTACT: 'secondary@example.com',
+      PARSED_CMDB_ID: 'CMDB-001',
+      PARSED_COST_CENTER: 'CC-001',
+      PARSED_BUSINESS_UNIT: 'platform',
+      PARSED_ENVIRONMENT: 'nonprod',
+      PARSED_GOVERNANCE_CODE_SCANNING_ENABLED: 'true',
+      PARSED_GOVERNANCE_SECRET_SCANNING_ENABLED: 'true',
+      PARSED_GOVERNANCE_DEPENDABOT_ENABLED: 'true',
+      PARSED_DESIGNATED_APPROVER: 'himanshu-im',
+      PARSED_TENANT_ADMIN_LOGIN: 'himanshu-im',
+      PARSED_JUSTIFICATION: 'Bootstrap Northwind tenant despite listing lag',
+      PARSED_DRY_RUN: 'false',
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      AUDIT_ARTIFACT_PATH: artifactPath,
+      GITHUB_RUN_ID: '26559705900',
+      GITHUB_RUN_ATTEMPT: '1',
+    },
+    api: {
+      getOrganization: async () => ({ exists: true }),
+      getOrganizationMembership: async () => ({
+        exists: true,
+        membership: { role: 'admin', state: 'active' },
+      }),
+      listOrgTeams: async () => [],
+    },
+    setProcessExitCode: false,
+  });
+
+  await runApprovalGate({
+    env: {
+      AUDIT_ARTIFACT_PATH: artifactPath,
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      GITHUB_TOKEN: 'repo-token',
+    },
+    api: {
+      getAssignableOwners: async () => ['aeruvakalpanaa'],
+      addIssueAssignees: async () => ({ status: 'assigned' }),
+      listIssueComments: async () => [
+        {
+          id: 332,
+          body: 'approved',
+          created_at: '2026-05-28T12:00:00Z',
+          user: { login: 'himanshu-im' },
+        },
+      ],
+      getOrganizationMembership: async () => ({
+        exists: true,
+        membership: { role: 'admin', state: 'active' },
+      }),
+    },
+    setProcessExitCode: false,
+  });
+
+  const result = await runApprovedExecution({
+    env: {
+      AUDIT_ARTIFACT_PATH: artifactPath,
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      GITHUB_RUN_ID: '26559705900',
+      GITHUB_RUN_ATTEMPT: '1',
+      TENANT_REGISTRY_DIR: registryDirectory,
+      TENANT_REGISTRY_PERSISTENCE_MODE: 'repo',
+      TENANT_REGISTRY_REQUIRE_DIRECTORY: 'true',
+    },
+    createApi: () => ({
+      ...buildExecutionApi(state),
+      // Simulates the org-team listing lagging behind teams created in this run (issue #54).
+      listOrgTeams: async () => [],
+      addIssueLabels: async () => {},
+    }),
+    tokenInfo: {
+      token: 'pat-token',
+      source: 'ISSUEOPS_GITHUB_TOKEN',
+      token_kind: 'pat',
+      is_pat_backed: true,
+      supports_team_hierarchy_mutation: true,
+    },
+    setProcessExitCode: false,
+  });
+
+  for (const childSlug of ['northwind-admin', 'northwind-repo-admin', 'northwind-cicd-admin']) {
+    const childTeam = state.teams.find((team) => team.slug === childSlug);
+    assert.ok(childTeam, `expected child team ${childSlug} to exist`);
+    assert.equal(childTeam.parent && childTeam.parent.slug, 'northwind-root');
+  }
+
+  const linkedRows = (result.execution.created_teams || []).filter((row) => row.result === 'linked');
+  assert.equal(linkedRows.length, 3);
+
+  for (const teamSlug of ['northwind-root', 'northwind-admin', 'northwind-repo-admin', 'northwind-cicd-admin']) {
+    assert.ok(
+      state.memberships.some((membership) =>
+        membership.teamSlug === teamSlug &&
+        membership.username === 'himanshu-im' &&
+        membership.role === 'maintainer'
+      ),
+      `expected himanshu-im to be maintainer on ${teamSlug}`
+    );
+  }
+
+  assert.ok(!String(result.execution.summary || '').includes('not recorded'));
+});
