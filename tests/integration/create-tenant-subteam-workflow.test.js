@@ -364,3 +364,121 @@ test('US3 fails closed when the requester loses both org ownership and root main
   assert.equal(result.reconciliation.boundary_revalidation_status, 'mismatched');
   assert.deepEqual(demotedTeamApi.teamStore.created, []);
 });
+
+test('US3 org owner who is only a plain root member is not assigned as subteam maintainer', async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'tenant-subteam-ownerfilter-'));
+  const artifactPath = path.join(workspace, 'audit.json');
+  const registryDir = buildRegistry(workspace);
+  const teamApi = buildTeamApi();
+  // Fast path: the fixed listTeamMaintainers returns only explicit active maintainers,
+  // excluding org-owner-user even though the role=maintainer listing would include them.
+  teamApi.listTeamMaintainers = async ({ teamSlug }) => {
+    if (teamSlug === 'contosouk-root') {
+      return [
+        { username: 'tenant-root-maintainer', role: 'maintainer', state: 'active' },
+        { username: 'tenant-admin-two', role: 'maintainer', state: 'active' },
+      ];
+    }
+    return [];
+  };
+
+  await runValidatedAndApprovedFlow({ artifactPath, registryDir, teamApi });
+
+  const result = await runApprovedExecution({
+    env: {
+      AUDIT_ARTIFACT_PATH: artifactPath,
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      GITHUB_RUN_ID: '26690000006',
+      GITHUB_RUN_ATTEMPT: '6',
+      TENANT_REGISTRY_DIR: registryDir,
+      TENANT_REGISTRY_REF: 'main',
+    },
+    tokenInfo: PAT_TOKEN_INFO,
+    teamApi,
+    commitRegistryTopology: false,
+    setProcessExitCode: false,
+  });
+
+  assert.equal(result.request.request_status, 'executed');
+  assert.equal(result.execution.failure_count, 0);
+  assert.deepEqual(
+    [...teamApi.teamStore.memberships].sort(),
+    [
+      'contosouk-payments:tenant-admin-two:maintainer',
+      'contosouk-payments:tenant-root-maintainer:maintainer',
+      'contosouk-portal-web:tenant-admin-two:maintainer',
+      'contosouk-portal-web:tenant-root-maintainer:maintainer',
+    ]
+  );
+  assert.ok(
+    teamApi.teamStore.memberships.every((entry) => !entry.includes('org-owner-user')),
+    'org owner must not be assigned as a subteam maintainer'
+  );
+});
+
+test('US3 creator auto-membership is removed from new subteams while intended maintainers remain', async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'tenant-subteam-creatorcleanup-'));
+  const artifactPath = path.join(workspace, 'audit.json');
+  const registryDir = buildRegistry(workspace);
+  const teamApi = buildTeamApi();
+  teamApi.teamStore.removals = [];
+  // GitHub auto-adds the creating PAT identity as maintainer on each new subteam.
+  teamApi.listTeamMembers = async ({ teamSlug }) => {
+    if (teamSlug === 'contosouk-root') {
+      return [
+        { username: 'tenant-root-maintainer', role: 'maintainer', state: 'active' },
+        { username: 'tenant-admin-two', role: 'maintainer', state: 'active' },
+        { username: 'regular-root-member', role: 'member', state: 'active' },
+      ];
+    }
+    if (teamApi.teamStore.created.includes(teamSlug)) {
+      return [
+        { username: 'issueops-pat-bot', role: 'maintainer', state: 'active' },
+        { username: 'tenant-root-maintainer', role: 'maintainer', state: 'active' },
+        { username: 'tenant-admin-two', role: 'maintainer', state: 'active' },
+      ];
+    }
+    return [];
+  };
+  teamApi.removeTeamMembership = async ({ teamSlug, username }) => {
+    teamApi.teamStore.removals.push(`${teamSlug}:${username}`);
+    return { username, removed: true };
+  };
+
+  await runValidatedAndApprovedFlow({ artifactPath, registryDir, teamApi });
+
+  const result = await runApprovedExecution({
+    env: {
+      AUDIT_ARTIFACT_PATH: artifactPath,
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      GITHUB_RUN_ID: '26690000007',
+      GITHUB_RUN_ATTEMPT: '7',
+      TENANT_REGISTRY_DIR: registryDir,
+      TENANT_REGISTRY_REF: 'main',
+    },
+    tokenInfo: PAT_TOKEN_INFO,
+    teamApi,
+    commitRegistryTopology: false,
+    setProcessExitCode: false,
+  });
+
+  assert.equal(result.request.request_status, 'executed');
+  assert.equal(result.execution.failure_count, 0);
+  assert.deepEqual(
+    [...teamApi.teamStore.removals].sort(),
+    [
+      'contosouk-payments:issueops-pat-bot',
+      'contosouk-portal-web:issueops-pat-bot',
+    ],
+    'only the creator identity is removed, never the intended maintainers'
+  );
+  assert.deepEqual(
+    [...teamApi.teamStore.memberships].sort(),
+    [
+      'contosouk-payments:tenant-admin-two:maintainer',
+      'contosouk-payments:tenant-root-maintainer:maintainer',
+      'contosouk-portal-web:tenant-admin-two:maintainer',
+      'contosouk-portal-web:tenant-root-maintainer:maintainer',
+    ]
+  );
+});
