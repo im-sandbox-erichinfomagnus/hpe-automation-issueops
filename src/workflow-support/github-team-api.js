@@ -272,26 +272,7 @@ function createGitHubTeamApi(options = {}) {
       if (!result.ok) {
         throw Object.assign(new Error('Failed to list team maintainers'), result);
       }
-      // The role=maintainer listing also includes org owners who are only plain members;
-      // confirm each candidate's explicit role via the per-user membership endpoint.
-      const confirmedMaintainers = [];
-      for (const candidate of (result.payload || []).map(mapMemberState)) {
-        const membershipResult = await request(
-          `/orgs/${organization}/teams/${teamSlug}/memberships/${candidate.username}`
-        );
-        if (membershipResult.status === 404) {
-          continue;
-        }
-        if (!membershipResult.ok) {
-          throw Object.assign(new Error('Failed to confirm team maintainer role'), membershipResult);
-        }
-        const membershipState = String(membershipResult.payload.state || '').toLowerCase();
-        const membershipRole = String(membershipResult.payload.role || '').toLowerCase();
-        if (membershipState === 'active' && membershipRole === 'maintainer') {
-          confirmedMaintainers.push(candidate);
-        }
-      }
-      return confirmedMaintainers;
+      return (result.payload || []).map(mapMemberState);
     },
 
     async getMembershipForUser({ organization, teamSlug, username }) {
