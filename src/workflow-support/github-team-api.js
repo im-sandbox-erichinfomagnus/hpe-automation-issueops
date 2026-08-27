@@ -252,11 +252,26 @@ function createGitHubTeamApi(options = {}) {
     },
 
     async listOrgTeams({ organization }) {
-      const result = await request(`/orgs/${organization}/teams?per_page=100`);
-      if (!result.ok) {
-        throw Object.assign(new Error('Failed to list organization teams'), result);
+      const teams = [];
+      let page = 1;
+      // Organization teams are paginated; walk pages until the API returns fewer
+      // than a full page so tenant resolution sees every team past the first 100.
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const result = await request(`/orgs/${organization}/teams?per_page=100&page=${page}`);
+        if (!result.ok) {
+          throw Object.assign(new Error('Failed to list organization teams'), result);
+        }
+        const pageTeams = Array.isArray(result.payload) ? result.payload : [];
+        for (const team of pageTeams) {
+          teams.push(mapTeamState(team));
+        }
+        if (pageTeams.length < 100) {
+          break;
+        }
+        page += 1;
       }
-      return (result.payload || []).map(mapTeamState);
+      return teams;
     },
 
     async listTeamMembers({ organization, teamSlug }) {
