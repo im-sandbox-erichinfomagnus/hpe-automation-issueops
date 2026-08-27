@@ -206,8 +206,8 @@ async function validateTenantCreationRequest(input = {}, options = {}) {
     errors.push('topology.accessModel.organizationRoleSpecifications must define canonical role-name and permission-intent mappings.');
   }
 
-  if (!isValidEmail(request.primary_contact)) {
-    errors.push('primary_contact is required and must match email format.');
+  if (request.primary_contact && !isValidEmail(request.primary_contact)) {
+    errors.push('primary_contact must match email format when provided.');
   }
 
   if (request.secondary_contact && !isValidEmail(request.secondary_contact)) {
@@ -438,7 +438,9 @@ async function validateTenantCreationRequest(input = {}, options = {}) {
       governance_mandatory_validation: governanceMandatorySatisfied ? 'valid' : 'invalid',
       access_model_validation: accessModelValid ? 'valid' : 'invalid',
       organization_role_spec_validation: organizationRoleSpecsValid ? 'valid' : 'invalid',
-      primary_contact_validation: isValidEmail(request.primary_contact) ? 'valid' : 'invalid',
+      primary_contact_validation: request.primary_contact
+        ? (isValidEmail(request.primary_contact) ? 'valid' : 'invalid')
+        : 'absent',
       secondary_contact_validation: request.secondary_contact
         ? (isValidEmail(request.secondary_contact) ? 'valid' : 'invalid')
         : 'absent',

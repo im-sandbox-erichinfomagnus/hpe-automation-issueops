@@ -131,7 +131,7 @@ body:
     id: primary_contact
     attributes:
       label: Primary contact
-      description: Required email contact for tenant ownership.
+      description: Optional email contact for tenant ownership. Validated for email format when provided.
       placeholder: owner@example.com
     validations:
       required: false

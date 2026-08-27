@@ -41,7 +41,7 @@ body:
     id: runner_name
     attributes:
       label: Runner name
-      description: Runner to move. Accepts the full tenant-prefixed name or the base name.
+      description: Runner to move. Accepts the full tenant-prefixed name or the base name; the tenant prefix is added automatically here if omitted.
       placeholder: ubuntu-build
     validations:
       required: false
@@ -57,7 +57,10 @@ body:
     id: target_runner_group_name
     attributes:
       label: Target runner group name
-      description: Existing tenant-prefixed runner group that should receive the runner.
+      description: >-
+        Full existing runner group name, including the tenant prefix - the prefix is NOT added
+        automatically. Must match an existing group exactly (e.g. ContosoUK_Builders for tenant
+        ContosoUK). Requests without the tenant prefix are rejected.
       placeholder: ContosoUK_Builders
     validations:
       required: false

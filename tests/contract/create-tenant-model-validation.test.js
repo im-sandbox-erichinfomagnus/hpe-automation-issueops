@@ -247,10 +247,43 @@ test('validateTenantCreationRequest rejects invalid tenant topology enhancement 
   assert.equal(validation.is_valid, false);
   assert.match(validation.errors.join('\n'), /tenant_type must be one of/i);
   assert.match(validation.errors.join('\n'), /environment must be one of/i);
-  assert.match(validation.errors.join('\n'), /primary_contact is required/i);
+  assert.match(validation.errors.join('\n'), /primary_contact must match email format when provided/i);
   assert.match(validation.errors.join('\n'), /secondary_contact is optional/i);
   assert.equal(validation.validation_findings.tenant_type_validation, 'invalid');
   assert.equal(validation.validation_findings.environment_validation, 'invalid');
+});
+
+test('validateTenantCreationRequest accepts an omitted primary contact', async () => {
+  const request = parseTenantCreationRequest({
+    parsedRequest: buildValidParsedRequest({
+      tenant_admin_login: 'tenant-admin-user',
+      primary_contact: '',
+    }),
+    issue: { number: 921, user: { login: 'requester-user' } },
+    repository: 'octo-org/issueops-speckit',
+  });
+
+  const validation = await validateTenantCreationRequest(request, baseValidationOptions());
+
+  assert.equal(validation.is_valid, true);
+  assert.doesNotMatch(validation.errors.join('\n'), /primary_contact/i);
+  assert.equal(validation.validation_findings.primary_contact_validation, 'absent');
+});
+
+test('validateTenantCreationRequest rejects a malformed primary contact when provided', async () => {
+  const request = parseTenantCreationRequest({
+    parsedRequest: buildValidParsedRequest({
+      primary_contact: 'not-an-email',
+    }),
+    issue: { number: 922, user: { login: 'requester-user' } },
+    repository: 'octo-org/issueops-speckit',
+  });
+
+  const validation = await validateTenantCreationRequest(request, baseValidationOptions());
+
+  assert.equal(validation.is_valid, false);
+  assert.match(validation.errors.join('\n'), /primary_contact must match email format when provided/i);
+  assert.equal(validation.validation_findings.primary_contact_validation, 'invalid');
 });
 
 test('validateTenantCreationRequest rejects non-mandatory governance policy flags', async () => {
