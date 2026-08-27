@@ -234,6 +234,66 @@ test('tenant repo validation blocks ambiguous tenant matches', async () => {
   assert.match(result.errors.join('\n'), /ambiguous/i);
 });
 
+test('tenant repo validation accepts a repo name already prefixed with the tenant name', async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'issueops-tenant-repo-prefixed-valid-'));
+  const registryDir = path.join(tempRoot, 'tenant-registry');
+  fs.mkdirSync(registryDir, { recursive: true });
+  writeRegistryRecord(registryDir, 'tenant-a.json', buildLegacyRegistryRecord());
+
+  const result = await validateTenantRepoRequest({
+    parsedRequest: buildParsedRequest({
+      tenant_name: 'Tenant A',
+      repository_name: 'tenant-a_acme-platform-service',
+    }),
+    issue: buildIssue(4),
+    repository: 'owner/repo',
+  }, buildTenantRepoApiOptions({
+    registryDir,
+    teams: [
+      { slug: 'tenanta-tenant', parent: null },
+      { slug: 'tenanta-repoadmin', parent: { slug: 'tenanta-tenant' } },
+    ],
+    memberships: {
+      'tenanta-tenant': { state: 'active', membership: { role: 'maintainer' } },
+      'tenanta-repoadmin': { state: 'active', membership: { role: 'member' } },
+    },
+  }));
+
+  assert.equal(result.is_valid, true);
+  assert.equal(result.request.repository_name_normalized, 'tenant-a_acme-platform-service');
+  assert.equal(result.request_status, 'awaiting_approval');
+});
+
+test('tenant repo validation automatically prefixes repo names to the tenant naming pattern when missing', async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'issueops-tenant-repo-prefix-auto-'));
+  const registryDir = path.join(tempRoot, 'tenant-registry');
+  fs.mkdirSync(registryDir, { recursive: true });
+  writeRegistryRecord(registryDir, 'tenant-a.json', buildLegacyRegistryRecord());
+
+  const result = await validateTenantRepoRequest({
+    parsedRequest: buildParsedRequest({
+      tenant_name: 'Tenant A',
+      repository_name: 'acme-platform-service',
+    }),
+    issue: buildIssue(4),
+    repository: 'owner/repo',
+  }, buildTenantRepoApiOptions({
+    registryDir,
+    teams: [
+      { slug: 'tenanta-tenant', parent: null },
+      { slug: 'tenanta-repoadmin', parent: { slug: 'tenanta-tenant' } },
+    ],
+    memberships: {
+      'tenanta-tenant': { state: 'active', membership: { role: 'maintainer' } },
+      'tenanta-repoadmin': { state: 'active', membership: { role: 'member' } },
+    },
+  }));
+
+  assert.equal(result.is_valid, true);
+  assert.equal(result.request.repository_name_normalized, 'tenant-a_acme-platform-service');
+  assert.equal(result.request_status, 'awaiting_approval');
+});
+
 test('tenant repo validation rejects unsafe repository-name normalization outcomes', async () => {
   const result = await validateTenantRepoRequest({
     parsedRequest: buildParsedRequest({ repository_name: '!!!' }),
@@ -487,7 +547,7 @@ test('US4 duplicate-owned topology blocks approval when requested repository is 
       repositories: {
         owned: [
           {
-            repoName: 'acme-platform-service',
+            repoName: 'tenant-a_acme-platform-service',
             tenantId: 'tenant-a',
             visibility: 'internal',
             repoType: 'service',
@@ -522,7 +582,7 @@ test('US4 duplicate-owned topology blocks approval when requested repository is 
 
   assert.equal(result.is_valid, false);
   assert.equal(result.validation_findings.duplicate_owned_repository_status, 'duplicate_conflict');
-  assert.equal(result.validation_findings.duplicate_owned_repository_conflict.normalized_name, 'acme-platform-service');
+  assert.equal(result.validation_findings.duplicate_owned_repository_conflict.normalized_name, 'tenant-a_acme-platform-service');
   assert.match(result.errors.join('\n'), /already present in tenant topology owned repositories/i);
 });
 
@@ -547,7 +607,7 @@ test('US4 duplicate-owned topology allows execution revalidation no-op when repo
       repositories: {
         owned: [
           {
-            repoName: 'acme-platform-service',
+            repoName: 'tenant-a_acme-platform-service',
             tenantId: 'tenant-a',
             visibility: 'internal',
             repoType: 'service',
@@ -575,7 +635,7 @@ test('US4 duplicate-owned topology allows execution revalidation no-op when repo
       'tenanta-tenant': { state: 'active', membership: { role: 'maintainer' } },
       'tenanta-repoadmin': { state: 'active', membership: { role: 'member' } },
     },
-    repositoryState: { exists: true, repository: { full_name: 'octo-org/acme-platform-service', visibility: 'internal' } },
+    repositoryState: { exists: true, repository: { full_name: 'octo-org/tenant-a_acme-platform-service', visibility: 'internal' } },
     extraOptions: {
       allowOwnedDuplicateWhenRepositoryExists: true,
     },
