@@ -772,14 +772,24 @@ async function buildPrimaryContactValidationResult(primaryContact, secondaryCont
   }));
 }
 
-test('tenant repo validation rejects missing primary contact', async () => {
+test('tenant repo validation accepts an omitted primary contact', async () => {
   const result = await buildPrimaryContactValidationResult(undefined);
+
+  assert.equal(result.is_valid, true);
+  assert.equal(result.primary_contact_validation.validation_status, 'absent');
+  assert.equal(result.primary_contact_validation.detected_type, 'absent');
+  assert.doesNotMatch(result.errors.join('\n'), /Primary contact is required\./i);
+  assert.doesNotMatch(result.errors.join('\n'), /primary contact/i);
+});
+
+test('tenant repo validation rejects a malformed primary contact when provided', async () => {
+  const result = await buildPrimaryContactValidationResult('not a contact!!');
 
   assert.equal(result.is_valid, false);
   assert.equal(result.request_status, 'validation_failed');
-  assert.equal(result.primary_contact_validation.validation_status, 'missing');
-  assert.equal(result.primary_contact_validation.detected_type, 'absent');
-  assert.match(result.errors.join('\n'), /Primary contact is required\./i);
+  assert.equal(result.primary_contact_validation.validation_status, 'invalid_format');
+  assert.equal(result.primary_contact_validation.detected_type, 'invalid');
+  assert.match(result.errors.join('\n'), /is not a valid GitHub handle or email address\./i);
 });
 
 test('tenant repo validation accepts valid primary contact as GitHub handle or email', async () => {

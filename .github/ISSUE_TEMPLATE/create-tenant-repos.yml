@@ -85,10 +85,11 @@ body:
     attributes:
       label: Primary contact (single-item path)
       description: >
-        GitHub username (handle) of the primary business owner for the single-item repository.
+        Optional. GitHub username (handle) of the primary business owner for the single-item repository.
         A GitHub handle is preferred (for example, octocat or @octocat).
         If the person does not have a GitHub account, a work email address is accepted
-        as a fallback (for example, alice@example.com). Used only when the CSV batch is empty.
+        as a fallback (for example, alice@example.com). Validated for handle or email format
+        when provided. Used only when the CSV batch is empty.
         Future enhancement: automatic GitHub handle validation may be integrated via
         the GitHub Users API.
       placeholder: octocat

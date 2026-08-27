@@ -339,9 +339,8 @@ async function validateTenantRepoRequest(input = {}, options = {}) {
     primaryContactValidationStatus = 'not_applicable';
     primaryContactValidationReason = 'Primary contact is supplied per row by the uploaded CSV attachment.';
   } else if (primaryContactDetectedType === 'absent') {
-    primaryContactValidationStatus = 'missing';
-    primaryContactValidationReason = 'Primary contact is required.';
-    errors.push(primaryContactValidationReason);
+    primaryContactValidationStatus = 'absent';
+    primaryContactValidationReason = 'Primary contact was not provided.';
   } else if (primaryContactDetectedType === 'invalid') {
     primaryContactValidationStatus = 'invalid_format';
     primaryContactValidationReason = `Primary contact '${request.primary_contact}' is not a valid GitHub handle or email address.`;
