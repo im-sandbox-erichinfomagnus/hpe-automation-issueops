@@ -148,7 +148,6 @@ jobs:
           PARSED_REPOSITORY_VISIBILITY: ${{ steps.parse_request.outputs.parsed_repository_visibility }}
           PARSED_PRIMARY_CONTACT: ${{ steps.parse_request.outputs.parsed_primary_contact }}
           PARSED_SECONDARY_CONTACT: ${{ steps.parse_request.outputs.parsed_secondary_contact }}
-          PARSED_DESIGNATED_APPROVER: ${{ steps.parse_request.outputs.parsed_designated_approver }}
           PARSED_INTAKE_MODE: ${{ steps.parse_request.outputs.parsed_intake_mode }}
           PARSED_DRY_RUN: ${{ steps.parse_request.outputs.parsed_dry_run }}
           PARSED_JUSTIFICATION: ${{ steps.parse_request.outputs.parsed_justification }}

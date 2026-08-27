@@ -108,12 +108,11 @@ jobs:
           PARSED_ORGANIZATION: ${{ steps.parse_request.outputs.parsed_organization }}
           PARSED_TENANT_NAME: ${{ steps.parse_request.outputs.parsed_tenant_name }}
           PARSED_TENANT_CSV: ${{ steps.parse_request.outputs.parsed_tenant_csv }}
-          PARSED_DESIGNATED_APPROVER: ${{ steps.parse_request.outputs.parsed_designated_approver }}
         run: |
           set -euo pipefail
 
           matches_request=false
-          if [ -n "${PARSED_ORGANIZATION:-}" ] && { [ -n "${PARSED_TENANT_NAME:-}" ] || [ -n "${PARSED_TENANT_CSV:-}" ]; } && [ -n "${PARSED_DESIGNATED_APPROVER:-}" ]; then
+          if [ -n "${PARSED_ORGANIZATION:-}" ] && { [ -n "${PARSED_TENANT_NAME:-}" ] || [ -n "${PARSED_TENANT_CSV:-}" ]; }; then
             matches_request=true
           fi
 
@@ -147,7 +146,6 @@ jobs:
           PARSED_TENANT_NAME: ${{ steps.parse_request.outputs.parsed_tenant_name }}
           PARSED_TENANT_CSV: ${{ steps.parse_request.outputs.parsed_tenant_csv }}
           PARSED_TENANT_ADMIN_LOGIN: ${{ steps.parse_request.outputs.parsed_tenant_admin_login }}
-          PARSED_DESIGNATED_APPROVER: ${{ steps.parse_request.outputs.parsed_designated_approver }}
           PARSED_JUSTIFICATION: ${{ steps.parse_request.outputs.parsed_justification }}
           PARSED_DRY_RUN: ${{ steps.parse_request.outputs.parsed_dry_run }}
           ISSUE_LABELS_JSON: ${{ steps.issue_context.outputs.issue_labels_json }}

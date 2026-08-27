@@ -110,8 +110,8 @@ test('T029: validateTenantCreationRequest preserves approval-gate semantics with
 
   assert.equal(validation.is_valid, true);
   assert.equal(validation.request_status, 'awaiting_approval');
-  assert.equal(validation.designated_approver_authorization.state, 'authorized');
-  assert.equal(validation.designated_approver_authorization.role, 'admin');
+  assert.equal(validation.designated_approver_authorization.state, 'not_applicable');
+  assert.equal(validation.designated_approver_authorization.role, 'not_applicable');
 });
 
 test('T029: validateTenantCreationRequest does not break approval checks with CICD team addition', async () => {

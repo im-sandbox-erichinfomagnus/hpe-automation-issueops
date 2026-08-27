@@ -145,15 +145,6 @@ body:
     validations:
       required: false
 
-  - type: input
-    id: designated_approver
-    attributes:
-      label: Designated approver
-      description: GitHub login for an active owner in the target organization who will post the approval comment.
-      placeholder: org-owner-user
-    validations:
-      required: true
-
   - type: dropdown
     id: dry_run
     attributes:

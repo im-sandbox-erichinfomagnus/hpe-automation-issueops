@@ -10,6 +10,15 @@ const { runApprovalGate } = require('../../src/scripts/run-approval-gate');
 const { runApprovedExecution } = require('../../src/scripts/run-approved-execution');
 const { runRequestValidation } = require('../../src/scripts/run-request-validation');
 
+const PAT_TOKEN_INFO = {
+  token: 'pat-token',
+  source: 'ISSUEOPS_GITHUB_TOKEN',
+  token_kind: 'pat',
+  is_pat_backed: true,
+  supports_team_hierarchy_mutation: true,
+  supports_org_mutation: true,
+};
+
 function normalizeSlug(value) {
   return String(value || '')
     .trim()
@@ -178,13 +187,7 @@ test('runApprovedExecution for create-tenant-model completes full tenant bootstr
       TENANT_REGISTRY_REQUIRE_DIRECTORY: 'true',
     },
     createApi: () => buildExecutionApi(state),
-    tokenInfo: {
-      token: 'pat-token',
-      source: 'ISSUEOPS_GITHUB_TOKEN',
-      token_kind: 'pat',
-      is_pat_backed: true,
-      supports_team_hierarchy_mutation: true,
-    },
+    tokenInfo: PAT_TOKEN_INFO,
     setProcessExitCode: false,
   });
 
@@ -329,13 +332,7 @@ test('runApprovedExecution for create-tenant-model provisions canonical organiza
         return role;
       },
     }),
-    tokenInfo: {
-      token: 'pat-token',
-      source: 'ISSUEOPS_GITHUB_TOKEN',
-      token_kind: 'pat',
-      is_pat_backed: true,
-      supports_team_hierarchy_mutation: true,
-    },
+    tokenInfo: PAT_TOKEN_INFO,
     setProcessExitCode: false,
   });
 
@@ -451,13 +448,7 @@ test('runApprovedExecution for create-tenant-model skips org-role provisioning w
         throw new Error('createOrganizationRole should not be called when list endpoint is unavailable');
       },
     }),
-    tokenInfo: {
-      token: 'pat-token',
-      source: 'ISSUEOPS_GITHUB_TOKEN',
-      token_kind: 'pat',
-      is_pat_backed: true,
-      supports_team_hierarchy_mutation: true,
-    },
+    tokenInfo: PAT_TOKEN_INFO,
     setProcessExitCode: false,
   });
 
@@ -563,13 +554,7 @@ test('runApprovedExecution for create-tenant-model skips org-role provisioning o
         throw error;
       },
     }),
-    tokenInfo: {
-      token: 'pat-token',
-      source: 'ISSUEOPS_GITHUB_TOKEN',
-      token_kind: 'pat',
-      is_pat_backed: true,
-      supports_team_hierarchy_mutation: true,
-    },
+    tokenInfo: PAT_TOKEN_INFO,
     setProcessExitCode: false,
   });
 
@@ -689,13 +674,7 @@ test('runApprovedExecution for create-tenant-model falls back to custom reposito
         return role;
       },
     }),
-    tokenInfo: {
-      token: 'pat-token',
-      source: 'ISSUEOPS_GITHUB_TOKEN',
-      token_kind: 'pat',
-      is_pat_backed: true,
-      supports_team_hierarchy_mutation: true,
-    },
+    tokenInfo: PAT_TOKEN_INFO,
     setProcessExitCode: false,
   });
 
@@ -794,13 +773,7 @@ test('runApprovedExecution for create-tenant-model persists canonical topology-f
       TENANT_REGISTRY_REQUIRE_DIRECTORY: 'true',
     },
     createApi: () => buildExecutionApi(state),
-    tokenInfo: {
-      token: 'pat-token',
-      source: 'ISSUEOPS_GITHUB_TOKEN',
-      token_kind: 'pat',
-      is_pat_backed: true,
-      supports_team_hierarchy_mutation: true,
-    },
+    tokenInfo: PAT_TOKEN_INFO,
     setProcessExitCode: false,
   });
 
@@ -909,13 +882,7 @@ test('runApprovedExecution for create-tenant-model applies normalized tenant ter
         appliedLabels.push(...labels);
       },
     }),
-    tokenInfo: {
-      token: 'pat-token',
-      source: 'ISSUEOPS_GITHUB_TOKEN',
-      token_kind: 'pat',
-      is_pat_backed: true,
-      supports_team_hierarchy_mutation: true,
-    },
+    tokenInfo: PAT_TOKEN_INFO,
     setProcessExitCode: false,
   });
 
@@ -1006,13 +973,7 @@ test('runApprovedExecution for create-tenant-model rerun stays idempotent for co
       TENANT_REGISTRY_REQUIRE_DIRECTORY: 'true',
     },
     createApi: () => buildExecutionApi(state),
-    tokenInfo: {
-      token: 'pat-token',
-      source: 'ISSUEOPS_GITHUB_TOKEN',
-      token_kind: 'pat',
-      is_pat_backed: true,
-      supports_team_hierarchy_mutation: true,
-    },
+    tokenInfo: PAT_TOKEN_INFO,
     setProcessExitCode: false,
   });
 
@@ -1030,13 +991,7 @@ test('runApprovedExecution for create-tenant-model rerun stays idempotent for co
       TENANT_REGISTRY_REQUIRE_DIRECTORY: 'true',
     },
     createApi: () => buildExecutionApi(state),
-    tokenInfo: {
-      token: 'pat-token',
-      source: 'ISSUEOPS_GITHUB_TOKEN',
-      token_kind: 'pat',
-      is_pat_backed: true,
-      supports_team_hierarchy_mutation: true,
-    },
+    tokenInfo: PAT_TOKEN_INFO,
     setProcessExitCode: false,
   });
 
@@ -1167,13 +1122,7 @@ test('runApprovedExecution for create-tenant-model assigns tenant admin as maint
       TENANT_REGISTRY_REQUIRE_DIRECTORY: 'true',
     },
     createApi: () => buildExecutionApi(state),
-    tokenInfo: {
-      token: 'pat-token',
-      source: 'ISSUEOPS_GITHUB_TOKEN',
-      token_kind: 'pat',
-      is_pat_backed: true,
-      supports_team_hierarchy_mutation: true,
-    },
+    tokenInfo: PAT_TOKEN_INFO,
     setProcessExitCode: false,
   });
 
@@ -1301,13 +1250,7 @@ test('runApprovedExecution for create-tenant-model normalizes requester maintain
       TENANT_BOOTSTRAP_REQUESTER_POLICY: 'member',
     },
     createApi: () => buildExecutionApi(state),
-    tokenInfo: {
-      token: 'pat-token',
-      source: 'ISSUEOPS_GITHUB_TOKEN',
-      token_kind: 'pat',
-      is_pat_backed: true,
-      supports_team_hierarchy_mutation: true,
-    },
+    tokenInfo: PAT_TOKEN_INFO,
     setProcessExitCode: false,
   });
 
@@ -1411,13 +1354,7 @@ test('runApprovedExecution for create-tenant-model reports partial execution whe
       TENANT_REGISTRY_REQUIRE_DIRECTORY: 'true',
     },
     createApi: () => buildExecutionApi(state),
-    tokenInfo: {
-      token: 'pat-token',
-      source: 'ISSUEOPS_GITHUB_TOKEN',
-      token_kind: 'pat',
-      is_pat_backed: true,
-      supports_team_hierarchy_mutation: true,
-    },
+    tokenInfo: PAT_TOKEN_INFO,
     setProcessExitCode: false,
   });
 
@@ -1576,13 +1513,7 @@ test('runApprovedExecution for create-tenant-model dry-run produces zero mutatio
       TENANT_REGISTRY_REQUIRE_DIRECTORY: 'true',
     },
     createApi: () => buildExecutionApi(state),
-    tokenInfo: {
-      token: 'pat-token',
-      source: 'ISSUEOPS_GITHUB_TOKEN',
-      token_kind: 'pat',
-      is_pat_backed: true,
-      supports_team_hierarchy_mutation: true,
-    },
+    tokenInfo: PAT_TOKEN_INFO,
     setProcessExitCode: false,
   });
 
@@ -1682,13 +1613,7 @@ test('runApprovedExecution for create-tenant-model is never reached when approva
       TENANT_REGISTRY_REQUIRE_DIRECTORY: 'true',
     },
     createApi: () => buildExecutionApi(state),
-    tokenInfo: {
-      token: 'pat-token',
-      source: 'ISSUEOPS_GITHUB_TOKEN',
-      token_kind: 'pat',
-      is_pat_backed: true,
-      supports_team_hierarchy_mutation: true,
-    },
+    tokenInfo: PAT_TOKEN_INFO,
     setProcessExitCode: false,
   });
 
@@ -1787,13 +1712,7 @@ test('runApprovedExecution for create-tenant-model fails closed when tenant-boun
       TENANT_REGISTRY_REQUIRE_DIRECTORY: 'true',
     },
     createApi: () => buildExecutionApi(state),
-    tokenInfo: {
-      token: 'pat-token',
-      source: 'ISSUEOPS_GITHUB_TOKEN',
-      token_kind: 'pat',
-      is_pat_backed: true,
-      supports_team_hierarchy_mutation: true,
-    },
+    tokenInfo: PAT_TOKEN_INFO,
     setProcessExitCode: false,
   });
 
@@ -1910,13 +1829,7 @@ test('runApprovedExecution for create-tenant-model migrates legacy registry reco
       TENANT_REGISTRY_REQUIRE_DIRECTORY: 'true',
     },
     createApi: () => buildExecutionApi(state),
-    tokenInfo: {
-      token: 'pat-token',
-      source: 'ISSUEOPS_GITHUB_TOKEN',
-      token_kind: 'pat',
-      is_pat_backed: true,
-      supports_team_hierarchy_mutation: true,
-    },
+    tokenInfo: PAT_TOKEN_INFO,
     setProcessExitCode: false,
   });
 
@@ -1938,13 +1851,7 @@ test('runApprovedExecution for create-tenant-model migrates legacy registry reco
       TENANT_REGISTRY_REQUIRE_DIRECTORY: 'true',
     },
     createApi: () => buildExecutionApi(state),
-    tokenInfo: {
-      token: 'pat-token',
-      source: 'ISSUEOPS_GITHUB_TOKEN',
-      token_kind: 'pat',
-      is_pat_backed: true,
-      supports_team_hierarchy_mutation: true,
-    },
+    tokenInfo: PAT_TOKEN_INFO,
     setProcessExitCode: false,
   });
 
@@ -2064,13 +1971,7 @@ test('runApprovedExecution for create-tenant-model applies CICD capability via p
         return role;
       },
     }),
-    tokenInfo: {
-      token: 'pat-token',
-      source: 'ISSUEOPS_GITHUB_TOKEN',
-      token_kind: 'pat',
-      is_pat_backed: true,
-      supports_team_hierarchy_mutation: true,
-    },
+    tokenInfo: PAT_TOKEN_INFO,
     setProcessExitCode: false,
   });
 
@@ -2181,13 +2082,7 @@ test('runApprovedExecution for create-tenant-model reports unavailable CICD capa
         throw new Error('should not be called for unavailable capability');
       },
     }),
-    tokenInfo: {
-      token: 'pat-token',
-      source: 'ISSUEOPS_GITHUB_TOKEN',
-      token_kind: 'pat',
-      is_pat_backed: true,
-      supports_team_hierarchy_mutation: true,
-    },
+    tokenInfo: PAT_TOKEN_INFO,
     setProcessExitCode: false,
   });
 
@@ -2308,13 +2203,7 @@ test('T031: runApprovedExecution preserves dry-run semantics without CICD capabi
         throw new Error('should not create roles in dry-run mode');
       },
     }),
-    tokenInfo: {
-      token: 'pat-token',
-      source: 'ISSUEOPS_GITHUB_TOKEN',
-      token_kind: 'pat',
-      is_pat_backed: true,
-      supports_team_hierarchy_mutation: true,
-    },
+    tokenInfo: PAT_TOKEN_INFO,
     setProcessExitCode: false,
   });
 
@@ -2424,13 +2313,7 @@ test('T031: runApprovedExecution for create-tenant-model skips CICD capability o
         throw error;
       },
     }),
-    tokenInfo: {
-      token: 'pat-token',
-      source: 'ISSUEOPS_GITHUB_TOKEN',
-      token_kind: 'pat',
-      is_pat_backed: true,
-      supports_team_hierarchy_mutation: true,
-    },
+    tokenInfo: PAT_TOKEN_INFO,
     setProcessExitCode: false,
   });
 
@@ -2527,13 +2410,7 @@ test('runApprovedExecution for create-tenant-model links child teams and assigns
       ...buildExecutionApi(state),
       addIssueLabels: async () => {},
     }),
-    tokenInfo: {
-      token: 'pat-token',
-      source: 'ISSUEOPS_GITHUB_TOKEN',
-      token_kind: 'pat',
-      is_pat_backed: true,
-      supports_team_hierarchy_mutation: true,
-    },
+    tokenInfo: PAT_TOKEN_INFO,
     setProcessExitCode: false,
   });
 
@@ -2649,13 +2526,7 @@ test('runApprovedExecution for create-tenant-model links child teams when the re
       listOrgTeams: async () => [],
       addIssueLabels: async () => {},
     }),
-    tokenInfo: {
-      token: 'pat-token',
-      source: 'ISSUEOPS_GITHUB_TOKEN',
-      token_kind: 'pat',
-      is_pat_backed: true,
-      supports_team_hierarchy_mutation: true,
-    },
+    tokenInfo: PAT_TOKEN_INFO,
     setProcessExitCode: false,
   });
 
@@ -2680,4 +2551,122 @@ test('runApprovedExecution for create-tenant-model links child teams when the re
   }
 
   assert.ok(!String(result.execution.summary || '').includes('not recorded'));
+});
+
+async function buildApprovedTenantCreationArtifact(workspacePrefix) {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), workspacePrefix));
+  const artifactPath = path.join(workspace, 'audit.json');
+  const registryDirectory = path.join(workspace, 'tenant-registry');
+  fs.mkdirSync(registryDirectory, { recursive: true });
+
+  await runRequestValidation({
+    env: {
+      GITHUB_REPOSITORY: 'im-sandbox-himanshu/issueops-speckit',
+      ISSUE_NUMBER: '901',
+      REQUESTER_LOGIN: 'himanshu-im',
+      PARSED_ORGANIZATION: 'im-sandbox-himanshu',
+      PARSED_TENANT_NAME: 'Northwind',
+      PARSED_TENANT_TYPE: 'application',
+      PARSED_PRIMARY_CONTACT: 'owner@example.com',
+      PARSED_SECONDARY_CONTACT: 'secondary@example.com',
+      PARSED_CMDB_ID: 'CMDB-001',
+      PARSED_COST_CENTER: 'CC-001',
+      PARSED_BUSINESS_UNIT: 'platform',
+      PARSED_ENVIRONMENT: 'nonprod',
+      PARSED_GOVERNANCE_CODE_SCANNING_ENABLED: 'true',
+      PARSED_GOVERNANCE_SECRET_SCANNING_ENABLED: 'true',
+      PARSED_GOVERNANCE_DEPENDABOT_ENABLED: 'true',
+      PARSED_TENANT_ADMIN_LOGIN: 'himanshu-im',
+      PARSED_JUSTIFICATION: 'Bootstrap Northwind tenant',
+      PARSED_DRY_RUN: 'false',
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      AUDIT_ARTIFACT_PATH: artifactPath,
+      GITHUB_RUN_ID: '26559705899',
+      GITHUB_RUN_ATTEMPT: '1',
+    },
+    api: {
+      getOrganization: async () => ({ exists: true }),
+      getOrganizationMembership: async () => ({
+        exists: true,
+        membership: { role: 'admin', state: 'active' },
+      }),
+      listOrgTeams: async () => [],
+    },
+    setProcessExitCode: false,
+  });
+
+  await runApprovalGate({
+    env: {
+      AUDIT_ARTIFACT_PATH: artifactPath,
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      GITHUB_TOKEN: 'repo-token',
+    },
+    api: {
+      getAssignableOwners: async () => ['aeruvakalpanaa'],
+      addIssueAssignees: async () => ({ status: 'assigned' }),
+      listIssueComments: async () => [],
+      getOrganizationMembership: async () => ({
+        exists: true,
+        membership: { role: 'admin', state: 'active' },
+      }),
+    },
+    setProcessExitCode: false,
+  });
+
+  return { artifactPath, registryDirectory };
+}
+
+function buildGuardExecutionEnv(artifactPath, registryDirectory) {
+  return {
+    AUDIT_ARTIFACT_PATH: artifactPath,
+    ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+    GITHUB_RUN_ID: '26559705899',
+    GITHUB_RUN_ATTEMPT: '1',
+    TENANT_REGISTRY_DIR: registryDirectory,
+    TENANT_REGISTRY_PERSISTENCE_MODE: 'repo',
+    TENANT_REGISTRY_REQUIRE_DIRECTORY: 'true',
+  };
+}
+
+test('runApprovedExecution dispatches tenant creation through the self-serve policy with a PAT-backed token', async () => {
+  const state = { nextTeamId: 8100, teams: [], memberships: [] };
+  const { artifactPath, registryDirectory } = await buildApprovedTenantCreationArtifact('create-tenant-model-guard-allow-');
+
+  const persisted = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
+  assert.equal(persisted.approval.approver_role, 'tenant_self_serve');
+
+  const result = await runApprovedExecution({
+    env: buildGuardExecutionEnv(artifactPath, registryDirectory),
+    createApi: () => ({
+      ...buildExecutionApi(state),
+      addIssueLabels: async () => {},
+    }),
+    tokenInfo: PAT_TOKEN_INFO,
+    setProcessExitCode: false,
+  });
+
+  assert.doesNotMatch(String(result.execution.summary || ''), /mutation blocked/i);
+  assert.equal(result.execution.mutation_count > 0, true);
+});
+
+test('runApprovedExecution blocks tenant creation when the token cannot mutate the organization', async () => {
+  const state = { nextTeamId: 8200, teams: [], memberships: [] };
+  const { artifactPath, registryDirectory } = await buildApprovedTenantCreationArtifact('create-tenant-model-guard-block-');
+
+  const result = await runApprovedExecution({
+    env: buildGuardExecutionEnv(artifactPath, registryDirectory),
+    createApi: () => ({
+      ...buildExecutionApi(state),
+      addIssueLabels: async () => {},
+    }),
+    tokenInfo: { ...PAT_TOKEN_INFO, supports_org_mutation: false },
+    setProcessExitCode: false,
+  });
+
+  assert.equal(result.request.request_status, 'failed');
+  assert.equal(result.execution.mutation_count, 0);
+  assert.match(
+    String(result.execution.summary || ''),
+    /Tenant self-serve mutation blocked because the workflow token is not PAT-backed for organization mutation/
+  );
 });

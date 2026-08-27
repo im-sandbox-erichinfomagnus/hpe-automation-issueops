@@ -31,7 +31,7 @@ test('create-tenant-repos issue form scaffold includes required fields', () => {
   assert.match(form, /id:\s+primary_contact[\s\S]*?required:\s+true/i);
   assert.match(form, /id:\s+secondary_contact/i);
   assert.match(form, /id:\s+secondary_contact[\s\S]*?required:\s+false/i);
-  assert.match(form, /id:\s+designated_approver/i);
+  assert.doesNotMatch(form, /id:\s+designated_approver/i);
   assert.match(form, /id:\s+dry_run/i);
   assert.match(form, /id:\s+justification/i);
 });

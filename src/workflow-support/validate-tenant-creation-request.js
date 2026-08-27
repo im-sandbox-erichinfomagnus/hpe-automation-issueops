@@ -143,10 +143,6 @@ async function validateTenantCreationRequest(input = {}, options = {}) {
     errors.push('Derived tenant key is unsafe for tenant-registry path usage.');
   }
 
-  if (!request.designated_approver_login) {
-    errors.push('A designated approver is required.');
-  }
-
   if (!request.tenant_admin_login) {
     errors.push('A tenant admin GitHub login is required.');
   }
@@ -261,35 +257,11 @@ async function validateTenantCreationRequest(input = {}, options = {}) {
     }
   }
 
-  let designatedApproverAuthorization = {
-    state: 'unknown',
-    role: 'other',
+  // Tenant creation is self-serve: the requester org-owner gate below is the authorization.
+  const designatedApproverAuthorization = {
+    state: 'not_applicable',
+    role: 'not_applicable',
   };
-
-  if (request.organization && request.designated_approver_login && typeof options.getOrganizationMembership === 'function') {
-    const membership = await options.getOrganizationMembership({
-      organization: request.organization,
-      username: request.designated_approver_login,
-    });
-
-    if (membership && membership.exists && membership.membership) {
-      const role = membership.membership.role || 'member';
-      const state = membership.membership.state || 'active';
-      designatedApproverAuthorization = {
-        state: state === 'active' && role === 'admin' ? 'authorized' : 'unauthorized',
-        role,
-      };
-    } else {
-      designatedApproverAuthorization = {
-        state: 'unauthorized',
-        role: 'other',
-      };
-    }
-
-    if (designatedApproverAuthorization.state !== 'authorized') {
-      errors.push('Designated approver must be an active target organization owner.');
-    }
-  }
 
   let requesterEligibility = {
     state: 'unknown',
