@@ -1118,11 +1118,11 @@ async function runRequestValidation(options = {}) {
     if (operation === 'team_hierarchy' && tokenInfo.source !== 'ISSUEOPS_GITHUB_TOKEN') {
       validation = buildInsufficientHierarchyTokenValidation(request, tokenInfo);
     } else if (!tokenInfo.token) {
-      if (isTeamRepoAccess) {
+      if (operation === 'team_repo_access') {
         validation = buildMissingTokenRepoAccessValidation(request);
-      } else if (isTeamRepoAccessRemoval) {
+      } else if (operation === 'team_repo_access_removal') {
         validation = buildMissingTokenRepoAccessRemovalValidation(request);
-      } else if (isTenantRepoCreation) {
+      } else if (operation === 'tenant_repo_creation') {
         validation = {
           is_valid: false,
           request_status: 'validation_failed',
@@ -1145,7 +1145,7 @@ async function runRequestValidation(options = {}) {
             request_status: 'validation_failed',
           },
         };
-      } else if (isHostedRunnerCreation || isHostedRunnerDeletion || isHostedRunnerMove || isRunnerGroupCreation || isTenantVariableManagement || isOrgVariableManagement || isTenantSubteamCreation || isRepoAdminMembership || isCicdAdminMembership || isRepositoryRulesetOperation) {
+      } else if (operation === 'hosted_runner_creation' || operation === 'hosted_runner_deletion' || operation === 'hosted_runner_move' || operation === 'runner_group_creation' || operation === 'tenant_variable_management' || operation === 'org_variable_management' || operation === 'tenant_subteam_creation' || operation === 'repo_admin_membership' || operation === 'cicd_admin_membership' || operation === 'repository_ruleset_creation' || operation === 'repository_ruleset_deletion') {
         validation = {
           is_valid: false,
           request_status: 'validation_failed',
@@ -1168,9 +1168,9 @@ async function runRequestValidation(options = {}) {
             request_status: 'validation_failed',
           },
         };
-      } else if (isTeamHierarchy) {
+      } else if (operation === 'team_hierarchy') {
         validation = buildMissingTokenHierarchyValidation(request);
-      } else if (isTenantCreation) {
+      } else if (operation === 'tenant_creation') {
         validation = {
           is_valid: false,
           request_status: 'validation_failed',
@@ -1192,7 +1192,7 @@ async function runRequestValidation(options = {}) {
             request_status: 'validation_failed',
           },
         };
-      } else if (isTeamCreation) {
+      } else if (operation === 'team_creation') {
         validation = {
           is_valid: false,
           request_status: 'validation_failed',
@@ -1257,7 +1257,7 @@ async function runRequestValidation(options = {}) {
       const rulesetsApi = isRepositoryRulesetOperation
         ? (options.rulesetsApi || createGitHubRepoRulesetsApi({ token: tokenInfo.token }))
         : null;
-      if (isTeamRepoAccess) {
+      if (operation === 'team_repo_access') {
         const repoAccessAttachmentMaxBytes = resolveTeamRepoAccessAttachmentMaxBytes({
           attachment_max_bytes: options.maxAttachmentBytes,
           repository_policy: teamRepoAccessRepositoryPolicy,
@@ -1315,7 +1315,7 @@ async function runRequestValidation(options = {}) {
           intake_mode: validation.request.intake_mode,
           dry_run: validation.request.dry_run,
         });
-      } else if (isTeamRepoAccessRemoval) {
+      } else if (operation === 'team_repo_access_removal') {
         const repoAccessAttachmentMaxBytes = resolveTeamRepoAccessAttachmentMaxBytes({
           attachment_max_bytes: options.maxAttachmentBytes,
           repository_policy: teamRepoAccessRepositoryPolicy,
@@ -1373,7 +1373,7 @@ async function runRequestValidation(options = {}) {
           intake_mode: validation.request.intake_mode,
           dry_run: validation.request.dry_run,
         });
-      } else if (isTenantRepoCreation) {
+      } else if (operation === 'tenant_repo_creation') {
         const issueComments = env.ISSUE_NUMBER
           ? typeof api.listIssueComments === 'function'
             ? await executeGitHubReadWithRetry(
@@ -1440,7 +1440,7 @@ async function runRequestValidation(options = {}) {
           dry_run: validation.request.dry_run,
           boundary_revalidation_status: 'matched',
         });
-      } else if (isHostedRunnerCreation) {
+      } else if (operation === 'hosted_runner_creation') {
         validation = await validateHostedRunnerRequest(request, {
           getOrganization: ({ organization }) => executeGitHubReadWithRetry(
             () => api.getOrganization({ organization }),
@@ -1479,7 +1479,7 @@ async function runRequestValidation(options = {}) {
           dry_run: validation.request.dry_run,
           boundary_revalidation_status: 'matched',
         });
-      } else if (isHostedRunnerMove) {
+      } else if (operation === 'hosted_runner_move') {
         validation = await validateHostedRunnerMoveRequest(request, {
           getOrganization: ({ organization }) => executeGitHubReadWithRetry(
             () => api.getOrganization({ organization }),
@@ -1520,7 +1520,7 @@ async function runRequestValidation(options = {}) {
           dry_run: validation.request.dry_run,
           boundary_revalidation_status: 'matched',
         });
-      } else if (isHostedRunnerDeletion) {
+      } else if (operation === 'hosted_runner_deletion') {
         validation = await validateHostedRunnerDeletionRequest(request, {
           getOrganization: ({ organization }) => executeGitHubReadWithRetry(
             () => api.getOrganization({ organization }),
@@ -1554,7 +1554,7 @@ async function runRequestValidation(options = {}) {
           dry_run: validation.request.dry_run,
           boundary_revalidation_status: 'matched',
         });
-      } else if (isRunnerGroupCreation) {
+      } else if (operation === 'runner_group_creation') {
         validation = await validateRunnerGroupRequest(request, {
           getOrganization: ({ organization }) => executeGitHubReadWithRetry(
             () => api.getOrganization({ organization }),
@@ -1588,7 +1588,7 @@ async function runRequestValidation(options = {}) {
           dry_run: validation.request.dry_run,
           boundary_revalidation_status: 'matched',
         });
-      } else if (isOrgVariableManagement) {
+      } else if (operation === 'org_variable_management') {
         validation = await validateOrgVariablesRequest(request, {
           getOrganization: ({ organization }) => executeGitHubReadWithRetry(
             () => api.getOrganization({ organization }),
@@ -1608,7 +1608,7 @@ async function runRequestValidation(options = {}) {
           boundary_revalidation_status: 'matched',
           state: validation.request && validation.request.dry_run ? 'validated' : 'approved_for_execution',
         };
-      } else if (isTenantSubteamCreation) {
+      } else if (operation === 'tenant_subteam_creation') {
         const subteamIssueComments = env.ISSUE_NUMBER
           ? typeof api.listIssueComments === 'function'
             ? await executeGitHubReadWithRetry(
@@ -1669,7 +1669,7 @@ async function runRequestValidation(options = {}) {
           tenant_root_team_id: validation.root_team_id,
           dry_run: validation.request.dry_run,
         });
-      } else if (isRepoAdminMembership) {
+      } else if (operation === 'repo_admin_membership') {
         const repoAdminIssueComments = env.ISSUE_NUMBER
           ? typeof api.listIssueComments === 'function'
             ? await executeGitHubReadWithRetry(
@@ -1740,7 +1740,7 @@ async function runRequestValidation(options = {}) {
           tenant_root_team_id: validation.root_team_id,
           dry_run: validation.request.dry_run,
         });
-      } else if (isCicdAdminMembership) {
+      } else if (operation === 'cicd_admin_membership') {
         const cicdIssueComments = env.ISSUE_NUMBER
           ? typeof api.listIssueComments === 'function'
             ? await executeGitHubReadWithRetry(
@@ -1811,7 +1811,7 @@ async function runRequestValidation(options = {}) {
           tenant_root_team_id: validation.root_team_id,
           dry_run: validation.request.dry_run,
         });
-      } else if (isTenantVariableManagement) {
+      } else if (operation === 'tenant_variable_management') {
         validation = await validateTenantVariablesRequest(request, {
           getOrganization: ({ organization }) => executeGitHubReadWithRetry(
             () => api.getOrganization({ organization }),
@@ -1841,7 +1841,7 @@ async function runRequestValidation(options = {}) {
           boundary_revalidation_status: 'matched',
           state: validation.request && validation.request.dry_run ? 'validated' : 'approved_for_execution',
         };
-      } else if (isRepositoryRulesetOperation) {
+      } else if (operation === 'repository_ruleset_creation' || operation === 'repository_ruleset_deletion') {
         validation = await validateRepositoryRulesetRequest(request, {
           getOrganization: ({ organization }) => executeGitHubReadWithRetry(
             () => api.getOrganization({ organization }),
@@ -1879,7 +1879,7 @@ async function runRequestValidation(options = {}) {
           rejected_entry_count: validation.plan && validation.plan.rejected_entry_count,
           state: validation.request && validation.request.dry_run ? 'validated' : 'approved_for_execution',
         };
-      } else if (isTenantCreation) {
+      } else if (operation === 'tenant_creation') {
         validation = await validateTenantCreationRequest(request, {
           getOrganization: ({ organization }) => executeGitHubReadWithRetry(
             () => api.getOrganization({ organization }),
@@ -1919,7 +1919,7 @@ async function runRequestValidation(options = {}) {
           dry_run: validation.request.dry_run,
         });
         reconciliationPlan.cicd_capability_decision = cicdCapabilityDecision;
-      } else if (isTeamCreation) {
+      } else if (operation === 'team_creation') {
         const issueComments = env.ISSUE_NUMBER
           ? typeof api.listIssueComments === 'function'
             ? await executeGitHubReadWithRetry(
@@ -1967,7 +1967,7 @@ async function runRequestValidation(options = {}) {
           organization_exists: validation.organization_visible,
           dry_run: validation.request.dry_run,
         });
-      } else if (isTeamHierarchy) {
+      } else if (operation === 'team_hierarchy') {
         const hierarchyAttachmentMaxBytes = resolveTeamHierarchyAttachmentMaxBytes({
           attachment_max_bytes: options.maxAttachmentBytes,
           repository_policy: teamHierarchyRepositoryPolicy,

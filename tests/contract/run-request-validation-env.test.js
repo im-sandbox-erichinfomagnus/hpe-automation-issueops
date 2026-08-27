@@ -134,6 +134,62 @@ test('runRequestValidation classifies remove-team-repo-access when only team and
   assert.equal(persisted.request.team_slug, 'platform-engineering');
   assert.match(persisted.execution.summary, /No repository-access mutation was attempted/i);
 });
+test('runRequestValidation classifies repository-ruleset creation when tenant name is blank and an approver is set', async () => {
+  const os = require('node:os');
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'create-repository-ruleset-classification-'));
+  const artifactPath = path.join(workspace, 'audit.json');
+
+  // A blank tenant name plus a designated approver also satisfies the
+  // team-repo-access-removal predicate, so this pins the dispatch to the
+  // operation value rather than predicate evaluation order. A token and a
+  // stub api are supplied so validation reaches the validator dispatch chain
+  // instead of short-circuiting on the missing-token branch.
+  const result = await runRequestValidation({
+    env: {
+      GITHUB_REPOSITORY: 'octo-org/issueops-speckit',
+      ISSUE_NUMBER: '614',
+      REQUESTER_LOGIN: 'requester',
+      ISSUEOPS_GITHUB_TOKEN: 'test-token',
+      PARSED_ORGANIZATION: 'octo-org',
+      PARSED_TENANT_NAME: '',
+      PARSED_REPOSITORY: 'service-catalog',
+      PARSED_RULESET_NAME: 'main-protection',
+      PARSED_TARGET: 'branch',
+      PARSED_REF_NAME_PATTERN: '~DEFAULT_BRANCH',
+      PARSED_ENFORCEMENT: 'evaluate',
+      PARSED_REQUIRE_PULL_REQUEST: 'false',
+      PARSED_BLOCK_FORCE_PUSHES: 'true',
+      PARSED_REQUIRE_LINEAR_HISTORY: 'false',
+      PARSED_RESTRICT_DELETIONS: 'false',
+      PARSED_DESIGNATED_APPROVER: 'octocat',
+      PARSED_BUSINESS_JUSTIFICATION: 'Protect the default branch',
+      PARSED_DRY_RUN: 'true',
+      AUDIT_ARTIFACT_PATH: artifactPath,
+    },
+    api: {
+      getOrganization: async () => ({ exists: true }),
+      getOrganizationMembership: async () => ({ exists: true, membership: { role: 'admin', state: 'active' } }),
+      getRepositoryCollaboratorPermission: async () => ({ permission: 'admin' }),
+      getMembershipForUser: async () => ({ state: 'absent', membership: null }),
+      getTeam: async () => ({ exists: false, team: null }),
+      listOrgTeams: async () => [],
+      listIssueComments: async () => [],
+      listRepositoryRulesets: async () => [],
+      getRepository: async () => ({ exists: true }),
+    },
+    setProcessExitCode: false,
+  });
+
+  const persisted = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
+  assert.equal(persisted.metadata.operation, 'repository_ruleset_creation');
+
+  const errorText = result.validation.errors.join('\n');
+  assert.doesNotMatch(errorText, /An existing target team is required/i);
+  assert.doesNotMatch(errorText, /Exactly one intake source must be populated for manual mode/i);
+  assert.doesNotMatch(errorText, /At least one valid requested repository is required/i);
+});
 test('runRequestValidation records repo-access audit metadata and missing-token failures when no workflow token is available', async () => {
   const os = require('node:os');
   const fs = require('node:fs');
