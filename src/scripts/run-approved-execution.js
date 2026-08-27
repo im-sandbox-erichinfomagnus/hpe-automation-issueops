@@ -1147,6 +1147,44 @@ async function executeTenantSubteamCreation(context = {}) {
           failure_reason: maintainerAttempt.ok ? null : classifyFailureReason(maintainerAttempt.error),
         });
       }
+
+      if (
+        typeof teamApi.listTeamMembers === 'function' &&
+        typeof teamApi.removeTeamMembership === 'function'
+      ) {
+        // GitHub auto-adds the authenticated creator as a team maintainer;
+        // keep only the intended tenant-admin maintainers on the new subteam.
+        const intendedMaintainers = new Set(
+          reconciliationPlan.maintainers_to_assign.map((username) => String(username || '').trim().toLowerCase())
+        );
+        const memberListAttempt = await executeWithBoundedRetry(
+          () => teamApi.listTeamMembers({ organization, teamSlug: team.normalized_slug }),
+          { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+        );
+        if (memberListAttempt.ok) {
+          const removableMembers = (memberListAttempt.value || [])
+            .map((member) => String(member.username || '').trim().toLowerCase())
+            .filter((username) => username && !intendedMaintainers.has(username));
+
+          for (const username of removableMembers) {
+            const removalAttempt = await executeWithBoundedRetry(
+              () => teamApi.removeTeamMembership({
+                organization,
+                teamSlug: team.normalized_slug,
+                username,
+              }),
+              { maxRetries: options.maxRetries || 2, sleep: options.sleep }
+            );
+            executionResults.push({
+              username,
+              team_slug: team.normalized_slug,
+              result_kind: 'tenant_subteam_creator_cleanup',
+              execution_result: removalAttempt.ok ? 'removed' : 'failed',
+              failure_reason: removalAttempt.ok ? null : classifyFailureReason(removalAttempt.error),
+            });
+          }
+        }
+      }
     }
 
     for (const team of reconciliationPlan.teams_already_present) {
