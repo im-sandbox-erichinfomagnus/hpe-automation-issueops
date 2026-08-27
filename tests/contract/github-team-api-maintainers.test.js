@@ -43,7 +43,7 @@ test('listTeamMaintainers filters out org owners who are only plain team members
   });
 
   assert.deepEqual(maintainers, [
-    { username: 'real-maintainer', role: 'member', state: 'active' },
+    { username: 'real-maintainer', role: 'maintainer', state: 'active' },
   ]);
   assert.ok(
     requestedPaths.includes('/orgs/octo-org/teams/contosouk-root/memberships/org-owner-user'),

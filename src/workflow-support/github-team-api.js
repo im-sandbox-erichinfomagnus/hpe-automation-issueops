@@ -288,7 +288,8 @@ function createGitHubTeamApi(options = {}) {
         const membershipState = String(membershipResult.payload.state || '').toLowerCase();
         const membershipRole = String(membershipResult.payload.role || '').toLowerCase();
         if (membershipState === 'active' && membershipRole === 'maintainer') {
-          confirmedMaintainers.push(candidate);
+          // The list payload carries no role, so report the confirmed membership values.
+          confirmedMaintainers.push({ ...candidate, role: membershipRole, state: membershipState });
         }
       }
       return confirmedMaintainers;
