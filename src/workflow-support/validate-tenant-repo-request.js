@@ -232,7 +232,7 @@ async function validateTenantRepoRequest(input = {}, options = {}) {
       const prefixedName = ensureTenantRepositoryPrefix(rawName, tenantNameForPrefix);
       return {
         ...entry,
-        repository_name_input: entry.repository_name_input || prefixedName,
+        repository_name_input: prefixedName,
         repository_name_normalized: prefixedName,
       };
     });
@@ -244,7 +244,7 @@ async function validateTenantRepoRequest(input = {}, options = {}) {
         request.repository_name_normalized || request.repository_name_input,
         tenantNameForPrefix
       );
-      request.repository_name_input = request.repository_name_input || request.repository_name_normalized;
+      request.repository_name_input = request.repository_name_normalized;
     }
   }
 

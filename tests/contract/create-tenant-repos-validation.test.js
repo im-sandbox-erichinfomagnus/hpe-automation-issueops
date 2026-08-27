@@ -547,7 +547,7 @@ test('US4 duplicate-owned topology blocks approval when requested repository is 
       repositories: {
         owned: [
           {
-            repoName: 'acme-platform-service',
+            repoName: 'tenant-a_acme-platform-service',
             tenantId: 'tenant-a',
             visibility: 'internal',
             repoType: 'service',
@@ -582,7 +582,7 @@ test('US4 duplicate-owned topology blocks approval when requested repository is 
 
   assert.equal(result.is_valid, false);
   assert.equal(result.validation_findings.duplicate_owned_repository_status, 'duplicate_conflict');
-  assert.equal(result.validation_findings.duplicate_owned_repository_conflict.normalized_name, 'acme-platform-service');
+  assert.equal(result.validation_findings.duplicate_owned_repository_conflict.normalized_name, 'tenant-a_acme-platform-service');
   assert.match(result.errors.join('\n'), /already present in tenant topology owned repositories/i);
 });
 
@@ -607,7 +607,7 @@ test('US4 duplicate-owned topology allows execution revalidation no-op when repo
       repositories: {
         owned: [
           {
-            repoName: 'acme-platform-service',
+            repoName: 'tenant-a_acme-platform-service',
             tenantId: 'tenant-a',
             visibility: 'internal',
             repoType: 'service',
@@ -635,7 +635,7 @@ test('US4 duplicate-owned topology allows execution revalidation no-op when repo
       'tenanta-tenant': { state: 'active', membership: { role: 'maintainer' } },
       'tenanta-repoadmin': { state: 'active', membership: { role: 'member' } },
     },
-    repositoryState: { exists: true, repository: { full_name: 'octo-org/acme-platform-service', visibility: 'internal' } },
+    repositoryState: { exists: true, repository: { full_name: 'octo-org/tenant-a_acme-platform-service', visibility: 'internal' } },
     extraOptions: {
       allowOwnedDuplicateWhenRepositoryExists: true,
     },
