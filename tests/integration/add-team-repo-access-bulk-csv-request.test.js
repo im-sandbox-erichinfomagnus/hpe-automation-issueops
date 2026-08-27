@@ -56,7 +56,8 @@ test('workflow scaffolding keeps add-team-repo-access runtime and lint assumptio
   const workflow = fs.readFileSync(workflowPath, 'utf8');
   const lintWorkflow = fs.readFileSync(lintWorkflowPath, 'utf8');
 
-  assert.match(workflow, /on:\s+issues:\s+types:\s+- opened\s+- edited\s+- reopened\s+- labeled/m);
+  assert.match(workflow, /on:\s+issues:\s+types:\s+- opened\s+- edited\s+- reopened/m);
+  assert.doesNotMatch(workflow, /types:[\s\S]{0,60}?- labeled/m);
   assert.match(workflow, /issue_comment:\s+types:\s+- created\s+- edited\s+- deleted/m);
   assert.doesNotMatch(workflow, /issue_comment:\s+if \[/m);
   assert.match(workflow, /uses:\s+actions\/setup-node@v6/);
