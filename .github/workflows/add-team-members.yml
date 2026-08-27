@@ -6,7 +6,6 @@ on:
       - opened
       - edited
       - reopened
-      - labeled
   issue_comment:
     types:
       - created
@@ -30,7 +29,7 @@ concurrency:
 
 jobs:
   intake:
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'issues' || github.event_name == 'issue_comment'
+    if: github.event_name == 'workflow_dispatch' || ((github.event_name == 'issues' || github.event_name == 'issue_comment') && contains(github.event.issue.labels.*.name, 'add-team-members'))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:

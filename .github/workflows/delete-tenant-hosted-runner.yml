@@ -6,7 +6,6 @@ on:
       - opened
       - edited
       - reopened
-      - labeled
   issue_comment:
     types:
       - created
