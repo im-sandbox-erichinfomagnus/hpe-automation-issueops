@@ -1,6 +1,10 @@
 'use strict';
 
-const { parseTenantRepoRequest } = require('./parse-tenant-repo-request');
+const {
+  deriveTenantRepositoryPrefix,
+  ensureTenantRepositoryPrefix,
+  parseTenantRepoRequest,
+} = require('./parse-tenant-repo-request');
 const {
   ALLOWED_REPOSITORY_VISIBILITIES,
   describeAllowedRepositoryVisibilities,
@@ -219,6 +223,31 @@ async function validateTenantRepoRequest(input = {}, options = {}) {
     request.intake_mode === 'csv_attachment' &&
     (!Array.isArray(request.repository_entries) || request.repository_entries.length === 0);
 
+  const tenantNameForPrefix = request.tenant_name_normalized || request.tenant_name_input || request.tenant_name || '';
+  const requiredTenantPrefix = deriveTenantRepositoryPrefix(tenantNameForPrefix);
+
+  if (Array.isArray(request.repository_entries) && request.repository_entries.length > 0) {
+    request.repository_entries = request.repository_entries.map((entry) => {
+      const rawName = entry.repository_name_normalized || entry.repository_name_input || '';
+      const prefixedName = ensureTenantRepositoryPrefix(rawName, tenantNameForPrefix);
+      return {
+        ...entry,
+        repository_name_input: entry.repository_name_input || prefixedName,
+        repository_name_normalized: prefixedName,
+      };
+    });
+  }
+
+  if (requiredTenantPrefix) {
+    if (request.repository_name_normalized || request.repository_name_input) {
+      request.repository_name_normalized = ensureTenantRepositoryPrefix(
+        request.repository_name_normalized || request.repository_name_input,
+        tenantNameForPrefix
+      );
+      request.repository_name_input = request.repository_name_input || request.repository_name_normalized;
+    }
+  }
+
   if (!request.organization) {
     errors.push('Target organization is required.');
   }
@@ -233,6 +262,15 @@ async function validateTenantRepoRequest(input = {}, options = {}) {
 
   if (!skipSingleItemChecks && (!request.repository_name_normalized || !isSafeRepositoryName(request.repository_name_normalized))) {
     errors.push('Repository name normalization failed or produced an unsafe repository slug.');
+  }
+
+  if (requiredTenantPrefix && request.repository_name_normalized) {
+    const repoLower = request.repository_name_normalized.toLowerCase();
+    const prefixLower = requiredTenantPrefix.toLowerCase();
+    const prefixMatches = repoLower === prefixLower || repoLower.startsWith(`${prefixLower}_`);
+    if (!prefixMatches) {
+      errors.push(`Repository name '${request.repository_name_normalized}' must include the tenant prefix '${requiredTenantPrefix}_'.`);
+    }
   }
 
   const { visibility: repositoryVisibility, source: repositoryVisibilitySource } = normalizeRepositoryVisibility(

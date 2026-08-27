@@ -234,6 +234,66 @@ test('tenant repo validation blocks ambiguous tenant matches', async () => {
   assert.match(result.errors.join('\n'), /ambiguous/i);
 });
 
+test('tenant repo validation accepts a repo name already prefixed with the tenant name', async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'issueops-tenant-repo-prefixed-valid-'));
+  const registryDir = path.join(tempRoot, 'tenant-registry');
+  fs.mkdirSync(registryDir, { recursive: true });
+  writeRegistryRecord(registryDir, 'tenant-a.json', buildLegacyRegistryRecord());
+
+  const result = await validateTenantRepoRequest({
+    parsedRequest: buildParsedRequest({
+      tenant_name: 'Tenant A',
+      repository_name: 'tenant-a_acme-platform-service',
+    }),
+    issue: buildIssue(4),
+    repository: 'owner/repo',
+  }, buildTenantRepoApiOptions({
+    registryDir,
+    teams: [
+      { slug: 'tenanta-tenant', parent: null },
+      { slug: 'tenanta-repoadmin', parent: { slug: 'tenanta-tenant' } },
+    ],
+    memberships: {
+      'tenanta-tenant': { state: 'active', membership: { role: 'maintainer' } },
+      'tenanta-repoadmin': { state: 'active', membership: { role: 'member' } },
+    },
+  }));
+
+  assert.equal(result.is_valid, true);
+  assert.equal(result.request.repository_name_normalized, 'tenant-a_acme-platform-service');
+  assert.equal(result.request_status, 'awaiting_approval');
+});
+
+test('tenant repo validation automatically prefixes repo names to the tenant naming pattern when missing', async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'issueops-tenant-repo-prefix-auto-'));
+  const registryDir = path.join(tempRoot, 'tenant-registry');
+  fs.mkdirSync(registryDir, { recursive: true });
+  writeRegistryRecord(registryDir, 'tenant-a.json', buildLegacyRegistryRecord());
+
+  const result = await validateTenantRepoRequest({
+    parsedRequest: buildParsedRequest({
+      tenant_name: 'Tenant A',
+      repository_name: 'acme-platform-service',
+    }),
+    issue: buildIssue(4),
+    repository: 'owner/repo',
+  }, buildTenantRepoApiOptions({
+    registryDir,
+    teams: [
+      { slug: 'tenanta-tenant', parent: null },
+      { slug: 'tenanta-repoadmin', parent: { slug: 'tenanta-tenant' } },
+    ],
+    memberships: {
+      'tenanta-tenant': { state: 'active', membership: { role: 'maintainer' } },
+      'tenanta-repoadmin': { state: 'active', membership: { role: 'member' } },
+    },
+  }));
+
+  assert.equal(result.is_valid, true);
+  assert.equal(result.request.repository_name_normalized, 'tenant-a_acme-platform-service');
+  assert.equal(result.request_status, 'awaiting_approval');
+});
+
 test('tenant repo validation rejects unsafe repository-name normalization outcomes', async () => {
   const result = await validateTenantRepoRequest({
     parsedRequest: buildParsedRequest({ repository_name: '!!!' }),

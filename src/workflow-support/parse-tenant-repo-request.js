@@ -54,6 +54,37 @@ function normalizeTenantName(value) {
   return normalizeText(value).replace(/\s+/g, ' ').toLowerCase();
 }
 
+function deriveTenantRepositoryPrefix(tenantName) {
+  const raw = normalizeText(tenantName);
+  if (!raw) {
+    return '';
+  }
+
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function ensureTenantRepositoryPrefix(repositoryName, tenantName) {
+  const normalizedRepositoryName = normalizeRepositoryName(repositoryName);
+  const prefix = deriveTenantRepositoryPrefix(tenantName);
+  if (!normalizedRepositoryName || !prefix) {
+    return normalizedRepositoryName;
+  }
+
+  const normalizedPrefix = prefix.toLowerCase();
+  const repoLower = normalizedRepositoryName.toLowerCase();
+  if (repoLower === normalizedPrefix || repoLower.startsWith(`${normalizedPrefix}_`)) {
+    return normalizedRepositoryName;
+  }
+
+  return `${normalizedPrefix}_${normalizedRepositoryName}`;
+}
+
 function readField(source, keys) {
   for (const key of keys) {
     if (source && source[key] != null && source[key] !== '') {
@@ -294,6 +325,16 @@ function parseTenantRepoRequest(input = {}) {
   // The first merged entry drives the backward-compatible single-item request
   // fields so downstream single-repo consumers and audits keep their shape.
   const primaryEntry = repositoryEntries[0] || singleEntry;
+  const tenantRepositoryPrefix = deriveTenantRepositoryPrefix(tenantNameNormalized || tenantNameInput);
+  const primaryEntryRepositoryName = ensureTenantRepositoryPrefix(
+    primaryEntry.repository_name_normalized || primaryEntry.repository_name_input,
+    tenantRepositoryPrefix || tenantNameNormalized || tenantNameInput
+  );
+
+  if (primaryEntryRepositoryName) {
+    primaryEntry.repository_name_normalized = primaryEntryRepositoryName;
+    primaryEntry.repository_name_input = primaryEntry.repository_name_input || primaryEntryRepositoryName;
+  }
 
   const submittedAt = input.submittedAt || new Date().toISOString();
   const requestId = buildRequestId(
@@ -340,6 +381,8 @@ function parseTenantRepoRequest(input = {}) {
 module.exports = {
   REPOSITORIES_CSV_COLUMNS,
   buildRepositoryEntry,
+  deriveTenantRepositoryPrefix,
+  ensureTenantRepositoryPrefix,
   mergeRepositoryEntries,
   normalizeBoolean,
   normalizeIntakeMode,
