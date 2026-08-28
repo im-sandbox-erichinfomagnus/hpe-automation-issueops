@@ -492,7 +492,9 @@ function isTenantCreationParsedRequest(parsedRequest = {}) {
   return Boolean(
     parsedRequest.tenant_name ||
     parsedRequest.parsed_tenant_name ||
-    parsedRequest.tenant_display_name
+    parsedRequest.tenant_display_name ||
+    parsedRequest.tenant_csv ||
+    parsedRequest.parsed_tenant_csv
   );
 }
 

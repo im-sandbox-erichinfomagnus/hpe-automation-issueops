@@ -190,6 +190,82 @@ test('runRequestValidation classifies repository-ruleset creation when tenant na
   assert.doesNotMatch(errorText, /Exactly one intake source must be populated for manual mode/i);
   assert.doesNotMatch(errorText, /At least one valid requested repository is required/i);
 });
+
+test('runRequestValidation classifies a CSV-only tenant request as tenant creation when the tenant name is blank', async () => {
+  const os = require('node:os');
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'create-tenant-model-csv-classification-'));
+  const artifactPath = path.join(workspace, 'audit.json');
+  const registryDir = path.join(workspace, 'tenant-registry');
+  fs.mkdirSync(registryDir, { recursive: true });
+
+  // The form marks tenant name optional and prefers the CSV row, so a blank name
+  // with a populated CSV must still classify as tenant creation.
+  const result = await runRequestValidation({
+    env: {
+      GITHUB_REPOSITORY: 'octo-org/issueops-speckit',
+      ISSUE_NUMBER: '615',
+      REQUESTER_LOGIN: 'requester',
+      ISSUEOPS_GITHUB_TOKEN: 'test-token',
+      AUDIT_ARTIFACT_PATH: artifactPath,
+      TENANT_REGISTRY_DIR: registryDir,
+      PARSED_ORGANIZATION: 'octo-org',
+      PARSED_TENANT_NAME: '',
+      PARSED_TENANT_CSV: 'tenant_name,tenant_admin_login,tenant_type,cmdb_id,cost_center,business_unit,environment,primary_contact,secondary_contact,code_scanning_enabled,secret_scanning_enabled,dependabot_enabled\nAcmeCsv,octocat,platform,CMDB-1001,CC-1001,Compute,nonprod,owner@example.com,backup@example.com,true,true,true',
+      PARSED_DRY_RUN: 'true',
+      PARSED_JUSTIFICATION: 'Bootstrap the tenant from the CSV row',
+    },
+    api: {
+      getOrganization: async () => ({ exists: true }),
+      getOrganizationMembership: async () => ({ exists: true, membership: { role: 'admin', state: 'active' } }),
+      listOrgTeams: async () => [],
+    },
+    setProcessExitCode: false,
+  });
+
+  const persisted = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
+  assert.equal(persisted.metadata.operation, 'tenant_creation');
+  assert.equal(result.validation.is_valid, true);
+
+  const errorText = result.validation.errors.join('\n');
+  assert.doesNotMatch(errorText, /Target team slug is required/i);
+  assert.doesNotMatch(errorText, /Exactly one supported intake mode must be selected/i);
+});
+
+test('runRequestValidation does not classify a request without any tenant signal as tenant creation', async () => {
+  const os = require('node:os');
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'tenant-classification-negative-'));
+  const artifactPath = path.join(workspace, 'audit.json');
+
+  // Negative control for the CSV widening: a blank tenant name and a blank tenant
+  // CSV must leave classification to the other predicates.
+  await runRequestValidation({
+    env: {
+      GITHUB_REPOSITORY: 'octo-org/issueops-speckit',
+      ISSUE_NUMBER: '616',
+      REQUESTER_LOGIN: 'requester',
+      ISSUEOPS_GITHUB_TOKEN: 'test-token',
+      AUDIT_ARTIFACT_PATH: artifactPath,
+      PARSED_ORGANIZATION: 'octo-org',
+      PARSED_TEAM: 'platform-engineering',
+      PARSED_TENANT_NAME: '',
+      PARSED_TENANT_CSV: '',
+      PARSED_DRY_RUN: 'true',
+    },
+    api: {
+      getOrganization: async () => ({ exists: true }),
+      getOrganizationMembership: async () => ({ exists: true, membership: { role: 'admin', state: 'active' } }),
+      listOrgTeams: async () => [],
+    },
+    setProcessExitCode: false,
+  });
+
+  const persisted = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
+  assert.notEqual(persisted.metadata.operation, 'tenant_creation');
+});
 test('runRequestValidation records repo-access audit metadata and missing-token failures when no workflow token is available', async () => {
   const os = require('node:os');
   const fs = require('node:fs');

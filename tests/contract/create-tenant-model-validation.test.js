@@ -448,3 +448,27 @@ test('evaluateCicdCapabilityPath selects none when no safe path exists', () => {
   assert.equal(decision.status, 'unavailable');
   assert.equal(decision.reason_code, 'capability_unavailable');
 });
+
+test('validateTenantCreationRequest accepts a CSV-only request and derives the tenant fields from the row', async () => {
+  const request = parseTenantCreationRequest({
+    parsedRequest: {
+      organization: 'octo-org',
+      tenant_name: '',
+      tenant_csv: 'tenant_name,tenant_admin_login,tenant_type,cmdb_id,cost_center,business_unit,environment,primary_contact,secondary_contact,code_scanning_enabled,secret_scanning_enabled,dependabot_enabled\nAcmeCsv,octocat,platform,CMDB-1001,CC-1001,Compute,nonprod,owner@example.com,backup@example.com,true,true,true',
+      dry_run: 'true',
+      justification: 'Bootstrap the tenant from the CSV row',
+    },
+    issue: { number: 6001, user: { login: 'requester-user' } },
+    repository: 'octo-org/issueops-speckit',
+  });
+
+  assert.equal(request.tenant_display_name, 'AcmeCsv');
+  assert.equal(request.tenant_admin_login, 'octocat');
+  assert.equal(request.tenant_type, 'platform');
+  assert.equal(request.primary_contact, 'owner@example.com');
+
+  const validation = await validateTenantCreationRequest(request, baseValidationOptions());
+
+  assert.equal(validation.is_valid, true);
+  assert.equal(validation.request_status, 'awaiting_approval');
+});
