@@ -104,7 +104,7 @@ test('runRequestValidation for create-tenant-model dry-run emits reconciliation 
   assert.match(persisted.execution.summary, /No tenant bootstrap mutation was attempted/i);
 });
 
-test('runApprovalGate approves tenant request when designated active owner comments approved', async () => {
+test('runApprovalGate auto-approves tenant creation under the tenant self-serve policy', async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'create-tenant-model-approval-'));
   const artifactPath = path.join(workspace, 'audit.json');
 
@@ -138,47 +138,82 @@ test('runApprovalGate approves tenant request when designated active owner comme
     api: {
       getAssignableOwners: async () => ['queue-owner'],
       addIssueAssignees: async () => ({ status: 'assigned' }),
-      listIssueComments: async () => [
-        {
-          id: 100,
-          body: 'approved',
-          created_at: '2026-05-26T10:00:00Z',
-          user: { login: 'org-owner-user' },
-        },
-      ],
-      getOrganizationMembership: async ({ username }) => ({
+      listIssueComments: async () => [],
+      getOrganizationMembership: async () => ({
         exists: true,
-        membership: {
-          role: username === 'org-owner-user' ? 'admin' : 'member',
-          state: 'active',
-        },
+        membership: { role: 'admin', state: 'active' },
       }),
     },
     setProcessExitCode: false,
   });
 
   assert.equal(approvalResult.approval.approval_status, 'approved');
-  assert.equal(approvalResult.approval.approver_role, 'target_org_owner');
+  assert.equal(approvalResult.approval.approver_role, 'tenant_self_serve');
+  assert.equal(approvalResult.approval.decision_source, 'policy');
+  assert.equal(approvalResult.approval.approver_login, approvalResult.request.requester_login);
   assert.equal(approvalResult.request.request_status, 'approved');
-  assert.match(approvalResult.assignment.assignment_note, /queue ownership only/i);
 });
 
-test('runApprovalGate denies tenant approval from non-designated commenter', async () => {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'create-tenant-model-denied-wrong-user-'));
+test('runApprovalGate never approves tenant creation when validation failed', async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'create-tenant-model-invalid-request-'));
   const artifactPath = path.join(workspace, 'audit.json');
 
-  await runRequestValidation({
+  const validationResult = await runRequestValidation({
+    env: buildTenantValidationEnv(artifactPath, {
+      GITHUB_TOKEN: '',
+      ISSUEOPS_GITHUB_TOKEN: '',
+    }),
+    setProcessExitCode: false,
+  });
+
+  assert.equal(validationResult.validation.is_valid, false);
+
+  const approvalResult = await runApprovalGate({
+    env: {
+      AUDIT_ARTIFACT_PATH: artifactPath,
+      GITHUB_TOKEN: 'test-token',
+    },
+    api: {
+      getAssignableOwners: async () => ['queue-owner'],
+      addIssueAssignees: async () => ({ status: 'assigned' }),
+      listIssueComments: async () => [],
+      getOrganizationMembership: async () => ({
+        exists: true,
+        membership: { role: 'admin', state: 'active' },
+      }),
+    },
+    setProcessExitCode: false,
+  });
+
+  assert.equal(approvalResult.approval.approval_status, 'not_requested');
+  assert.notEqual(approvalResult.approval.approval_status, 'approved');
+});
+
+test('runRequestValidation blocks tenant creation when the requester is not an active org owner', async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'create-tenant-model-requester-not-owner-'));
+  const artifactPath = path.join(workspace, 'audit.json');
+
+  const result = await runRequestValidation({
     env: buildTenantValidationEnv(artifactPath),
     api: {
       getOrganization: async () => ({ exists: true }),
       getOrganizationMembership: async ({ username }) => ({
         exists: true,
-        membership: { role: 'admin', state: 'active' },
+        membership: {
+          role: username === 'requester-user' ? 'member' : 'admin',
+          state: 'active',
+        },
       }),
       listOrgTeams: async () => [],
     },
     setProcessExitCode: false,
   });
+
+  assert.equal(result.validation.is_valid, false);
+  assert.equal(
+    result.validation.errors.includes('Requester must be an active owner in the target organization to create a tenant.'),
+    true
+  );
 
   const approvalResult = await runApprovalGate({
     env: {
@@ -188,14 +223,7 @@ test('runApprovalGate denies tenant approval from non-designated commenter', asy
     api: {
       getAssignableOwners: async () => ['queue-owner'],
       addIssueAssignees: async () => ({ status: 'assigned' }),
-      listIssueComments: async () => [
-        {
-          id: 200,
-          body: 'approved',
-          created_at: '2026-05-26T10:05:00Z',
-          user: { login: 'different-owner' },
-        },
-      ],
+      listIssueComments: async () => [],
       getOrganizationMembership: async () => ({
         exists: true,
         membership: { role: 'admin', state: 'active' },
@@ -204,58 +232,10 @@ test('runApprovalGate denies tenant approval from non-designated commenter', asy
     setProcessExitCode: false,
   });
 
-  assert.equal(approvalResult.approval.approval_status, 'denied');
-  assert.equal(approvalResult.approval.approver_role, 'other');
-  assert.match(approvalResult.approval.decision_note, /does not authorize tenant bootstrap mutation/i);
+  assert.notEqual(approvalResult.approval.approval_status, 'approved');
 });
 
-test('runApprovalGate denies tenant approval when designated approver is not an active owner', async () => {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'create-tenant-model-denied-non-owner-'));
-  const artifactPath = path.join(workspace, 'audit.json');
-
-  await runRequestValidation({
-    env: buildTenantValidationEnv(artifactPath),
-    api: {
-      getOrganization: async () => ({ exists: true }),
-      getOrganizationMembership: async () => ({
-        exists: true,
-        membership: { role: 'admin', state: 'active' },
-      }),
-      listOrgTeams: async () => [],
-    },
-    setProcessExitCode: false,
-  });
-
-  const approvalResult = await runApprovalGate({
-    env: {
-      AUDIT_ARTIFACT_PATH: artifactPath,
-      GITHUB_TOKEN: 'test-token',
-    },
-    api: {
-      getAssignableOwners: async () => ['queue-owner'],
-      addIssueAssignees: async () => ({ status: 'assigned' }),
-      listIssueComments: async () => [
-        {
-          id: 300,
-          body: 'approved',
-          created_at: '2026-05-26T10:10:00Z',
-          user: { login: 'org-owner-user' },
-        },
-      ],
-      getOrganizationMembership: async () => ({
-        exists: true,
-        membership: { role: 'member', state: 'active' },
-      }),
-    },
-    setProcessExitCode: false,
-  });
-
-  assert.equal(approvalResult.approval.approval_status, 'denied');
-  assert.equal(approvalResult.approval.approver_authorization_state, 'unauthorized');
-  assert.match(approvalResult.approval.decision_note, /does not authorize tenant bootstrap mutation/i);
-});
-
-test('runApprovalGate keeps central assignment routing-only when no approval comment exists', async () => {
+test('runApprovalGate skips central assignment for tenant creation self-serve requests', async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'create-tenant-model-assignment-only-'));
   const artifactPath = path.join(workspace, 'audit.json');
 
@@ -298,10 +278,10 @@ test('runApprovalGate keeps central assignment routing-only when no approval com
     setProcessExitCode: false,
   });
 
-  assert.equal(approvalResult.assignment.assignment_status, 'assigned');
-  assert.match(approvalResult.assignment.assignment_note, /queue ownership only/i);
-  assert.equal(approvalResult.approval.approval_status, 'pending');
-  assert.equal(approvalResult.request.request_status, 'awaiting_approval');
+  assert.equal(approvalResult.assignment.assignment_status, 'not_attempted');
+  assert.equal(approvalResult.approval.approval_status, 'approved');
+  assert.equal(approvalResult.approval.approver_role, 'tenant_self_serve');
+  assert.equal(approvalResult.request.request_status, 'approved');
 });
 
 test('runRequestValidation fails closed for tenant creation when workflow token is missing', async () => {
@@ -376,4 +356,26 @@ test('runRequestValidation fails closed for tenant creation when token lacks org
   assert.equal(result.validation.is_valid, false);
   assert.equal(result.validation.request_status, 'validation_failed');
   assert.match(result.validation.errors.join('\n'), /Resource not accessible by integration/i);
+});
+
+test('runRequestValidation accepts tenant creation without a designated approver', async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'create-tenant-model-no-approver-'));
+  const artifactPath = path.join(workspace, 'audit.json');
+
+  const result = await runRequestValidation({
+    env: buildTenantValidationEnv(artifactPath, { PARSED_DESIGNATED_APPROVER: '' }),
+    api: {
+      getOrganization: async () => ({ exists: true }),
+      getOrganizationMembership: async () => ({
+        exists: true,
+        membership: { role: 'admin', state: 'active' },
+      }),
+      listOrgTeams: async () => [],
+    },
+    setProcessExitCode: false,
+  });
+
+  assert.equal(result.validation.is_valid, true);
+  assert.equal(result.validation.designated_approver_authorization.state, 'not_applicable');
+  assert.equal(result.validation.designated_approver_authorization.role, 'not_applicable');
 });

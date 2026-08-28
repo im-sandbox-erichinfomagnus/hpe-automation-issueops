@@ -6,11 +6,7 @@ const path = require('path');
 const { assertTeamHierarchyAllowed } = require('../actions/team-hierarchy-policy');
 const { assertTeamCreationAllowed } = require('../actions/team-creation-policy');
 const { assertMutationAllowed } = require('../actions/team-membership-policy');
-const { assertTenantBootstrapHierarchyAllowed } = require('../actions/team-hierarchy-policy');
-const { assertTenantBootstrapMembershipAllowed } = require('../actions/team-membership-policy');
 const { assertRepositoryAccessAllowed } = require('../actions/team-repo-access-policy');
-const { assertRepositoryCreationAllowed } = require('../actions/repo-creation-policy');
-const { assertRepoAdminTeamPermissionAllowed } = require('../actions/repo-permission-policy');
 const { assertHostedRunnerMutationAllowed } = require('../actions/hosted-runner-policy');
 const { assertRunnerGroupCreationAllowed } = require('../actions/runner-group-policy');
 const { buildAuditArtifact, toAuditArtifactJson } = require('../workflow-support/build-audit-artifact');
@@ -2661,23 +2657,7 @@ async function runApprovedExecution(options = {}) {
 
   let mutationDecision;
   try {
-    mutationDecision = isTenantCreation
-      ? (() => {
-          const decision = assertTenantBootstrapMembershipAllowed({
-            approval_status: auditArtifact.approval.approval_status,
-            approver_role: auditArtifact.approval.approver_role,
-            requester_login: auditArtifact.request.requester_login,
-            dry_run: auditArtifact.request.dry_run,
-            tokenInfo: options.tokenInfo,
-          });
-
-          if (!decision.tokenInfo || !decision.tokenInfo.is_pat_backed) {
-            throw new Error('Tenant bootstrap mutation blocked because the workflow token is not PAT-backed for org mutation');
-          }
-
-          return decision;
-        })()
-      : isTeamCreation
+    mutationDecision = isTeamCreation
       ? assertTeamCreationAllowed({
           approval_status: auditArtifact.approval.approval_status,
           approver_login: auditArtifact.approval.approver_login,
@@ -2706,16 +2686,6 @@ async function runApprovedExecution(options = {}) {
           })
       : isTeamRepoAccessRemoval
         ? assertRepositoryAccessAllowed({
-            approval_status: auditArtifact.approval.approval_status,
-            approver_login: auditArtifact.approval.approver_login,
-            designated_approver_login: auditArtifact.request.designated_approver_login,
-            approver_role: auditArtifact.approval.approver_role,
-            approver_authorization_state: auditArtifact.approval.approver_authorization_state,
-            dry_run: auditArtifact.request.dry_run,
-            tokenInfo: options.tokenInfo,
-          })
-      : isTenantRepoCreation
-        ? assertRepositoryCreationAllowed({
             approval_status: auditArtifact.approval.approval_status,
             approver_login: auditArtifact.approval.approver_login,
             designated_approver_login: auditArtifact.request.designated_approver_login,
@@ -2760,7 +2730,7 @@ async function runApprovedExecution(options = {}) {
             dry_run: auditArtifact.request.dry_run,
             tokenInfo: options.tokenInfo,
           })
-      : (isTenantSubteamCreation || isRepoAdminMembership || isCicdAdminMembership)
+      : (isTenantSubteamCreation || isRepoAdminMembership || isCicdAdminMembership || isTenantCreation || isTenantRepoCreation)
         ? assertTenantSelfServeMutationAllowed({
             approval_status: auditArtifact.approval.approval_status,
             dry_run: auditArtifact.request.dry_run,
@@ -3690,14 +3660,15 @@ async function runApprovedExecution(options = {}) {
         if (!creationFailed && reconciliationPlan.permission_action === 'grant_admin') {
           let permissionPolicyAllowed = true;
           try {
-            assertRepoAdminTeamPermissionAllowed({
+            assertTenantSelfServeMutationAllowed({
               approval_status: auditArtifact.approval.approval_status,
-              approver_role: auditArtifact.approval.approver_role,
-              approver_authorization_state: auditArtifact.approval.approver_authorization_state,
               dry_run: auditArtifact.request.dry_run,
-              repo_admin_team_slug: auditArtifact.request.repo_admin_team_slug,
               tokenInfo: mutationDecision.tokenInfo,
             });
+
+            if (!auditArtifact.request.repo_admin_team_slug) {
+              throw new Error('Repository permission grant blocked because repo-admin team slug is missing');
+            }
           } catch (error) {
             permissionPolicyAllowed = false;
             executionResults.push({
@@ -4398,15 +4369,15 @@ async function runApprovedExecution(options = {}) {
 
         try {
           if (requestedChildLinks.length > 0) {
-            assertTenantBootstrapHierarchyAllowed({
+            assertTenantSelfServeMutationAllowed({
               approval_status: auditArtifact.approval.approval_status,
-              approver_login: auditArtifact.approval.approver_login,
-              designated_approver_login: auditArtifact.request.designated_approver_login,
-              approver_authorization_state: auditArtifact.approval.approver_authorization_state,
-              parent_team_slug: auditArtifact.request.tenant_team_slug,
               dry_run: auditArtifact.request.dry_run,
               tokenInfo: mutationDecision.tokenInfo,
             });
+
+            if (!auditArtifact.request.tenant_team_slug) {
+              throw new Error('Tenant hierarchy mutation blocked because parent team slug is missing');
+            }
 
             for (const childLink of requestedChildLinks) {
               const childTeamSlug = String(childLink.child_team_slug || '').toLowerCase();
@@ -4463,13 +4434,15 @@ async function runApprovedExecution(options = {}) {
               }
             }
 
-            assertTenantBootstrapMembershipAllowed({
+            assertTenantSelfServeMutationAllowed({
               approval_status: auditArtifact.approval.approval_status,
-              approver_role: auditArtifact.approval.approver_role,
-              requester_login: auditArtifact.request.requester_login,
               dry_run: auditArtifact.request.dry_run,
               tokenInfo: mutationDecision.tokenInfo,
             });
+
+            if (!auditArtifact.request.requester_login) {
+              throw new Error('Tenant membership bootstrap blocked because requester login is missing');
+            }
 
             const tenantAdminLogin = auditArtifact.request.tenant_admin_login || '';
             const requesterLogin = auditArtifact.request.requester_login || '';

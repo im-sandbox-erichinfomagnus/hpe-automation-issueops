@@ -10,6 +10,15 @@ const { runApprovalGate } = require('../../src/scripts/run-approval-gate');
 const { runApprovedExecution } = require('../../src/scripts/run-approved-execution');
 const { runRequestValidation } = require('../../src/scripts/run-request-validation');
 
+const PAT_TOKEN_INFO = {
+  token: 'pat-token',
+  source: 'ISSUEOPS_GITHUB_TOKEN',
+  token_kind: 'pat',
+  is_pat_backed: true,
+  supports_team_repo_access_mutation: true,
+  supports_org_mutation: true,
+};
+
 test('create-tenant-repos workflow includes validation and approval gates', () => {
   const workflowPath = path.join(__dirname, '..', '..', '.github', 'workflows', 'create-tenant-repos.yml');
   const workflow = fs.readFileSync(workflowPath, 'utf8');
@@ -217,13 +226,7 @@ test('US3 happy path creates repository and grants admin to X_RepoAdmin', async 
       TENANT_REGISTRY_REF: 'main',
       AUDIT_ARTIFACT_RETENTION_DAYS: '30',
     },
-    tokenInfo: {
-      token: 'pat-token',
-      source: 'ISSUEOPS_GITHUB_TOKEN',
-      token_kind: 'pat',
-      is_pat_backed: true,
-      supports_team_repo_access_mutation: true,
-    },
+    tokenInfo: PAT_TOKEN_INFO,
     createApi: () => ({
       getRepository: async () => ({ exists: false, repository: null }),
       getTeamRepositoryPermission: async () => ({ current_permission_api_value: 'none' }),
@@ -311,13 +314,7 @@ test('US3 creates repositories with requested private, internal, and public visi
         TENANT_REGISTRY_DIR: registryDir,
         TENANT_REGISTRY_REF: 'main',
       },
-      tokenInfo: {
-        token: 'pat-token',
-        source: 'ISSUEOPS_GITHUB_TOKEN',
-        token_kind: 'pat',
-        is_pat_backed: true,
-        supports_team_repo_access_mutation: true,
-      },
+      tokenInfo: PAT_TOKEN_INFO,
       createApi: () => ({
         getRepository: async () => ({ exists: false, repository: null }),
         getTeamRepositoryPermission: async () => ({ current_permission_api_value: 'none' }),
@@ -366,13 +363,7 @@ test('US3 existing repository follows no-op or missing-grant reconciliation', as
       TENANT_REGISTRY_DIR: registryDir,
       TENANT_REGISTRY_REF: 'main',
     },
-    tokenInfo: {
-      token: 'pat-token',
-      source: 'ISSUEOPS_GITHUB_TOKEN',
-      token_kind: 'pat',
-      is_pat_backed: true,
-      supports_team_repo_access_mutation: true,
-    },
+    tokenInfo: PAT_TOKEN_INFO,
     createApi: () => ({
       getRepository: async () => ({ exists: true, repository: { full_name: 'im-sandbox-himanshu/acme-platform-service', visibility: 'private' } }),
       getTeamRepositoryPermission: async () => ({ current_permission_api_value: 'admin' }),
@@ -404,13 +395,7 @@ test('US3 existing repository follows no-op or missing-grant reconciliation', as
       TENANT_REGISTRY_DIR: registryDir,
       TENANT_REGISTRY_REF: 'main',
     },
-    tokenInfo: {
-      token: 'pat-token',
-      source: 'ISSUEOPS_GITHUB_TOKEN',
-      token_kind: 'pat',
-      is_pat_backed: true,
-      supports_team_repo_access_mutation: true,
-    },
+    tokenInfo: PAT_TOKEN_INFO,
     createApi: () => ({
       getRepository: async () => ({ exists: true, repository: { full_name: 'im-sandbox-himanshu/acme-platform-service', visibility: 'private' } }),
       getTeamRepositoryPermission: async () => ({ current_permission_api_value: 'maintain' }),
@@ -491,13 +476,7 @@ test('US4 happy path includes contact metadata in audit artifact and step summar
       TENANT_REGISTRY_REF: 'main',
       GITHUB_STEP_SUMMARY: summaryPath,
     },
-    tokenInfo: {
-      token: 'pat-token',
-      source: 'ISSUEOPS_GITHUB_TOKEN',
-      token_kind: 'pat',
-      is_pat_backed: true,
-      supports_team_repo_access_mutation: true,
-    },
+    tokenInfo: PAT_TOKEN_INFO,
     createApi: () => ({
       getRepository: async () => ({ exists: false, repository: null }),
       getTeamRepositoryPermission: async () => ({ current_permission_api_value: 'none' }),
@@ -627,13 +606,7 @@ test('US4 no-op execution preserves contact metadata from current request', asyn
       TENANT_REGISTRY_DIR: registryDir,
       TENANT_REGISTRY_REF: 'main',
     },
-    tokenInfo: {
-      token: 'pat-token',
-      source: 'ISSUEOPS_GITHUB_TOKEN',
-      token_kind: 'pat',
-      is_pat_backed: true,
-      supports_team_repo_access_mutation: true,
-    },
+    tokenInfo: PAT_TOKEN_INFO,
     createApi: () => ({
       getRepository: async () => ({
         exists: true,
@@ -757,13 +730,7 @@ test('US3 existing repository with mismatched visibility is blocked as a conflic
       TENANT_REGISTRY_DIR: registryDir,
       TENANT_REGISTRY_REF: 'main',
     },
-    tokenInfo: {
-      token: 'pat-token',
-      source: 'ISSUEOPS_GITHUB_TOKEN',
-      token_kind: 'pat',
-      is_pat_backed: true,
-      supports_team_repo_access_mutation: true,
-    },
+    tokenInfo: PAT_TOKEN_INFO,
     createApi: () => ({
       getRepository: async () => ({ exists: true, repository: { full_name: 'im-sandbox-himanshu/acme-platform-service', visibility: 'public' } }),
       getTeamRepositoryPermission: async () => ({ current_permission_api_value: 'admin' }),
@@ -822,13 +789,7 @@ test('US3 blocks approved execution when boundary revalidation mismatches', asyn
       TENANT_REGISTRY_DIR: registryDir,
       TENANT_REGISTRY_REF: 'main',
     },
-    tokenInfo: {
-      token: 'pat-token',
-      source: 'ISSUEOPS_GITHUB_TOKEN',
-      token_kind: 'pat',
-      is_pat_backed: true,
-      supports_team_repo_access_mutation: true,
-    },
+    tokenInfo: PAT_TOKEN_INFO,
     createApi: () => ({
       getRepository: async () => ({ exists: false, repository: null }),
       getTeamRepositoryPermission: async () => ({ current_permission_api_value: 'none' }),
@@ -891,13 +852,7 @@ test('US3 handles permission-grant failures, retry context, and audit persistenc
         TENANT_REGISTRY_DIR: registryDir,
         TENANT_REGISTRY_REF: 'main',
       },
-      tokenInfo: {
-        token: 'pat-token',
-        source: 'ISSUEOPS_GITHUB_TOKEN',
-        token_kind: 'pat',
-        is_pat_backed: true,
-        supports_team_repo_access_mutation: true,
-      },
+      tokenInfo: PAT_TOKEN_INFO,
       createApi: () => ({
         getRepository: async () => ({ exists: false, repository: null }),
         getTeamRepositoryPermission: async () => ({ current_permission_api_value: 'none' }),
@@ -968,13 +923,7 @@ test('US4 appends owned topology entry after successful repository provisioning'
       TENANT_REGISTRY_DIR: registryDir,
       TENANT_REGISTRY_REF: 'main',
     },
-    tokenInfo: {
-      token: 'pat-token',
-      source: 'ISSUEOPS_GITHUB_TOKEN',
-      token_kind: 'pat',
-      is_pat_backed: true,
-      supports_team_repo_access_mutation: true,
-    },
+    tokenInfo: PAT_TOKEN_INFO,
     createApi: () => ({
       getRepository: async () => ({ exists: false, repository: null }),
       getTeamRepositoryPermission: async () => ({ current_permission_api_value: 'none' }),
@@ -1039,13 +988,7 @@ test('US4 rerun is idempotent with noop_already_owned and no duplicate append', 
       TENANT_REGISTRY_DIR: registryDir,
       TENANT_REGISTRY_REF: 'main',
     },
-    tokenInfo: {
-      token: 'pat-token',
-      source: 'ISSUEOPS_GITHUB_TOKEN',
-      token_kind: 'pat',
-      is_pat_backed: true,
-      supports_team_repo_access_mutation: true,
-    },
+    tokenInfo: PAT_TOKEN_INFO,
     createApi: () => ({
       getRepository: async () => ({ exists: false, repository: null }),
       getTeamRepositoryPermission: async () => ({ current_permission_api_value: 'none' }),
@@ -1071,13 +1014,7 @@ test('US4 rerun is idempotent with noop_already_owned and no duplicate append', 
       TENANT_REGISTRY_DIR: registryDir,
       TENANT_REGISTRY_REF: 'main',
     },
-    tokenInfo: {
-      token: 'pat-token',
-      source: 'ISSUEOPS_GITHUB_TOKEN',
-      token_kind: 'pat',
-      is_pat_backed: true,
-      supports_team_repo_access_mutation: true,
-    },
+    tokenInfo: PAT_TOKEN_INFO,
     createApi: () => ({
       getRepository: async () => ({ exists: true, repository: { full_name: 'im-sandbox-himanshu/acme-platform-service', visibility: 'private' } }),
       getTeamRepositoryPermission: async () => ({ current_permission_api_value: 'admin' }),
@@ -1229,13 +1166,7 @@ test('US2 mixed canonical and legacy tenant records keep approval and execution 
       }),
       GITHUB_RUN_ATTEMPT: '20',
     },
-    tokenInfo: {
-      token: 'pat-token',
-      source: 'ISSUEOPS_GITHUB_TOKEN',
-      token_kind: 'pat',
-      is_pat_backed: true,
-      supports_team_repo_access_mutation: true,
-    },
+    tokenInfo: PAT_TOKEN_INFO,
     createApi: () => ({
       getRepository: async () => ({ exists: false, repository: null }),
       getTeamRepositoryPermission: async () => ({ current_permission_api_value: 'none' }),
@@ -1277,13 +1208,7 @@ test('US2 mixed canonical and legacy tenant records keep approval and execution 
       }),
       GITHUB_RUN_ATTEMPT: '21',
     },
-    tokenInfo: {
-      token: 'pat-token',
-      source: 'ISSUEOPS_GITHUB_TOKEN',
-      token_kind: 'pat',
-      is_pat_backed: true,
-      supports_team_repo_access_mutation: true,
-    },
+    tokenInfo: PAT_TOKEN_INFO,
     createApi: () => ({
       getRepository: async () => ({ exists: false, repository: null }),
       getTeamRepositoryPermission: async () => ({ current_permission_api_value: 'none' }),
@@ -1350,13 +1275,7 @@ test('dry-run approved execution emits intent with no repository or permission m
       TENANT_REGISTRY_DIR: registryDir,
       TENANT_REGISTRY_REF: 'main',
     },
-    tokenInfo: {
-      token: 'pat-token',
-      source: 'ISSUEOPS_GITHUB_TOKEN',
-      token_kind: 'pat',
-      is_pat_backed: true,
-      supports_team_repo_access_mutation: true,
-    },
+    tokenInfo: PAT_TOKEN_INFO,
     createApi: () => ({
       getRepository: async () => ({ exists: false, repository: null }),
       getTeamRepositoryPermission: async () => ({ current_permission_api_value: 'none' }),
@@ -1411,13 +1330,7 @@ test('approved execution grants admin only to repo-admin team, never direct indi
       TENANT_REGISTRY_DIR: registryDir,
       TENANT_REGISTRY_REF: 'main',
     },
-    tokenInfo: {
-      token: 'pat-token',
-      source: 'ISSUEOPS_GITHUB_TOKEN',
-      token_kind: 'pat',
-      is_pat_backed: true,
-      supports_team_repo_access_mutation: true,
-    },
+    tokenInfo: PAT_TOKEN_INFO,
     createApi: () => ({
       getRepository: async () => ({ exists: false, repository: null }),
       getTeamRepositoryPermission: async () => ({ current_permission_api_value: 'none' }),
@@ -1479,13 +1392,7 @@ test('approved tenant-repo execution removes stale tenant terminal labels before
       TENANT_REGISTRY_DIR: registryDir,
       TENANT_REGISTRY_REF: 'main',
     },
-    tokenInfo: {
-      token: 'pat-token',
-      source: 'ISSUEOPS_GITHUB_TOKEN',
-      token_kind: 'pat',
-      is_pat_backed: true,
-      supports_team_repo_access_mutation: true,
-    },
+    tokenInfo: PAT_TOKEN_INFO,
     createApi: () => ({
       getRepository: async () => ({
         exists: true,

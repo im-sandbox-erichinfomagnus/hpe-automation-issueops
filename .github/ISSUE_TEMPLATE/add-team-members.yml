@@ -16,7 +16,6 @@ body:
     attributes:
       label: Target organization
       description: GitHub organization that owns the target team.
-      value: im-sandbox-erichinfomagnus
       placeholder: octo-org
     validations:
       required: true

@@ -131,6 +131,8 @@ async function runApprovalGate(options = {}) {
       approver_login: auditArtifact.request.requester_login || '',
       approver_role: 'tenant_self_serve',
       approver_authorization_state: 'authorized',
+      approved_context_marker: auditArtifact.request.context_marker || null,
+      latest_context_marker: auditArtifact.request.context_marker || null,
       approved_at: new Date().toISOString(),
       decision_source: 'policy',
       decision_note: 'No approval step is required for tenant self-serve operations; requester authorization was validated at intake.',

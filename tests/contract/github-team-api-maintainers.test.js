@@ -81,3 +81,45 @@ test('listTeamMaintainers skips candidates whose membership vanished (404) witho
 
   assert.deepEqual(maintainers.map((member) => member.username), ['real-maintainer']);
 });
+
+test('listOrgTeams walks every page so tenant resolution sees teams past the first 100', async () => {
+  const requestedPaths = [];
+  const page1 = Array.from({ length: 100 }, (_, i) => ({ id: i + 1, slug: `team-${String(i + 1).padStart(3, '0')}`, name: `Team ${i + 1}`, parent: null }));
+  const page2 = Array.from({ length: 56 }, (_, i) => ({ id: 101 + i, slug: `realc01-${i}`, name: `RealC01 ${i}`, parent: null }));
+
+  const fetchImpl = async (url) => {
+    const path = url.replace('https://api.github.com', '');
+    requestedPaths.push(path);
+
+    if (path.startsWith('/orgs/octo-org/teams?')) {
+      // A request with no page parameter behaves as page 1, matching the API default.
+      const match = /[?&]page=(\d+)/.exec(path);
+      const page = match ? Number(match[1]) : 1;
+      return jsonResponse(page === 1 ? page1 : page === 2 ? page2 : []);
+    }
+    return jsonResponse([], 200);
+  };
+
+  const api = createGitHubTeamApi({ token: 'test-token', fetchImpl });
+  const teams = await api.listOrgTeams({ organization: 'octo-org' });
+
+  assert.equal(teams.length, 156);
+  assert.equal(requestedPaths.filter((p) => p.startsWith('/orgs/octo-org/teams?')).length, 2);
+  assert.ok(teams.some((team) => team.slug === 'team-001'), 'first page must be included');
+  assert.ok(teams.some((team) => team.slug === 'realc01-55'), 'second page must be included');
+});
+
+test('listOrgTeams stops after a short first page', async () => {
+  const requestedPaths = [];
+  const fetchImpl = async (url) => {
+    const path = url.replace('https://api.github.com', '');
+    requestedPaths.push(path);
+    return jsonResponse([{ id: 1, slug: 'only-team', name: 'Only Team', parent: null }]);
+  };
+
+  const api = createGitHubTeamApi({ token: 'test-token', fetchImpl });
+  const teams = await api.listOrgTeams({ organization: 'octo-org' });
+
+  assert.equal(teams.length, 1);
+  assert.deepEqual(requestedPaths, ['/orgs/octo-org/teams?per_page=100&page=1']);
+});

@@ -10,7 +10,6 @@ body:
     attributes:
       label: Target organization
       description: GitHub organization where tenant teams will be created.
-      value: im-sandbox-erichinfomagnus
       placeholder: octo-org
     validations:
       required: true
@@ -131,7 +130,7 @@ body:
     id: primary_contact
     attributes:
       label: Primary contact
-      description: Required email contact for tenant ownership.
+      description: Optional email contact for tenant ownership. Validated for email format when provided.
       placeholder: owner@example.com
     validations:
       required: false
@@ -144,15 +143,6 @@ body:
       placeholder: backup@example.com
     validations:
       required: false
-
-  - type: input
-    id: designated_approver
-    attributes:
-      label: Designated approver
-      description: GitHub login for an active owner in the target organization who will post the approval comment.
-      placeholder: org-owner-user
-    validations:
-      required: true
 
   - type: dropdown
     id: dry_run

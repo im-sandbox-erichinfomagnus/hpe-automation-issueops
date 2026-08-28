@@ -339,9 +339,8 @@ async function validateTenantRepoRequest(input = {}, options = {}) {
     primaryContactValidationStatus = 'not_applicable';
     primaryContactValidationReason = 'Primary contact is supplied per row by the uploaded CSV attachment.';
   } else if (primaryContactDetectedType === 'absent') {
-    primaryContactValidationStatus = 'missing';
-    primaryContactValidationReason = 'Primary contact is required.';
-    errors.push(primaryContactValidationReason);
+    primaryContactValidationStatus = 'absent';
+    primaryContactValidationReason = 'Primary contact was not provided.';
   } else if (primaryContactDetectedType === 'invalid') {
     primaryContactValidationStatus = 'invalid_format';
     primaryContactValidationReason = `Primary contact '${request.primary_contact}' is not a valid GitHub handle or email address.`;
@@ -369,10 +368,6 @@ async function validateTenantRepoRequest(input = {}, options = {}) {
   } else if (secondaryContactDetectedType === 'email') {
     secondaryContactValidationStatus = 'valid';
     secondaryContactValidationReason = 'Secondary contact is a valid email address.';
-  }
-
-  if (!request.designated_approver_login) {
-    errors.push('A designated approver is required.');
   }
 
   let organizationVisible = false;
@@ -507,32 +502,11 @@ async function validateTenantRepoRequest(input = {}, options = {}) {
     }
   }
 
-  let designatedApproverAuthorization = {
-    state: 'unknown',
-    role: 'other',
+  // Tenant repo creation is self-serve: the requester maintainership gate is the authorization.
+  const designatedApproverAuthorization = {
+    state: 'not_applicable',
+    role: 'not_applicable',
   };
-  if (request.organization && request.designated_approver_login && typeof options.getOrganizationMembership === 'function') {
-    const approverMembership = await options.getOrganizationMembership({
-      organization: request.organization,
-      username: request.designated_approver_login,
-    });
-
-    const approverState = approverMembership && approverMembership.membership && approverMembership.membership.state
-      ? String(approverMembership.membership.state).toLowerCase()
-      : 'absent';
-    const approverRole = approverMembership && approverMembership.membership && approverMembership.membership.role
-      ? String(approverMembership.membership.role).toLowerCase()
-      : 'other';
-
-    designatedApproverAuthorization = {
-      state: approverState === 'active' && approverRole === 'admin' ? 'authorized' : 'unauthorized',
-      role: approverRole,
-    };
-
-    if (designatedApproverAuthorization.state !== 'authorized') {
-      errors.push('Designated approver must be an active target organization owner.');
-    }
-  }
 
   let repositoryState = {
     exists: false,

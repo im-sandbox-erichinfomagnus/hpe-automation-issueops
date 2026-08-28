@@ -9,6 +9,8 @@ const TENANT_SELF_SERVE_OPERATIONS = [
   'repo_admin_membership',
   'tenant_subteam_creation',
   'org_variable_management',
+  'tenant_creation',
+  'tenant_repo_creation',
 ];
 
 function isTenantSelfServeOperation(operation) {

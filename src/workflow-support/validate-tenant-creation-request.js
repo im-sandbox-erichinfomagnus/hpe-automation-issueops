@@ -143,10 +143,6 @@ async function validateTenantCreationRequest(input = {}, options = {}) {
     errors.push('Derived tenant key is unsafe for tenant-registry path usage.');
   }
 
-  if (!request.designated_approver_login) {
-    errors.push('A designated approver is required.');
-  }
-
   if (!request.tenant_admin_login) {
     errors.push('A tenant admin GitHub login is required.');
   }
@@ -206,8 +202,8 @@ async function validateTenantCreationRequest(input = {}, options = {}) {
     errors.push('topology.accessModel.organizationRoleSpecifications must define canonical role-name and permission-intent mappings.');
   }
 
-  if (!isValidEmail(request.primary_contact)) {
-    errors.push('primary_contact is required and must match email format.');
+  if (request.primary_contact && !isValidEmail(request.primary_contact)) {
+    errors.push('primary_contact must match email format when provided.');
   }
 
   if (request.secondary_contact && !isValidEmail(request.secondary_contact)) {
@@ -261,35 +257,11 @@ async function validateTenantCreationRequest(input = {}, options = {}) {
     }
   }
 
-  let designatedApproverAuthorization = {
-    state: 'unknown',
-    role: 'other',
+  // Tenant creation is self-serve: the requester org-owner gate below is the authorization.
+  const designatedApproverAuthorization = {
+    state: 'not_applicable',
+    role: 'not_applicable',
   };
-
-  if (request.organization && request.designated_approver_login && typeof options.getOrganizationMembership === 'function') {
-    const membership = await options.getOrganizationMembership({
-      organization: request.organization,
-      username: request.designated_approver_login,
-    });
-
-    if (membership && membership.exists && membership.membership) {
-      const role = membership.membership.role || 'member';
-      const state = membership.membership.state || 'active';
-      designatedApproverAuthorization = {
-        state: state === 'active' && role === 'admin' ? 'authorized' : 'unauthorized',
-        role,
-      };
-    } else {
-      designatedApproverAuthorization = {
-        state: 'unauthorized',
-        role: 'other',
-      };
-    }
-
-    if (designatedApproverAuthorization.state !== 'authorized') {
-      errors.push('Designated approver must be an active target organization owner.');
-    }
-  }
 
   let requesterEligibility = {
     state: 'unknown',
@@ -438,7 +410,9 @@ async function validateTenantCreationRequest(input = {}, options = {}) {
       governance_mandatory_validation: governanceMandatorySatisfied ? 'valid' : 'invalid',
       access_model_validation: accessModelValid ? 'valid' : 'invalid',
       organization_role_spec_validation: organizationRoleSpecsValid ? 'valid' : 'invalid',
-      primary_contact_validation: isValidEmail(request.primary_contact) ? 'valid' : 'invalid',
+      primary_contact_validation: request.primary_contact
+        ? (isValidEmail(request.primary_contact) ? 'valid' : 'invalid')
+        : 'absent',
       secondary_contact_validation: request.secondary_contact
         ? (isValidEmail(request.secondary_contact) ? 'valid' : 'invalid')
         : 'absent',

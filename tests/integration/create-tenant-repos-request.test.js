@@ -8,6 +8,7 @@ const test = require('node:test');
 
 const { runRequestValidation } = require('../../src/scripts/run-request-validation');
 const { runApprovalGate } = require('../../src/scripts/run-approval-gate');
+const { deriveContextBindingStatus } = require('../../src/workflow-support/build-execution-outcome');
 
 function buildTenantRepoValidationEnv(artifactPath, overrides = {}) {
   return {
@@ -279,7 +280,7 @@ test('tenant repo request validation rejects invalid repository visibility and w
   assert.match(summary, /Allowed repository visibilities: private, internal, public/i);
 });
 
-test('runApprovalGate approves tenant repo request when designated active owner comments approved', async () => {
+test('runApprovalGate auto-approves tenant repo creation under the tenant self-serve policy', async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'create-tenant-repos-approval-'));
   const artifactPath = path.join(workspace, 'audit.json');
   const registryDir = buildTenantRepoRegistry(workspace);
@@ -304,33 +305,25 @@ test('runApprovalGate approves tenant repo request when designated active owner 
     api: {
       getAssignableOwners: async () => ['queue-owner'],
       addIssueAssignees: async () => ({ status: 'assigned' }),
-      listIssueComments: async () => [
-        {
-          id: 100,
-          body: 'approved',
-          created_at: '2026-05-29T11:00:00Z',
-          user: { login: 'org-owner-user' },
-        },
-      ],
-      getOrganizationMembership: async ({ username }) => ({
+      listIssueComments: async () => [],
+      getOrganizationMembership: async () => ({
         exists: true,
-        membership: {
-          role: username === 'org-owner-user' ? 'admin' : 'member',
-          state: 'active',
-        },
+        membership: { role: 'admin', state: 'active' },
       }),
     },
     setProcessExitCode: false,
   });
 
   assert.equal(approvalResult.approval.approval_status, 'approved');
-  assert.equal(approvalResult.approval.approver_role, 'target_org_owner');
+  assert.equal(approvalResult.approval.approver_role, 'tenant_self_serve');
+  assert.equal(approvalResult.approval.decision_source, 'policy');
+  assert.equal(approvalResult.approval.approver_login, approvalResult.request.requester_login);
   assert.equal(approvalResult.request.request_status, 'approved');
   assert.equal(approvalResult.approval.approved_context_marker, approvalResult.request.context_marker);
   assert.equal(approvalResult.approval.latest_context_marker, approvalResult.request.context_marker);
 });
 
-test('runApprovalGate invalidates stale tenant repo approval when context marker changes', async () => {
+test('runApprovalGate rebinds tenant repo approval to the current context marker and still flags a stale one as mismatched', async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'create-tenant-repos-stale-context-'));
   const artifactPath = path.join(workspace, 'audit.json');
   const registryDir = buildTenantRepoRegistry(workspace);
@@ -377,27 +370,49 @@ test('runApprovalGate invalidates stale tenant repo approval when context marker
     setProcessExitCode: false,
   });
 
-  assert.equal(approvalResult.approval.approval_status, 'invalidated');
-  assert.equal(approvalResult.request.request_status, 'awaiting_approval');
-  assert.match(approvalResult.approval.decision_note, /latest validated context marker changed/i);
+  assert.equal(approvalResult.approval.approval_status, 'approved');
+  assert.equal(approvalResult.approval.approver_role, 'tenant_self_serve');
+  assert.equal(approvalResult.approval.approved_context_marker, 'tenant-repo-context:new');
+  assert.equal(approvalResult.approval.latest_context_marker, 'tenant-repo-context:new');
+  assert.notEqual(approvalResult.approval.approved_context_marker, 'tenant-repo-context:old');
+
+  // Markers are populated, so a stale execution context is still detected as mismatched rather than unknown.
+  assert.equal(
+    deriveContextBindingStatus({
+      approved_context_marker: approvalResult.approval.approved_context_marker,
+      latest_context_marker: approvalResult.approval.latest_context_marker,
+      execution_context_marker: 'tenant-repo-context:old',
+    }),
+    'mismatched'
+  );
 });
 
-test('runApprovalGate denies tenant repo approval from a non-designated assignee comment', async () => {
+test('tenant repo request validation blocks a requester who is not a maintainer of exactly one tenant', async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'create-tenant-repos-central-assignment-denied-'));
   const artifactPath = path.join(workspace, 'audit.json');
   const registryDir = buildTenantRepoRegistry(workspace);
 
-  await runRequestValidation({
+  const result = await runRequestValidation({
     env: buildTenantRepoValidationEnv(artifactPath, {
       TENANT_REGISTRY_DIR: registryDir,
+      PARSED_TENANT_NAME: '',
     }),
-    api: buildValidationApi(),
+    api: {
+      ...buildValidationApi(),
+      getMembershipForUser: async () => ({ state: 'absent', membership: null }),
+    },
     tenantRepoApi: {
       getRepository: async () => ({ exists: false, repository: null }),
       getTeamRepositoryPermission: async () => ({ current_permission_api_value: 'none' }),
     },
     setProcessExitCode: false,
   });
+
+  assert.equal(result.validation.is_valid, false);
+  assert.equal(
+    result.validation.errors.includes('Requester could not be resolved as maintainer of exactly one valid tenant context.'),
+    true
+  );
 
   const approvalResult = await runApprovalGate({
     env: {
@@ -407,14 +422,7 @@ test('runApprovalGate denies tenant repo approval from a non-designated assignee
     api: {
       getAssignableOwners: async () => ['queue-owner'],
       addIssueAssignees: async () => ({ status: 'assigned' }),
-      listIssueComments: async () => [
-        {
-          id: 200,
-          body: 'approved',
-          created_at: '2026-05-29T11:05:00Z',
-          user: { login: 'queue-owner' },
-        },
-      ],
+      listIssueComments: async () => [],
       getOrganizationMembership: async () => ({
         exists: true,
         membership: { role: 'admin', state: 'active' },
@@ -423,9 +431,29 @@ test('runApprovalGate denies tenant repo approval from a non-designated assignee
     setProcessExitCode: false,
   });
 
-  assert.equal(approvalResult.assignment.assignment_status, 'assigned');
-  assert.equal(approvalResult.approval.approval_status, 'denied');
-  assert.equal(approvalResult.approval.approver_role, 'other');
-  assert.match(approvalResult.approval.decision_note, /does not authorize tenant repository creation mutation/i);
+  assert.notEqual(approvalResult.approval.approval_status, 'approved');
+});
+
+test('tenant repo request validation accepts a request without a designated approver', async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'create-tenant-repos-no-approver-'));
+  const artifactPath = path.join(workspace, 'audit.json');
+  const registryDir = buildTenantRepoRegistry(workspace);
+
+  const result = await runRequestValidation({
+    env: buildTenantRepoValidationEnv(artifactPath, {
+      TENANT_REGISTRY_DIR: registryDir,
+      PARSED_DESIGNATED_APPROVER: '',
+    }),
+    api: buildValidationApi(),
+    tenantRepoApi: {
+      getRepository: async () => ({ exists: false, repository: null }),
+      getTeamRepositoryPermission: async () => ({ current_permission_api_value: 'none' }),
+    },
+    setProcessExitCode: false,
+  });
+
+  assert.equal(result.validation.is_valid, true);
+  assert.equal(result.validation.designated_approver_authorization.state, 'not_applicable');
+  assert.equal(result.validation.designated_approver_authorization.role, 'not_applicable');
 });
 
