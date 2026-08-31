@@ -291,6 +291,7 @@ async function validateHostedRunnerRequest(input = {}, options = {}) {
         tenant_team_slug: resolvedContext.tenant_team_slug,
         cicd_admin_team_name: resolvedContext.cicd_admin_team_name,
         cicd_admin_team_slug: resolvedContext.cicd_admin_team_slug,
+        cicd_admin_team_matched_on: resolvedContext.cicd_admin_team_matched_on || null,
         governance_relation_status: resolvedContext.governance_relation_status,
         requester_cicd_membership_state: resolvedContext.requester_cicd_membership_state,
         tenant_match_count: tenantResolution.tenant_match_count,
@@ -307,6 +308,7 @@ async function validateHostedRunnerRequest(input = {}, options = {}) {
     tenant_team_slug: canonicalTenantContext ? canonicalTenantContext.tenant_team_slug : '',
     cicd_admin_team_name: canonicalTenantContext ? canonicalTenantContext.cicd_admin_team_name : '',
     cicd_admin_team_slug: canonicalTenantContext ? canonicalTenantContext.cicd_admin_team_slug : '',
+    cicd_admin_team_matched_on: canonicalTenantContext ? canonicalTenantContext.cicd_admin_team_matched_on : null,
     context_marker: canonicalTenantContext ? canonicalTenantContext.context_marker : '',
     request_status: requestStatus,
   };

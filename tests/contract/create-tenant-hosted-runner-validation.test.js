@@ -370,3 +370,71 @@ test('cross-tenant runner group targeting via prefix collision is rejected', asy
     JSON.stringify(result.errors)
   );
 });
+
+function canonicalTopologyRecordWithCicdTeam(input) {
+  const record = canonicalTopologyRecord(input);
+  record.topology.teams.structure.push({
+    team: `${input.tenantId}-cicd-admin`,
+    parent: `${input.tenantId}-root`,
+    type: 'cicd-admin',
+  });
+  return record;
+}
+
+function cicdGateRegistry() {
+  return buildRegistry([
+    canonicalTopologyRecordWithCicdTeam({ tenantId: 'contosouk', tenantName: 'ContosoUK', organization: 'octo-org' }),
+  ]);
+}
+
+function cicdGateOptions(registryDir, activeTeamSlug, activeUsername) {
+  return buildOptions(registryDir, {
+    listTeams: async () => ([
+      { slug: 'contosouk-root', parent: null },
+      { slug: 'contosouk-admin', parent: { slug: 'contosouk-root' } },
+      { slug: 'contosouk-repo-admin', parent: { slug: 'contosouk-root' } },
+      { slug: 'contosouk-cicd-admin', parent: { slug: 'contosouk-root' } },
+    ]),
+    getMembershipForUser: async ({ teamSlug, username }) => (
+      teamSlug === activeTeamSlug && username === activeUsername
+        ? { state: 'active', membership: { role: 'member' } }
+        : { state: 'absent', membership: null }
+    ),
+  });
+}
+
+test('hosted runner creation: a member of only the tenant cicd-admin team passes the CI/CD gate', async () => {
+  const registryDir = cicdGateRegistry();
+  const result = await validateHostedRunnerRequest(
+    buildRequestInput({ requesterLogin: 'cicd-only-user' }),
+    cicdGateOptions(registryDir, 'contosouk-cicd-admin', 'cicd-only-user')
+  );
+
+  assert.equal(result.is_valid, true, JSON.stringify(result.errors));
+  assert.equal(result.canonical_tenant_context.cicd_admin_team_slug, 'contosouk-cicd-admin');
+  assert.equal(result.canonical_tenant_context.cicd_admin_team_matched_on, 'cicd-admin');
+  assert.equal(result.canonical_tenant_context.requester_cicd_membership_state, 'active_member');
+});
+
+test('hosted runner creation: a member of only the tenant admin team still passes the CI/CD gate', async () => {
+  const registryDir = cicdGateRegistry();
+  const result = await validateHostedRunnerRequest(
+    buildRequestInput({ requesterLogin: 'admin-only-user' }),
+    cicdGateOptions(registryDir, 'contosouk-admin', 'admin-only-user')
+  );
+
+  assert.equal(result.is_valid, true, JSON.stringify(result.errors));
+  assert.equal(result.canonical_tenant_context.cicd_admin_team_slug, 'contosouk-admin');
+  assert.equal(result.canonical_tenant_context.cicd_admin_team_matched_on, 'admin');
+});
+
+test('hosted runner creation: a member of neither CI/CD team is not authorized', async () => {
+  const registryDir = cicdGateRegistry();
+  const result = await validateHostedRunnerRequest(
+    buildRequestInput({ requesterLogin: 'outsider-user' }),
+    cicdGateOptions(registryDir, 'contosouk-nobody', 'nobody')
+  );
+
+  assert.equal(result.is_valid, false);
+  assert.equal(result.tenant_resolution.tenant_resolution_status, 'no_match');
+});

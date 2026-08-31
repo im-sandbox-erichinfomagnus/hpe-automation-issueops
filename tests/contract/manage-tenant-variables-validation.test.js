@@ -214,3 +214,72 @@ test('an invalid variable operation is rejected', async () => {
     JSON.stringify(result.errors)
   );
 });
+
+function canonicalTopologyRecordWithCicdTeam(input) {
+  const record = canonicalTopologyRecord(input);
+  record.topology.teams.structure.push({
+    team: `${input.tenantId}-cicd-admin`,
+    parent: `${input.tenantId}-root`,
+    type: 'cicd-admin',
+  });
+  return record;
+}
+
+function cicdGateRegistry() {
+  return buildRegistry([
+    canonicalTopologyRecordWithCicdTeam({ tenantId: 'contosouk', tenantName: 'ContosoUK', organization: 'octo-org' }),
+  ]);
+}
+
+function membershipOnly(expectedTeamSlug, expectedUsername) {
+  return async ({ teamSlug, username }) => (
+    teamSlug === expectedTeamSlug && username === expectedUsername
+      ? { state: 'active', membership: { role: 'member' } }
+      : { state: 'absent', membership: null }
+  );
+}
+
+test('a member of only the tenant cicd-admin team passes the CI/CD gate for variables', async () => {
+  const registryDir = cicdGateRegistry();
+  const result = await validateTenantVariablesRequest(
+    buildRequestInput({ requesterLogin: 'cicd-only-user' }),
+    buildOptions(registryDir, {
+      getMembershipForUser: membershipOnly('contosouk-cicd-admin', 'cicd-only-user'),
+    })
+  );
+
+  assert.equal(result.is_valid, true, JSON.stringify(result.errors));
+  assert.equal(result.validation_findings.requester_cicd_membership_state, 'active_member');
+  assert.equal(result.validation_findings.cicd_admin_team_matched_on, 'cicd-admin');
+  assert.equal(result.request.cicd_admin_team_slug, 'contosouk-cicd-admin');
+});
+
+test('a member of only the tenant admin team still passes the CI/CD gate for variables', async () => {
+  const registryDir = cicdGateRegistry();
+  const result = await validateTenantVariablesRequest(
+    buildRequestInput({ requesterLogin: 'admin-only-user' }),
+    buildOptions(registryDir, {
+      getMembershipForUser: membershipOnly('contosouk-admin', 'admin-only-user'),
+    })
+  );
+
+  assert.equal(result.is_valid, true, JSON.stringify(result.errors));
+  assert.equal(result.validation_findings.cicd_admin_team_matched_on, 'admin');
+  assert.equal(result.request.cicd_admin_team_slug, 'contosouk-admin');
+});
+
+test('a member of neither CI/CD team is blocked and the variables error names both teams', async () => {
+  const registryDir = cicdGateRegistry();
+  const result = await validateTenantVariablesRequest(
+    buildRequestInput({ requesterLogin: 'outsider-user' }),
+    buildOptions(registryDir, {
+      getMembershipForUser: async () => ({ state: 'absent', membership: null }),
+    })
+  );
+
+  assert.equal(result.is_valid, false);
+  const blocked = result.errors.find((error) => /is not a member of/.test(error));
+  assert.ok(blocked, JSON.stringify(result.errors));
+  assert.match(blocked, /contosouk-cicd-admin/);
+  assert.match(blocked, /contosouk-admin/);
+});
