@@ -66,15 +66,19 @@ function readTopologyView(record = {}) {
     const orgName = record.organization
       || (topology.organization && topology.organization.orgName)
       || '';
+    // A structure array can omit node types (acme.json carries only cicd-admin), so
+    // each slug falls back to the record's flat field before giving up.
     return {
       schema: 'canonical',
       tenant_key: normalizeLogin(record.tenantId || record.tenant_key),
       tenant_display_name: String(record.tenantName || record.tenant_display_name || ''),
       organization: normalizeLogin(orgName),
-      tenant_root_team_slug: byType.root || normalizeLogin(topology.teams.tenantRootTeam),
-      admin_team_slug: byType.admin || '',
-      repo_admin_team_slug: byType['repo-admin'] || '',
-      cicd_admin_team_slug: byType['cicd-admin'] || '',
+      tenant_root_team_slug: byType.root
+        || normalizeLogin(topology.teams.tenantRootTeam)
+        || normalizeLogin(record.tenant_team_slug),
+      admin_team_slug: byType.admin || normalizeLogin(record.admin_team_slug),
+      repo_admin_team_slug: byType['repo-admin'] || normalizeLogin(record.repo_admin_team_slug),
+      cicd_admin_team_slug: byType['cicd-admin'] || normalizeLogin(record.cicd_admin_team_slug),
     };
   }
 
