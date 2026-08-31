@@ -354,18 +354,42 @@ function isTenantRepoCreationParsedRequest(parsedRequest = {}) {
   return (looksLikeRepositoryName || hasRepositoriesCsv || isCsvAttachmentTenantRepo) && !hasTenantModelSpecificSignals;
 }
 
-function isHostedRunnerCreationParsedRequest(parsedRequest = {}) {
-  return Boolean(
+const HOSTED_RUNNER_CREATION_LABEL = 'create-tenant-hosted-runner';
+const HOSTED_RUNNER_DELETION_LABEL = 'delete-tenant-hosted-runner';
+const RUNNER_OPERATION_LABELS = [
+  HOSTED_RUNNER_CREATION_LABEL,
+  HOSTED_RUNNER_DELETION_LABEL,
+  'move-tenant-hosted-runner',
+  'create-tenant-runner-groups',
+];
+
+// Returns the single runner form label on the issue, or '' when absent or ambiguous
+// so a CSV-only request fails closed to the scalar-only classification.
+function readRunnerOperationLabelFromEnv(env = process.env) {
+  const labels = readIssueLabelsFromEnv(env);
+  const matched = RUNNER_OPERATION_LABELS.filter((label) => labels.includes(label));
+  return matched.length === 1 ? matched[0] : '';
+}
+
+function isHostedRunnerCreationParsedRequest(parsedRequest = {}, operationLabel = '') {
+  const hasScalarRequest = Boolean(
     (parsedRequest.runner_name || parsedRequest.parsed_runner_name) &&
     (parsedRequest.runner_image_id ||
       parsedRequest.parsed_runner_image_id ||
       parsedRequest.runner_size ||
       parsedRequest.parsed_runner_size)
   );
+  // Creation and deletion post their CSV to the same PARSED_RUNNER_CSV field, so the
+  // form label is the only signal that separates them on a CSV-only request.
+  const hasLabelledCsvRequest = Boolean(
+    (parsedRequest.runner_csv || parsedRequest.parsed_runner_csv) &&
+    operationLabel === HOSTED_RUNNER_CREATION_LABEL
+  );
+  return hasScalarRequest || hasLabelledCsvRequest;
 }
 
-function isHostedRunnerDeletionParsedRequest(parsedRequest = {}) {
-  return Boolean(
+function isHostedRunnerDeletionParsedRequest(parsedRequest = {}, operationLabel = '') {
+  const hasScalarRequest = Boolean(
     (parsedRequest.runner_name || parsedRequest.parsed_runner_name) &&
     !(parsedRequest.target_runner_group_name || parsedRequest.parsed_target_runner_group_name) &&
     !(parsedRequest.runner_image_id ||
@@ -373,19 +397,29 @@ function isHostedRunnerDeletionParsedRequest(parsedRequest = {}) {
       parsedRequest.runner_size ||
       parsedRequest.parsed_runner_size)
   );
+  const hasLabelledCsvRequest = Boolean(
+    (parsedRequest.runner_csv || parsedRequest.parsed_runner_csv) &&
+    operationLabel === HOSTED_RUNNER_DELETION_LABEL
+  );
+  return hasScalarRequest || hasLabelledCsvRequest;
 }
 
+// Move and runner groups each own their CSV field, so no label guard is needed.
 function isHostedRunnerMoveParsedRequest(parsedRequest = {}) {
   return Boolean(
-    (parsedRequest.runner_name || parsedRequest.parsed_runner_name) &&
-    (parsedRequest.target_runner_group_name || parsedRequest.parsed_target_runner_group_name)
+    ((parsedRequest.runner_name || parsedRequest.parsed_runner_name) &&
+      (parsedRequest.target_runner_group_name || parsedRequest.parsed_target_runner_group_name)) ||
+    parsedRequest.runner_moves_csv ||
+    parsedRequest.parsed_runner_moves_csv
   );
 }
 
 function isRunnerGroupCreationParsedRequest(parsedRequest = {}) {
   return Boolean(
-    (parsedRequest.runner_group_name || parsedRequest.parsed_runner_group_name) &&
-    !(parsedRequest.runner_name || parsedRequest.parsed_runner_name)
+    ((parsedRequest.runner_group_name || parsedRequest.parsed_runner_group_name) &&
+      !(parsedRequest.runner_name || parsedRequest.parsed_runner_name)) ||
+    parsedRequest.runner_groups_csv ||
+    parsedRequest.parsed_runner_groups_csv
   );
 }
 
@@ -929,11 +963,12 @@ function buildMissingTokenRepoAccessRemovalValidation(request) {
 async function runRequestValidation(options = {}) {
   const env = options.env || process.env;
   const shouldSetProcessExitCode = options.setProcessExitCode !== false && env === process.env;
+  const runnerOperationLabel = readRunnerOperationLabelFromEnv(env);
   const artifactPath = path.resolve(
     env.AUDIT_ARTIFACT_PATH ||
       path.join(
         'artifacts',
-          `${isOrgVariablesManagementParsedRequest(readParsedRequestFromEnv(env)) ? 'manage-org-variables' : isTenantSubteamCreationParsedRequest(readParsedRequestFromEnv(env)) ? 'create-tenant-subteam' : isRepoAdminMembershipParsedRequest(readParsedRequestFromEnv(env)) ? 'add-repo-admin-to-tenant' : isCicdAdminMembershipParsedRequest(readParsedRequestFromEnv(env)) ? 'add-cicd-admin-to-tenant' : isTenantVariablesManagementParsedRequest(readParsedRequestFromEnv(env)) ? 'manage-tenant-variables' : isRepositoryRulesetCreationParsedRequest(readParsedRequestFromEnv(env)) ? 'create-repository-ruleset' : isRepositoryRulesetDeletionParsedRequest(readParsedRequestFromEnv(env)) ? 'delete-repository-ruleset' : isTeamRepoAccessParsedRequest(readParsedRequestFromEnv(env)) ? 'add-team-repo-access' : isTeamRepoAccessRemovalParsedRequest(readParsedRequestFromEnv(env)) ? 'remove-team-repo-access' : isTenantRepoCreationParsedRequest(readParsedRequestFromEnv(env)) ? 'create-tenant-repos' : isHostedRunnerCreationParsedRequest(readParsedRequestFromEnv(env)) ? 'create-tenant-hosted-runner' : isHostedRunnerMoveParsedRequest(readParsedRequestFromEnv(env)) ? 'move-tenant-hosted-runner' : isHostedRunnerDeletionParsedRequest(readParsedRequestFromEnv(env)) ? 'delete-tenant-hosted-runner' : isRunnerGroupCreationParsedRequest(readParsedRequestFromEnv(env)) ? 'create-tenant-runner-groups' : isTenantCreationParsedRequest(readParsedRequestFromEnv(env)) ? 'create-tenant-model' : isTeamCreationParsedRequest(readParsedRequestFromEnv(env)) ? 'create-org-teams' : isTeamHierarchyParsedRequest(readParsedRequestFromEnv(env)) ? 'add-child-teams' : 'add-team-members'}-validation-${env.ISSUE_NUMBER || 'manual'}.json`
+          `${isOrgVariablesManagementParsedRequest(readParsedRequestFromEnv(env)) ? 'manage-org-variables' : isTenantSubteamCreationParsedRequest(readParsedRequestFromEnv(env)) ? 'create-tenant-subteam' : isRepoAdminMembershipParsedRequest(readParsedRequestFromEnv(env)) ? 'add-repo-admin-to-tenant' : isCicdAdminMembershipParsedRequest(readParsedRequestFromEnv(env)) ? 'add-cicd-admin-to-tenant' : isTenantVariablesManagementParsedRequest(readParsedRequestFromEnv(env)) ? 'manage-tenant-variables' : isRepositoryRulesetCreationParsedRequest(readParsedRequestFromEnv(env)) ? 'create-repository-ruleset' : isRepositoryRulesetDeletionParsedRequest(readParsedRequestFromEnv(env)) ? 'delete-repository-ruleset' : isTeamRepoAccessParsedRequest(readParsedRequestFromEnv(env)) ? 'add-team-repo-access' : isTeamRepoAccessRemovalParsedRequest(readParsedRequestFromEnv(env)) ? 'remove-team-repo-access' : isTenantRepoCreationParsedRequest(readParsedRequestFromEnv(env)) ? 'create-tenant-repos' : isHostedRunnerCreationParsedRequest(readParsedRequestFromEnv(env), runnerOperationLabel) ? 'create-tenant-hosted-runner' : isHostedRunnerMoveParsedRequest(readParsedRequestFromEnv(env)) ? 'move-tenant-hosted-runner' : isHostedRunnerDeletionParsedRequest(readParsedRequestFromEnv(env), runnerOperationLabel) ? 'delete-tenant-hosted-runner' : isRunnerGroupCreationParsedRequest(readParsedRequestFromEnv(env)) ? 'create-tenant-runner-groups' : isTenantCreationParsedRequest(readParsedRequestFromEnv(env)) ? 'create-tenant-model' : isTeamCreationParsedRequest(readParsedRequestFromEnv(env)) ? 'create-org-teams' : isTeamHierarchyParsedRequest(readParsedRequestFromEnv(env)) ? 'add-child-teams' : 'add-team-members'}-validation-${env.ISSUE_NUMBER || 'manual'}.json`
       )
   );
   const parsedRequest = readParsedRequestFromEnv(env);
@@ -944,9 +979,9 @@ async function runRequestValidation(options = {}) {
   const isTeamRepoAccess = !isOrgVariableManagement && !isTenantSubteamCreation && !isRepoAdminMembership && !isCicdAdminMembership && isTeamRepoAccessParsedRequest(parsedRequest);
         const isTeamRepoAccessRemoval = !isOrgVariableManagement && !isTenantSubteamCreation && !isRepoAdminMembership && !isCicdAdminMembership && isTeamRepoAccessRemovalParsedRequest(parsedRequest);
   const isTenantRepoCreation = !isOrgVariableManagement && !isTenantSubteamCreation && !isRepoAdminMembership && !isCicdAdminMembership && isTenantRepoCreationParsedRequest(parsedRequest);
-  const isHostedRunnerCreation = !isTenantRepoCreation && isHostedRunnerCreationParsedRequest(parsedRequest);
+  const isHostedRunnerCreation = !isTenantRepoCreation && isHostedRunnerCreationParsedRequest(parsedRequest, runnerOperationLabel);
   const isHostedRunnerMove = !isTenantRepoCreation && !isHostedRunnerCreation && isHostedRunnerMoveParsedRequest(parsedRequest);
-  const isHostedRunnerDeletion = !isTenantRepoCreation && !isHostedRunnerCreation && !isHostedRunnerMove && isHostedRunnerDeletionParsedRequest(parsedRequest);
+  const isHostedRunnerDeletion = !isTenantRepoCreation && !isHostedRunnerCreation && !isHostedRunnerMove && isHostedRunnerDeletionParsedRequest(parsedRequest, runnerOperationLabel);
   const isRunnerGroupCreation = !isTenantRepoCreation && !isHostedRunnerCreation && !isHostedRunnerMove && !isHostedRunnerDeletion && isRunnerGroupCreationParsedRequest(parsedRequest);
   const isTenantRunnerOperation = isHostedRunnerCreation || isHostedRunnerDeletion || isHostedRunnerMove || isRunnerGroupCreation;
   const isTenantVariableManagement = !isTenantRunnerOperation && !isTenantRepoCreation && isTenantVariablesManagementParsedRequest(parsedRequest);
@@ -2455,6 +2490,7 @@ module.exports = {
   parseParsedRequestJson,
   parseJsonFromEnv,
   readIssueLabelsFromEnv,
+  readRunnerOperationLabelFromEnv,
   readParsedRequestFromEnv,
   buildCommentContextFromEnv,
   runRequestValidation,
