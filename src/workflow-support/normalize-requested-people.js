@@ -1,6 +1,7 @@
 'use strict';
 
-const GITHUB_LOGIN_PATTERN = /^[a-z\d](?:[a-z\d]|-(?=[a-z\d])){0,38}$/i;
+// Underscore is permitted so EMU logins (<handle>_<enterprise-shortcode>) validate.
+const GITHUB_LOGIN_PATTERN = /^[a-z\d](?:[a-z\d]|[-_](?=[a-z\d])){0,38}$/i;
 
 function unwrapCodeFence(value) {
   const text = String(value || '').trim();
