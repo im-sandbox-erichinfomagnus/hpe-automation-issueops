@@ -1,0 +1,31 @@
+{
+  "tenantId": "repo27b",
+  "tenantName": "Repo27b",
+  "tenantType": "application",
+  "organization": "im-sandbox-erichinfomagnus",
+  "topology": {
+    "organization": {
+      "orgName": "im-sandbox-erichinfomagnus"
+    },
+    "teams": {
+      "tenantRootTeam": "repo27b-root",
+      "structure": [
+        {
+          "team": "repo27b-root",
+          "parent": null,
+          "type": "root"
+        },
+        {
+          "team": "repo27b-admin",
+          "parent": "repo27b-root",
+          "type": "admin"
+        },
+        {
+          "team": "repo27b-repo-admin",
+          "parent": "repo27b-root",
+          "type": "repo-admin"
+        }
+      ]
+    }
+  }
+}
