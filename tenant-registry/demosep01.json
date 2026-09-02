@@ -32,7 +32,18 @@
       ]
     },
     "repositories": {
-      "owned": []
+      "owned": [
+        {
+          "repoName": "demosep01_demo-service",
+          "tenantId": "demosep01",
+          "visibility": "private",
+          "repoType": "service",
+          "lifecycle": "active",
+          "migrationWave": "wave-1",
+          "source": "ghec",
+          "adminTeam": "demosep01-repo-admin"
+        }
+      ]
     },
     "runnerTopology": {
       "runnerGroups": []
