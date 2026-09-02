@@ -28,6 +28,11 @@
           "team": "demosep01-cicd-admin",
           "parent": "demosep01-root",
           "type": "cicd-admin"
+        },
+        {
+          "team": "demosep01-developers",
+          "parent": "demosep01-root",
+          "type": "subteam"
         }
       ]
     },
