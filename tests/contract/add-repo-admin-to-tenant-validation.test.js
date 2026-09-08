@@ -132,6 +132,108 @@ test('a requester who is neither org owner nor root-team maintainer is rejected'
   );
 });
 
+test('a repo-admin team member who is neither org owner nor root-team maintainer is authorized (1.0.6 widening)', async () => {
+  const registryDir = buildRegistry();
+  const result = await validateRepoAdminMembershipRequest(
+    buildRequestInput({ requesterLogin: 'repo-admin-team-member' }),
+    buildOptions(registryDir, {
+      getMembershipForUser: async ({ teamSlug, username }) => {
+        if (teamSlug === 'contosouk-repo-admin' && username === 'repo-admin-team-member') {
+          return { state: 'active', membership: { role: 'member' } };
+        }
+        return { state: 'absent', membership: null };
+      },
+    })
+  );
+
+  assert.equal(result.is_valid, true, JSON.stringify(result.errors));
+  assert.equal(
+    result.errors.some((error) => /not an active target organization owner and is not an active maintainer of the tenant top team/i.test(error)),
+    false,
+    JSON.stringify(result.errors)
+  );
+});
+
+test('a repo-admin team maintainer is authorized', async () => {
+  const registryDir = buildRegistry();
+  const result = await validateRepoAdminMembershipRequest(
+    buildRequestInput({ requesterLogin: 'repo-admin-team-maintainer' }),
+    buildOptions(registryDir, {
+      getMembershipForUser: async ({ teamSlug, username }) => {
+        if (teamSlug === 'contosouk-repo-admin' && username === 'repo-admin-team-maintainer') {
+          return { state: 'active', membership: { role: 'maintainer' } };
+        }
+        return { state: 'absent', membership: null };
+      },
+    })
+  );
+
+  assert.equal(result.is_valid, true, JSON.stringify(result.errors));
+});
+
+test('an org owner with no repo-admin membership is still authorized after the widening', async () => {
+  const registryDir = buildRegistry();
+  const result = await validateRepoAdminMembershipRequest(
+    buildRequestInput({ requesterLogin: 'org-admin-user' }),
+    buildOptions(registryDir, {
+      getMembershipForUser: async () => ({ state: 'absent', membership: null }),
+    })
+  );
+
+  assert.equal(result.is_valid, true, JSON.stringify(result.errors));
+  assert.equal(result.validation_findings.requester_org_role, 'admin');
+});
+
+test('a root-team maintainer with no repo-admin membership is still authorized after the widening', async () => {
+  const registryDir = buildRegistry();
+  const result = await validateRepoAdminMembershipRequest(
+    buildRequestInput(),
+    buildOptions(registryDir, {
+      getMembershipForUser: async ({ teamSlug, username }) => {
+        if (teamSlug === 'contosouk-root' && username === 'tenant-root-maintainer') {
+          return { state: 'active', membership: { role: 'maintainer' } };
+        }
+        return { state: 'absent', membership: null };
+      },
+    })
+  );
+
+  assert.equal(result.is_valid, true, JSON.stringify(result.errors));
+  assert.equal(result.validation_findings.requester_membership_state, 'active_maintainer');
+});
+
+test('the widened gate still rejects a requester in neither team who is not an org owner', async () => {
+  const registryDir = buildRegistry();
+  const result = await validateRepoAdminMembershipRequest(
+    buildRequestInput({ requesterLogin: 'unrelated-user' }),
+    buildOptions(registryDir, {
+      getMembershipForUser: async () => ({ state: 'absent', membership: null }),
+    })
+  );
+
+  assert.equal(result.is_valid, false);
+  assert.equal(
+    result.errors.some((error) => /is not an active member of the tenant repo admin team/i.test(error)),
+    true,
+    JSON.stringify(result.errors)
+  );
+});
+
+test('a root-team maintainer can still request when the repo-admin team does not exist yet', async () => {
+  const registryDir = buildRegistry();
+  const result = await validateRepoAdminMembershipRequest(
+    buildRequestInput(),
+    buildOptions(registryDir, {
+      getTeamBySlug: async ({ teamSlug }) => (teamSlug === 'contosouk-root'
+        ? { exists: true, team: { id: 101, slug: 'contosouk-root' } }
+        : { exists: false, team: null }),
+    })
+  );
+
+  assert.equal(result.repo_admin_team_exists, false);
+  assert.equal(result.is_valid, true, JSON.stringify(result.errors));
+});
+
 test('a requester who is only a root-team member is rejected', async () => {
   const registryDir = buildRegistry();
   const result = await validateRepoAdminMembershipRequest(

@@ -16,6 +16,7 @@ const { hashAttachmentContent } = require('./hash-attachment-content');
 const { resolveCsvAttachmentComment } = require('./resolve-csv-attachment-comment');
 const { readTenantRegistryRecords } = require('./resolve-tenant-context-from-registry');
 const { readTopologyView } = require('./resolve-tenant-cicd-context-from-registry');
+const { probeTeamMembership } = require('./probe-team-membership');
 
 const REPO_ADMIN_TEAM_SUFFIX = '-repo-admin';
 
@@ -348,14 +349,16 @@ async function validateRepoAdminMembershipRequest(input = {}, options = {}) {
     ? (resolvedView.repo_admin_team_slug || deriveRepoAdminTeamSlug(tenantKey))
     : '';
 
-  // Authorization gate (per Uma + design doc §5.3): an active target org owner
-  // OR an active maintainer of the tenant root team may call this operation.
-  // Deliberately wider than the root-maintainer-only gate used by
-  // add-cicd-admin-to-tenant (#26).
+  // Authorization gate (per Uma + design doc §5.3): an active target org owner,
+  // an active maintainer of the tenant root team, or an active member of the
+  // tenant repo admin team may call this operation. The repo-admin-team path was
+  // added for the 1.0.6 approver model, which also widened add-cicd-admin-to-tenant
+  // (#26) so the two gates now agree.
   let requesterMembershipState = 'unknown';
   let requesterOrgRole = 'unknown';
   let isTopTeamMaintainer = false;
   let isOrgAdmin = false;
+  let isRepoAdminTeamMember = false;
   if (resolvedView && !tenantTeamSlug) {
     errors.push(`Tenant '${tenantDisplayName}' has no resolvable top team and cannot authorize repo admin membership management.`);
   } else if (resolvedView) {
@@ -392,10 +395,18 @@ async function validateRepoAdminMembershipRequest(input = {}, options = {}) {
             ? 'absent'
             : 'unknown';
       isTopTeamMaintainer = requesterMembershipState === 'active_maintainer';
+
+      const repoAdminProbe = await probeTeamMembership({
+        organization,
+        username: requesterLogin,
+        getMembershipForUser: options.getMembershipForUser,
+        teamSlugs: [repoAdminTeamSlug],
+      });
+      isRepoAdminTeamMember = repoAdminProbe.authorized;
     }
 
-    if (!isOrgAdmin && !isTopTeamMaintainer) {
-      errors.push(`Requester '${request.requester_login}' is not an active target organization owner and is not an active maintainer of the tenant top team '${tenantTeamSlug}' and cannot manage repo admin membership for tenant '${tenantDisplayName}'.`);
+    if (!isOrgAdmin && !isTopTeamMaintainer && !isRepoAdminTeamMember) {
+      errors.push(`Requester '${request.requester_login}' is not an active target organization owner and is not an active maintainer of the tenant top team '${tenantTeamSlug}' and is not an active member of the tenant repo admin team '${repoAdminTeamSlug}' and cannot manage repo admin membership for tenant '${tenantDisplayName}'.`);
     }
   }
 

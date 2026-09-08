@@ -146,7 +146,9 @@ test('a requester who is only a root-team member is rejected', async () => {
   );
 });
 
-test('a cicd-admin team member who is not a root-team maintainer is rejected (stricter than the variables OR-gate)', async () => {
+// 1.0.6 approver model: the gate was deliberately root-maintainer-only until Eric
+// approved widening it, so this assertion is an intentional flip of the old policy.
+test('a cicd-admin team member who is not a root-team maintainer is authorized (1.0.6 widening)', async () => {
   const registryDir = buildRegistry();
   const result = await validateCicdAdminMembershipRequest(
     buildRequestInput({ requesterLogin: 'cicd-team-member' }),
@@ -160,12 +162,80 @@ test('a cicd-admin team member who is not a root-team maintainer is rejected (st
     })
   );
 
-  assert.equal(result.is_valid, false);
+  assert.equal(result.is_valid, true, JSON.stringify(result.errors));
   assert.equal(
     result.errors.some((error) => /not an active maintainer of the tenant top team/i.test(error)),
+    false,
+    JSON.stringify(result.errors)
+  );
+});
+
+test('a cicd-admin team maintainer who is not a root-team maintainer is authorized', async () => {
+  const registryDir = buildRegistry();
+  const result = await validateCicdAdminMembershipRequest(
+    buildRequestInput({ requesterLogin: 'cicd-team-maintainer' }),
+    buildOptions(registryDir, {
+      getMembershipForUser: async ({ teamSlug, username }) => {
+        if (teamSlug === 'contosouk-cicd-admin' && username === 'cicd-team-maintainer') {
+          return { state: 'active', membership: { role: 'maintainer' } };
+        }
+        return { state: 'absent', membership: null };
+      },
+    })
+  );
+
+  assert.equal(result.is_valid, true, JSON.stringify(result.errors));
+});
+
+test('a root-team maintainer with no cicd-admin membership is still authorized after the widening', async () => {
+  const registryDir = buildRegistry();
+  const result = await validateCicdAdminMembershipRequest(
+    buildRequestInput(),
+    buildOptions(registryDir, {
+      getMembershipForUser: async ({ teamSlug, username }) => {
+        if (teamSlug === 'contosouk-root' && username === 'tenant-root-maintainer') {
+          return { state: 'active', membership: { role: 'maintainer' } };
+        }
+        return { state: 'absent', membership: null };
+      },
+    })
+  );
+
+  assert.equal(result.is_valid, true, JSON.stringify(result.errors));
+  assert.equal(result.validation_findings.requester_membership_state, 'active_maintainer');
+});
+
+test('the widened gate still rejects a requester in neither team', async () => {
+  const registryDir = buildRegistry();
+  const result = await validateCicdAdminMembershipRequest(
+    buildRequestInput({ requesterLogin: 'unrelated-user' }),
+    buildOptions(registryDir, {
+      getMembershipForUser: async () => ({ state: 'absent', membership: null }),
+    })
+  );
+
+  assert.equal(result.is_valid, false);
+  assert.equal(
+    result.errors.some((error) => /is not an active member of the tenant CI\/CD admin team/i.test(error)),
     true,
     JSON.stringify(result.errors)
   );
+});
+
+test('a root-team maintainer can still bootstrap when the cicd-admin team does not exist yet', async () => {
+  const registryDir = buildRegistry();
+  const result = await validateCicdAdminMembershipRequest(
+    buildRequestInput(),
+    buildOptions(registryDir, {
+      getTeamBySlug: async ({ teamSlug }) => (teamSlug === 'contosouk-root'
+        ? { exists: true, team: { id: 101, slug: 'contosouk-root' } }
+        : { exists: false, team: null }),
+    })
+  );
+
+  assert.equal(result.cicd_admin_team_exists, false);
+  assert.equal(result.is_valid, true, JSON.stringify(result.errors));
+  assert.equal(result.plan.team_action, 'create_team');
 });
 
 test('an unknown tenant is rejected with available tenant names', async () => {

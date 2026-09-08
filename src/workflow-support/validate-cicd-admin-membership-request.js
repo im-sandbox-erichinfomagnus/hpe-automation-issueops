@@ -16,6 +16,7 @@ const { hashAttachmentContent } = require('./hash-attachment-content');
 const { resolveCsvAttachmentComment } = require('./resolve-csv-attachment-comment');
 const { readTenantRegistryRecords } = require('./resolve-tenant-context-from-registry');
 const { readTopologyView } = require('./resolve-tenant-cicd-context-from-registry');
+const { probeTeamMembership } = require('./probe-team-membership');
 
 const CICD_ADMIN_TEAM_SUFFIX = '-cicd-admin';
 
@@ -347,11 +348,14 @@ async function validateCicdAdminMembershipRequest(input = {}, options = {}) {
   const tenantTeamSlug = resolvedView ? resolvedView.tenant_root_team_slug : '';
   const cicdAdminTeamSlug = deriveDedicatedCicdAdminTeamSlug(tenantKey);
 
-  // Authorization gate: only an active maintainer of the tenant root team (a
-  // Tenant Admin) may call this operation. This is intentionally stricter than
-  // the tenant-variables OR-gate per the design doc for NetGear-GHAS-TAS#26.
+  // Authorization gate: an active maintainer of the tenant root team (a Tenant
+  // Admin), or an active member of the tenant CI/CD admin team, may call this
+  // operation. The CI/CD-team path was added for the 1.0.6 approver model; the
+  // gate was previously root-maintainer only, which left CI/CD admins unable to
+  // manage their own team.
   let requesterMembershipState = 'unknown';
   let isTopTeamMaintainer = false;
+  let isCicdAdminTeamMember = false;
   if (resolvedView && !tenantTeamSlug) {
     errors.push(`Tenant '${tenantDisplayName}' has no resolvable top team and cannot authorize CI/CD admin membership management.`);
   } else if (resolvedView && typeof options.getMembershipForUser === 'function') {
@@ -374,8 +378,16 @@ async function validateCicdAdminMembershipRequest(input = {}, options = {}) {
           : 'unknown';
     isTopTeamMaintainer = requesterMembershipState === 'active_maintainer';
 
-    if (!isTopTeamMaintainer) {
-      errors.push(`Requester '${request.requester_login}' is not an active maintainer of the tenant top team '${tenantTeamSlug}' and cannot manage CI/CD admin membership for tenant '${tenantDisplayName}'.`);
+    const cicdAdminProbe = await probeTeamMembership({
+      organization,
+      username: requesterLogin,
+      getMembershipForUser: options.getMembershipForUser,
+      teamSlugs: [cicdAdminTeamSlug],
+    });
+    isCicdAdminTeamMember = cicdAdminProbe.authorized;
+
+    if (!isTopTeamMaintainer && !isCicdAdminTeamMember) {
+      errors.push(`Requester '${request.requester_login}' is not an active maintainer of the tenant top team '${tenantTeamSlug}' and is not an active member of the tenant CI/CD admin team '${cicdAdminTeamSlug}' and cannot manage CI/CD admin membership for tenant '${tenantDisplayName}'.`);
     }
   }
 
