@@ -248,3 +248,62 @@ test('cross-tenant runner group creation via prefix collision is rejected', asyn
     JSON.stringify(result.errors)
   );
 });
+
+function cicdGateRegistry() {
+  const registryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runner-group-cicd-registry-'));
+  const record = canonicalTopologyRecord({ tenantId: 'contosouk', tenantName: 'ContosoUK', organization: 'octo-org' });
+  record.topology.teams.structure.push({ team: 'contosouk-cicd-admin', parent: 'contosouk-root', type: 'cicd-admin' });
+  fs.writeFileSync(path.join(registryDir, 'contosouk.json'), JSON.stringify(record, null, 2), 'utf8');
+  return registryDir;
+}
+
+function cicdGateOptions(registryDir, activeTeamSlug, activeUsername) {
+  return buildOptions(registryDir, {
+    listTeams: async () => ([
+      { slug: 'contosouk-root', parent: null },
+      { slug: 'contosouk-admin', parent: { slug: 'contosouk-root' } },
+      { slug: 'contosouk-repo-admin', parent: { slug: 'contosouk-root' } },
+      { slug: 'contosouk-cicd-admin', parent: { slug: 'contosouk-root' } },
+    ]),
+    getMembershipForUser: async ({ teamSlug, username }) => (
+      teamSlug === activeTeamSlug && username === activeUsername
+        ? { state: 'active', membership: { role: 'member' } }
+        : { state: 'absent', membership: null }
+    ),
+  });
+}
+
+test('runner groups: a member of only the tenant cicd-admin team passes the CI/CD gate', async () => {
+  const registryDir = cicdGateRegistry();
+  const result = await validateRunnerGroupRequest(
+    buildRequestInput({ requesterLogin: 'cicd-only-user' }),
+    cicdGateOptions(registryDir, 'contosouk-cicd-admin', 'cicd-only-user')
+  );
+
+  assert.equal(result.is_valid, true, JSON.stringify(result.errors));
+  assert.equal(result.canonical_tenant_context.cicd_admin_team_slug, 'contosouk-cicd-admin');
+  assert.equal(result.canonical_tenant_context.cicd_admin_team_matched_on, 'cicd-admin');
+});
+
+test('runner groups: a member of only the tenant admin team still passes the CI/CD gate', async () => {
+  const registryDir = cicdGateRegistry();
+  const result = await validateRunnerGroupRequest(
+    buildRequestInput({ requesterLogin: 'admin-only-user' }),
+    cicdGateOptions(registryDir, 'contosouk-admin', 'admin-only-user')
+  );
+
+  assert.equal(result.is_valid, true, JSON.stringify(result.errors));
+  assert.equal(result.canonical_tenant_context.cicd_admin_team_slug, 'contosouk-admin');
+  assert.equal(result.canonical_tenant_context.cicd_admin_team_matched_on, 'admin');
+});
+
+test('runner groups: a member of neither CI/CD team is not authorized', async () => {
+  const registryDir = cicdGateRegistry();
+  const result = await validateRunnerGroupRequest(
+    buildRequestInput({ requesterLogin: 'outsider-user' }),
+    cicdGateOptions(registryDir, 'contosouk-nobody', 'nobody')
+  );
+
+  assert.equal(result.is_valid, false);
+  assert.equal(result.tenant_resolution.tenant_resolution_status, 'no_match');
+});

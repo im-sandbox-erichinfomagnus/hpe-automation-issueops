@@ -125,14 +125,15 @@ test('parser normalizes dropdown-style image source values', () => {
   assert.equal(request.runner_image_source, 'github');
 });
 
-test('tenant admin team derivation follows the 022 canonical topology naming', () => {
-  // The CI/CD administration authority is the tenant topology admin team (type "admin",
-  // <tenant-slug>-admin) per specs/022-enhance-tenant-topology, not a separate CICDAdmins team.
+test('tenant CI/CD admin team derivation targets the dedicated CICDAdmins team', () => {
+  // Release sheet: CICDAdmins (<tenant-slug>-cicd-admin) is the primary CI/CD role and is
+  // the team add-cicd-admin-to-tenant writes members into. The topology admin team stays
+  // an accepted fallback inside the gate, but derivation names the dedicated team.
   const derived = deriveCicdAdminTeam('ContosoUK');
-  assert.equal(derived.cicd_admin_team_name, 'contosouk-admin');
-  assert.equal(derived.cicd_admin_team_slug, 'contosouk-admin');
+  assert.equal(derived.cicd_admin_team_name, 'contosouk-cicd-admin');
+  assert.equal(derived.cicd_admin_team_slug, 'contosouk-cicd-admin');
 
   const derivedWithSpace = deriveCicdAdminTeam('Contoso UK');
-  assert.equal(derivedWithSpace.cicd_admin_team_name, 'contoso-uk-admin');
-  assert.equal(derivedWithSpace.cicd_admin_team_slug, 'contoso-uk-admin');
+  assert.equal(derivedWithSpace.cicd_admin_team_name, 'contoso-uk-cicd-admin');
+  assert.equal(derivedWithSpace.cicd_admin_team_slug, 'contoso-uk-cicd-admin');
 });

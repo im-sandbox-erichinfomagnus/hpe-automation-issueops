@@ -197,6 +197,7 @@ async function validateTeamHierarchyRequest(input = {}, options = {}) {
   const getOrganizationMembership = options.getOrganizationMembership;
   const listTeams = options.listTeams;
   const resolveTeamMembership = options.resolveTeamMembership;
+  const skipDesignatedApproverValidation = options.skipDesignatedApproverValidation === true;
   const issueComments = options.issueComments || input.issueComments || input.issue_comments || [];
   const latestFailedValidationAt = options.latestFailedValidationAt || input.latestFailedValidationAt || null;
   const latestFailedValidationAttemptId = options.latestFailedValidationAttemptId || input.latestFailedValidationAttemptId || null;

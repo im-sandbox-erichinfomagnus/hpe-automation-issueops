@@ -346,3 +346,156 @@ test('runRequestValidation keeps tenant creation classification when parser JSON
   assert.equal(persisted.metadata.operation, 'tenant_creation');
   assert.match(persisted.execution.summary, /No tenant bootstrap mutation was attempted/i);
 });
+
+// ---------------------------------------------------------------------------
+// Bug 1 (#113): CSV-only runner requests must classify by operation, not fall
+// through to tenant_creation. Creation and deletion share PARSED_RUNNER_CSV, so
+// the form label is what separates them.
+// ---------------------------------------------------------------------------
+
+// Valid for BOTH the creation and deletion CSV contracts, so the cross-guards can
+// send byte-identical text and vary only the label.
+const SHARED_RUNNER_CSV = 'runner_name\nubuntu-build';
+
+async function classifyRunnerRequest(parsedOverrides = {}, issueLabels = null) {
+  const os = require('node:os');
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'runner-csv-classification-'));
+  const artifactPath = path.join(workspace, 'audit.json');
+  const registryDir = path.join(workspace, 'tenant-registry');
+  fs.mkdirSync(registryDir, { recursive: true });
+
+  const env = {
+    GITHUB_REPOSITORY: 'octo-org/issueops-speckit',
+    ISSUE_NUMBER: '731',
+    REQUESTER_LOGIN: 'requester',
+    ISSUEOPS_GITHUB_TOKEN: 'test-token',
+    AUDIT_ARTIFACT_PATH: artifactPath,
+    TENANT_REGISTRY_DIR: registryDir,
+    PARSED_ORGANIZATION: 'octo-org',
+    PARSED_TENANT_NAME: 'ContosoUK',
+    PARSED_DESIGNATED_APPROVER: 'org-owner-user',
+    PARSED_DRY_RUN: 'true',
+    PARSED_JUSTIFICATION: 'Runner capacity for the tenant.',
+    ...parsedOverrides,
+  };
+  if (issueLabels) {
+    env.ISSUE_LABELS_JSON = JSON.stringify(issueLabels.map((name) => ({ name })));
+  }
+
+  await runRequestValidation({
+    env,
+    api: {
+      getOrganization: async () => ({ exists: true }),
+      getOrganizationMembership: async () => ({ exists: true, membership: { role: 'admin', state: 'active' } }),
+      listOrgTeams: async () => [],
+      getMembershipForUser: async () => ({ state: 'absent', membership: null }),
+      listHostedRunners: async () => ([]),
+      listRunnerGroups: async () => ([]),
+    },
+    setProcessExitCode: false,
+  });
+
+  return JSON.parse(fs.readFileSync(artifactPath, 'utf8')).metadata.operation;
+}
+
+test('runRequestValidation classifies a CSV-only hosted runner creation request by its form label', async () => {
+  const operation = await classifyRunnerRequest(
+    { PARSED_RUNNER_NAME: '', PARSED_RUNNER_CSV: 'runner_name,runner_image_id,runner_image_source,runner_size,runner_group_name,maximum_runners\nubuntu-build,2295,github,4-core,ContosoUK_Builders,1' },
+    ['issueops', 'create-tenant-hosted-runner']
+  );
+
+  assert.equal(operation, 'hosted_runner_creation');
+});
+
+test('runRequestValidation classifies a CSV-only hosted runner deletion request by its form label', async () => {
+  const operation = await classifyRunnerRequest(
+    { PARSED_RUNNER_NAME: '', PARSED_RUNNER_CSV: SHARED_RUNNER_CSV },
+    ['issueops', 'delete-tenant-hosted-runner']
+  );
+
+  assert.equal(operation, 'hosted_runner_deletion');
+});
+
+test('runRequestValidation classifies a CSV-only hosted runner move request', async () => {
+  const operation = await classifyRunnerRequest(
+    { PARSED_RUNNER_NAME: '', PARSED_RUNNER_MOVES_CSV: 'runner_name,target_runner_group_name\nubuntu-build,ContosoUK_Builders' },
+    ['issueops', 'move-tenant-hosted-runner']
+  );
+
+  assert.equal(operation, 'hosted_runner_move');
+});
+
+test('runRequestValidation classifies a CSV-only runner group request', async () => {
+  const operation = await classifyRunnerRequest(
+    { PARSED_RUNNER_GROUP_NAME: '', PARSED_RUNNER_GROUPS_CSV: 'runner_group_name,runner_group_visibility,allows_public_repositories\nBuilders,selected,false' },
+    ['issueops', 'create-tenant-runner-groups']
+  );
+
+  assert.equal(operation, 'runner_group_creation');
+});
+
+test('CROSS-GUARD: identical runner CSV text with the create label classifies as creation, not deletion', async () => {
+  const operation = await classifyRunnerRequest(
+    { PARSED_RUNNER_NAME: '', PARSED_RUNNER_CSV: SHARED_RUNNER_CSV },
+    ['issueops', 'create-tenant-hosted-runner']
+  );
+
+  assert.equal(operation, 'hosted_runner_creation');
+  assert.notEqual(operation, 'hosted_runner_deletion');
+});
+
+test('CROSS-GUARD: identical runner CSV text with the delete label classifies as deletion, not creation', async () => {
+  const operation = await classifyRunnerRequest(
+    { PARSED_RUNNER_NAME: '', PARSED_RUNNER_CSV: SHARED_RUNNER_CSV },
+    ['issueops', 'delete-tenant-hosted-runner']
+  );
+
+  assert.equal(operation, 'hosted_runner_deletion');
+  assert.notEqual(operation, 'hosted_runner_creation');
+});
+
+test('a CSV-only runner request with no form label falls back to the scalar-only classification', async () => {
+  const operation = await classifyRunnerRequest(
+    { PARSED_RUNNER_NAME: '', PARSED_RUNNER_CSV: SHARED_RUNNER_CSV },
+    null
+  );
+
+  // Fail closed: without a label the CSV paths stay off and the tenant name wins.
+  assert.equal(operation, 'tenant_creation');
+});
+
+test('scalar hosted runner creation and deletion requests still classify as they did before', async () => {
+  const creation = await classifyRunnerRequest(
+    { PARSED_RUNNER_NAME: 'ubuntu-build', PARSED_RUNNER_IMAGE_ID: '2295', PARSED_RUNNER_SIZE: '4-core' },
+    ['issueops', 'create-tenant-hosted-runner']
+  );
+  assert.equal(creation, 'hosted_runner_creation');
+
+  const deletion = await classifyRunnerRequest(
+    { PARSED_RUNNER_NAME: 'ubuntu-build' },
+    ['issueops', 'delete-tenant-hosted-runner']
+  );
+  assert.equal(deletion, 'hosted_runner_deletion');
+});
+
+test('scalar runner move and runner group requests still classify as they did before', async () => {
+  const move = await classifyRunnerRequest(
+    { PARSED_RUNNER_NAME: 'ubuntu-build', PARSED_TARGET_RUNNER_GROUP_NAME: 'ContosoUK_Builders' },
+    ['issueops', 'move-tenant-hosted-runner']
+  );
+  assert.equal(move, 'hosted_runner_move');
+
+  const groups = await classifyRunnerRequest(
+    { PARSED_RUNNER_GROUP_NAME: 'Builders' },
+    ['issueops', 'create-tenant-runner-groups']
+  );
+  assert.equal(groups, 'runner_group_creation');
+});
+
+test('a tenant request carrying no runner signal is unaffected by the runner CSV paths', async () => {
+  const operation = await classifyRunnerRequest({}, ['issueops', 'create-tenant-model']);
+
+  assert.equal(operation, 'tenant_creation');
+});

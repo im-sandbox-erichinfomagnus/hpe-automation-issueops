@@ -11,7 +11,7 @@ const {
   parseTenantVariablesRequest,
 } = require('./parse-tenant-variables-request');
 const { readTenantRegistryRecords } = require('./resolve-tenant-context-from-registry');
-const { readTopologyView } = require('./resolve-tenant-cicd-context-from-registry');
+const { readTopologyView, probeCicdTeamMembership } = require('./resolve-tenant-cicd-context-from-registry');
 
 function normalizeLogin(value) {
   return String(value || '').trim().toLowerCase();
@@ -125,7 +125,9 @@ async function validateTenantVariablesRequest(input = {}, options = {}) {
   const tenantKey = resolvedView ? resolvedView.tenant_key : '';
   const tenantDisplayName = resolvedView ? resolvedView.tenant_display_name : '';
   const tenantTeamSlug = resolvedView ? resolvedView.tenant_root_team_slug : '';
-  const cicdAdminTeamSlug = resolvedView ? resolvedView.admin_team_slug : '';
+  const dedicatedCicdTeamSlug = resolvedView ? resolvedView.cicd_admin_team_slug : '';
+  const adminTeamSlug = resolvedView ? resolvedView.admin_team_slug : '';
+  let cicdAdminTeamSlug = dedicatedCicdTeamSlug || adminTeamSlug;
   const prefix = deriveTenantVariablePrefix(tenantKey);
 
   // Authorization gate (V2.2.1): the requester must be an active member or
@@ -134,6 +136,7 @@ async function validateTenantVariablesRequest(input = {}, options = {}) {
   // which share the same CI/CD-level gate.
   let requesterMembershipState = 'unknown';
   let requesterCicdMembershipState = 'not_applicable';
+  let cicdAdminTeamMatchedOn = null;
   let isTopTeamMaintainer = false;
   let isCicdTeamMember = false;
   if (resolvedView && !tenantTeamSlug) {
@@ -158,29 +161,27 @@ async function validateTenantVariablesRequest(input = {}, options = {}) {
           : 'unknown';
     isTopTeamMaintainer = requesterMembershipState === 'active_maintainer';
 
-    if (cicdAdminTeamSlug) {
-      const cicdMembership = await options.getMembershipForUser({
+    if (dedicatedCicdTeamSlug || adminTeamSlug) {
+      const cicdProbe = await probeCicdTeamMembership({
         organization,
-        teamSlug: cicdAdminTeamSlug,
         username: requesterLogin,
+        getMembershipForUser: options.getMembershipForUser,
+        cicdAdminTeamSlug: dedicatedCicdTeamSlug,
+        adminTeamSlug,
       });
-      const cicdState = cicdMembership && cicdMembership.state ? String(cicdMembership.state).toLowerCase() : 'absent';
-      const cicdRole = cicdMembership && cicdMembership.membership && cicdMembership.membership.role
-        ? String(cicdMembership.membership.role).toLowerCase()
-        : '';
 
-      requesterCicdMembershipState = cicdState === 'active' && cicdRole === 'maintainer'
-        ? 'active_maintainer'
-        : cicdState === 'active'
-          ? 'active_member'
-          : cicdState === 'absent'
-            ? 'absent'
-            : 'unknown';
-      isCicdTeamMember = cicdState === 'active';
+      requesterCicdMembershipState = cicdProbe.membership_state;
+      isCicdTeamMember = cicdProbe.authorized;
+      cicdAdminTeamMatchedOn = cicdProbe.cicd_admin_team_matched_on;
+      cicdAdminTeamSlug = cicdProbe.cicd_admin_team_slug || cicdAdminTeamSlug;
     }
 
     if (!isTopTeamMaintainer && !isCicdTeamMember) {
-      errors.push(`Requester '${request.requester_login}' is not a member of the tenant CI/CD admin team '${cicdAdminTeamSlug || 'n/a'}' and is not an active maintainer of the tenant top team '${tenantTeamSlug}' and cannot manage variables for tenant '${tenantDisplayName}'.`);
+      const cicdTeamsNamed = [dedicatedCicdTeamSlug, adminTeamSlug].filter(Boolean);
+      const cicdTeamsPhrase = cicdTeamsNamed.length === 2
+        ? `the tenant CI/CD admin team '${cicdTeamsNamed[0]}' or the tenant admin team '${cicdTeamsNamed[1]}'`
+        : `the tenant CI/CD admin team '${cicdTeamsNamed[0] || 'n/a'}'`;
+      errors.push(`Requester '${request.requester_login}' is not a member of ${cicdTeamsPhrase} and is not an active maintainer of the tenant top team '${tenantTeamSlug}' and cannot manage variables for tenant '${tenantDisplayName}'.`);
     }
   }
 
@@ -340,6 +341,7 @@ async function validateTenantVariablesRequest(input = {}, options = {}) {
         tenant_team_name: tenantTeamSlug,
         tenant_team_slug: tenantTeamSlug,
         cicd_admin_team_slug: cicdAdminTeamSlug,
+        cicd_admin_team_matched_on: cicdAdminTeamMatchedOn,
         requester_membership_state: requesterMembershipState,
         tenant_resolution_status: tenantResolutionStatus,
         context_marker: contextMarker,
@@ -392,6 +394,7 @@ async function validateTenantVariablesRequest(input = {}, options = {}) {
       tenant_resolution_status: tenantResolutionStatus,
       requester_membership_state: requesterMembershipState,
       requester_cicd_membership_state: requesterCicdMembershipState,
+      cicd_admin_team_matched_on: cicdAdminTeamMatchedOn,
       variable_operation: variableOperation,
       variable_prefix: prefix,
       variable_plan: planEntries,
