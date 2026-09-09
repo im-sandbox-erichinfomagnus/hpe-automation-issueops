@@ -359,6 +359,8 @@ async function validateRepoAdminMembershipRequest(input = {}, options = {}) {
   let isTopTeamMaintainer = false;
   let isOrgAdmin = false;
   let isRepoAdminTeamMember = false;
+  let requesterRepoAdminMembershipState = 'unknown';
+  let repoAdminTeamMatchedOn = null;
   if (resolvedView && !tenantTeamSlug) {
     errors.push(`Tenant '${tenantDisplayName}' has no resolvable top team and cannot authorize repo admin membership management.`);
   } else if (resolvedView) {
@@ -403,12 +405,24 @@ async function validateRepoAdminMembershipRequest(input = {}, options = {}) {
         teamSlugs: [repoAdminTeamSlug],
       });
       isRepoAdminTeamMember = repoAdminProbe.authorized;
+      requesterRepoAdminMembershipState = repoAdminProbe.membership_state;
+      repoAdminTeamMatchedOn = repoAdminProbe.matched_on;
     }
 
     if (!isOrgAdmin && !isTopTeamMaintainer && !isRepoAdminTeamMember) {
       errors.push(`Requester '${request.requester_login}' is not an active target organization owner and is not an active maintainer of the tenant top team '${tenantTeamSlug}' and is not an active member of the tenant repo admin team '${repoAdminTeamSlug}' and cannot manage repo admin membership for tenant '${tenantDisplayName}'.`);
     }
   }
+
+  // Names the tenant role the requester actually holds. The gate above is an OR, so
+  // its evaluation order carries no meaning; this records the most specific role.
+  const requesterAuthorizationPath = isRepoAdminTeamMember
+    ? 'tenant_repo_admin_team'
+    : isTopTeamMaintainer
+      ? 'tenant_admin_maintainer'
+      : isOrgAdmin
+        ? 'org_owner'
+        : 'none';
 
   let rootTeamExists = false;
   let rootTeamId = null;
@@ -509,6 +523,9 @@ async function validateRepoAdminMembershipRequest(input = {}, options = {}) {
         tenant_team_slug: tenantTeamSlug,
         repo_admin_team_slug: repoAdminTeamSlug,
         requester_membership_state: requesterMembershipState,
+        requester_repo_admin_membership_state: requesterRepoAdminMembershipState,
+        repo_admin_team_matched_on: repoAdminTeamMatchedOn,
+        requester_authorization_path: requesterAuthorizationPath,
         requester_org_role: requesterOrgRole,
         tenant_resolution_status: tenantResolutionStatus,
         context_marker: contextMarker,
@@ -571,6 +588,9 @@ async function validateRepoAdminMembershipRequest(input = {}, options = {}) {
     validation_findings: {
       tenant_resolution_status: tenantResolutionStatus,
       requester_membership_state: requesterMembershipState,
+      requester_repo_admin_membership_state: requesterRepoAdminMembershipState,
+      repo_admin_team_matched_on: repoAdminTeamMatchedOn,
+      requester_authorization_path: requesterAuthorizationPath,
       requester_org_role: requesterOrgRole,
       repo_admin_team_slug: repoAdminTeamSlug,
       repo_admin_team_exists: repoAdminTeamExists,

@@ -356,6 +356,8 @@ async function validateCicdAdminMembershipRequest(input = {}, options = {}) {
   let requesterMembershipState = 'unknown';
   let isTopTeamMaintainer = false;
   let isCicdAdminTeamMember = false;
+  let requesterCicdMembershipState = 'unknown';
+  let cicdAdminTeamMatchedOn = null;
   if (resolvedView && !tenantTeamSlug) {
     errors.push(`Tenant '${tenantDisplayName}' has no resolvable top team and cannot authorize CI/CD admin membership management.`);
   } else if (resolvedView && typeof options.getMembershipForUser === 'function') {
@@ -385,11 +387,21 @@ async function validateCicdAdminMembershipRequest(input = {}, options = {}) {
       teamSlugs: [cicdAdminTeamSlug],
     });
     isCicdAdminTeamMember = cicdAdminProbe.authorized;
+    requesterCicdMembershipState = cicdAdminProbe.membership_state;
+    cicdAdminTeamMatchedOn = cicdAdminProbe.matched_on;
 
     if (!isTopTeamMaintainer && !isCicdAdminTeamMember) {
       errors.push(`Requester '${request.requester_login}' is not an active maintainer of the tenant top team '${tenantTeamSlug}' and is not an active member of the tenant CI/CD admin team '${cicdAdminTeamSlug}' and cannot manage CI/CD admin membership for tenant '${tenantDisplayName}'.`);
     }
   }
+
+  // Names the tenant role the requester actually holds. The gate above is an OR, so
+  // its evaluation order carries no meaning; this records the most specific role.
+  const requesterAuthorizationPath = isCicdAdminTeamMember
+    ? 'tenant_cicd_admin_team'
+    : isTopTeamMaintainer
+      ? 'tenant_admin_maintainer'
+      : 'none';
 
   let rootTeamExists = false;
   let rootTeamId = null;
@@ -490,6 +502,9 @@ async function validateCicdAdminMembershipRequest(input = {}, options = {}) {
         tenant_team_slug: tenantTeamSlug,
         cicd_admin_team_slug: cicdAdminTeamSlug,
         requester_membership_state: requesterMembershipState,
+        requester_cicd_membership_state: requesterCicdMembershipState,
+        cicd_admin_team_matched_on: cicdAdminTeamMatchedOn,
+        requester_authorization_path: requesterAuthorizationPath,
         tenant_resolution_status: tenantResolutionStatus,
         context_marker: contextMarker,
       }
@@ -551,6 +566,9 @@ async function validateCicdAdminMembershipRequest(input = {}, options = {}) {
     validation_findings: {
       tenant_resolution_status: tenantResolutionStatus,
       requester_membership_state: requesterMembershipState,
+      requester_cicd_membership_state: requesterCicdMembershipState,
+      cicd_admin_team_matched_on: cicdAdminTeamMatchedOn,
+      requester_authorization_path: requesterAuthorizationPath,
       cicd_admin_team_slug: cicdAdminTeamSlug,
       cicd_admin_team_exists: cicdAdminTeamExists,
       team_action: plan.team_action,
