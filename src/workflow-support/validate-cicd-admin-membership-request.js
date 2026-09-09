@@ -358,6 +358,7 @@ async function validateCicdAdminMembershipRequest(input = {}, options = {}) {
   let isCicdAdminTeamMember = false;
   let requesterCicdMembershipState = 'unknown';
   let cicdAdminTeamMatchedOn = null;
+  let cicdAdminProbeError = null;
   if (resolvedView && !tenantTeamSlug) {
     errors.push(`Tenant '${tenantDisplayName}' has no resolvable top team and cannot authorize CI/CD admin membership management.`);
   } else if (resolvedView && typeof options.getMembershipForUser === 'function') {
@@ -380,15 +381,24 @@ async function validateCicdAdminMembershipRequest(input = {}, options = {}) {
           : 'unknown';
     isTopTeamMaintainer = requesterMembershipState === 'active_maintainer';
 
-    const cicdAdminProbe = await probeTeamMembership({
-      organization,
-      username: requesterLogin,
-      getMembershipForUser: options.getMembershipForUser,
-      teamSlugs: [cicdAdminTeamSlug],
-    });
-    isCicdAdminTeamMember = cicdAdminProbe.authorized;
-    requesterCicdMembershipState = cicdAdminProbe.membership_state;
-    cicdAdminTeamMatchedOn = cicdAdminProbe.matched_on;
+    // A probe failure must not deny a requester the pre-1.0.6 gate would have allowed, so it
+    // degrades to top-team maintainership instead of propagating.
+    try {
+      const cicdAdminProbe = await probeTeamMembership({
+        organization,
+        username: requesterLogin,
+        getMembershipForUser: options.getMembershipForUser,
+        teamSlugs: [cicdAdminTeamSlug],
+      });
+      isCicdAdminTeamMember = cicdAdminProbe.authorized;
+      requesterCicdMembershipState = cicdAdminProbe.membership_state;
+      cicdAdminTeamMatchedOn = cicdAdminProbe.matched_on;
+    } catch (error) {
+      cicdAdminProbeError = error && error.message ? error.message : 'unknown error';
+      warnings.push(
+        `Could not inspect membership of the tenant CI/CD admin team '${cicdAdminTeamSlug}' (${cicdAdminProbeError}); authorization fell back to tenant top-team maintainership.`
+      );
+    }
 
     if (!isTopTeamMaintainer && !isCicdAdminTeamMember) {
       errors.push(`Requester '${request.requester_login}' is not an active maintainer of the tenant top team '${tenantTeamSlug}' and is not an active member of the tenant CI/CD admin team '${cicdAdminTeamSlug}' and cannot manage CI/CD admin membership for tenant '${tenantDisplayName}'.`);
@@ -568,6 +578,7 @@ async function validateCicdAdminMembershipRequest(input = {}, options = {}) {
       requester_membership_state: requesterMembershipState,
       requester_cicd_membership_state: requesterCicdMembershipState,
       cicd_admin_team_matched_on: cicdAdminTeamMatchedOn,
+      cicd_admin_probe_error: cicdAdminProbeError,
       requester_authorization_path: requesterAuthorizationPath,
       cicd_admin_team_slug: cicdAdminTeamSlug,
       cicd_admin_team_exists: cicdAdminTeamExists,

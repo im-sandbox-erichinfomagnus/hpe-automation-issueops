@@ -361,6 +361,7 @@ async function validateRepoAdminMembershipRequest(input = {}, options = {}) {
   let isRepoAdminTeamMember = false;
   let requesterRepoAdminMembershipState = 'unknown';
   let repoAdminTeamMatchedOn = null;
+  let repoAdminProbeError = null;
   if (resolvedView && !tenantTeamSlug) {
     errors.push(`Tenant '${tenantDisplayName}' has no resolvable top team and cannot authorize repo admin membership management.`);
   } else if (resolvedView) {
@@ -398,15 +399,24 @@ async function validateRepoAdminMembershipRequest(input = {}, options = {}) {
             : 'unknown';
       isTopTeamMaintainer = requesterMembershipState === 'active_maintainer';
 
-      const repoAdminProbe = await probeTeamMembership({
-        organization,
-        username: requesterLogin,
-        getMembershipForUser: options.getMembershipForUser,
-        teamSlugs: [repoAdminTeamSlug],
-      });
-      isRepoAdminTeamMember = repoAdminProbe.authorized;
-      requesterRepoAdminMembershipState = repoAdminProbe.membership_state;
-      repoAdminTeamMatchedOn = repoAdminProbe.matched_on;
+      // A probe failure must not deny a requester the pre-1.0.6 gate would have allowed, so it
+      // degrades to org ownership or top-team maintainership instead of propagating.
+      try {
+        const repoAdminProbe = await probeTeamMembership({
+          organization,
+          username: requesterLogin,
+          getMembershipForUser: options.getMembershipForUser,
+          teamSlugs: [repoAdminTeamSlug],
+        });
+        isRepoAdminTeamMember = repoAdminProbe.authorized;
+        requesterRepoAdminMembershipState = repoAdminProbe.membership_state;
+        repoAdminTeamMatchedOn = repoAdminProbe.matched_on;
+      } catch (error) {
+        repoAdminProbeError = error && error.message ? error.message : 'unknown error';
+        warnings.push(
+          `Could not inspect membership of the tenant repo admin team '${repoAdminTeamSlug}' (${repoAdminProbeError}); authorization fell back to organization ownership or tenant top-team maintainership.`
+        );
+      }
     }
 
     if (!isOrgAdmin && !isTopTeamMaintainer && !isRepoAdminTeamMember) {
@@ -590,6 +600,7 @@ async function validateRepoAdminMembershipRequest(input = {}, options = {}) {
       requester_membership_state: requesterMembershipState,
       requester_repo_admin_membership_state: requesterRepoAdminMembershipState,
       repo_admin_team_matched_on: repoAdminTeamMatchedOn,
+      repo_admin_probe_error: repoAdminProbeError,
       requester_authorization_path: requesterAuthorizationPath,
       requester_org_role: requesterOrgRole,
       repo_admin_team_slug: repoAdminTeamSlug,
