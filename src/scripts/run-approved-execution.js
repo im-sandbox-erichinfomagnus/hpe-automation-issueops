@@ -62,6 +62,10 @@ const { createGitHubRepoRulesetsApi } = require('../workflow-support/github-repo
 const { assertRunnerGroupCreationAllowed: assertTenantVariablesMutationAllowed } = require('../actions/runner-group-policy');
 const { assertTenantSelfServeMutationAllowed } = require('../actions/tenant-self-serve-policy');
 const { assertRunnerGroupCreationAllowed: assertRepositoryRulesetMutationAllowed } = require('../actions/runner-group-policy');
+
+// Fast-lane ops accept a policy auto-approval from a tenant CI/CD role holder in addition to the
+// designated org owner. Applied per call site so the shared policy default (and rulesets) are unchanged.
+const FAST_LANE_APPROVER_ROLES = ['target_org_owner', 'tenant_role_holder'];
 const { emitAuditSummary } = require('./emit-audit-summary');
 
 function terminalStateLabelPrefix(operation) {
@@ -2703,7 +2707,7 @@ async function runApprovedExecution(options = {}) {
             approver_authorization_state: auditArtifact.approval.approver_authorization_state,
             dry_run: auditArtifact.request.dry_run,
             tokenInfo: options.tokenInfo,
-          })
+          }, { allowedApproverRoles: FAST_LANE_APPROVER_ROLES })
       : isRunnerGroupCreation
         ? assertRunnerGroupCreationAllowed({
             approval_status: auditArtifact.approval.approval_status,
@@ -2713,7 +2717,7 @@ async function runApprovedExecution(options = {}) {
             approver_authorization_state: auditArtifact.approval.approver_authorization_state,
             dry_run: auditArtifact.request.dry_run,
             tokenInfo: options.tokenInfo,
-          })
+          }, { allowedApproverRoles: FAST_LANE_APPROVER_ROLES })
       : isOrgVariableManagement
         ? assertTenantSelfServeMutationAllowed({
             approval_status: auditArtifact.approval.approval_status,
@@ -2729,7 +2733,7 @@ async function runApprovedExecution(options = {}) {
             approver_authorization_state: auditArtifact.approval.approver_authorization_state,
             dry_run: auditArtifact.request.dry_run,
             tokenInfo: options.tokenInfo,
-          })
+          }, { allowedApproverRoles: FAST_LANE_APPROVER_ROLES })
       : (isTenantSubteamCreation || isRepoAdminMembership || isCicdAdminMembership || isTenantCreation || isTenantRepoCreation)
         ? assertTenantSelfServeMutationAllowed({
             approval_status: auditArtifact.approval.approval_status,

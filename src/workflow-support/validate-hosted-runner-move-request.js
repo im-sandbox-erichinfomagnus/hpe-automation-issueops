@@ -28,6 +28,7 @@ function buildCanonicalTenantContext(tenantResolution) {
     cicd_admin_team_matched_on: resolvedContext.cicd_admin_team_matched_on || null,
     governance_relation_status: resolvedContext.governance_relation_status,
     requester_cicd_membership_state: resolvedContext.requester_cicd_membership_state,
+    requester_authorization_path: resolvedContext.requester_authorization_path || 'none',
     tenant_match_count: tenantResolution.tenant_match_count,
     tenant_resolution_status: tenantResolution.tenant_resolution_status,
     context_marker: resolvedContext.context_marker,
