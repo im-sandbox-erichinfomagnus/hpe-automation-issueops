@@ -116,6 +116,15 @@ function orderedCicdTeamCandidates(input = {}) {
   });
 }
 
+// Single definition of the matched_on -> authorization-path mapping. The CI/CD gate
+// accepts the tenant admin team as an equivalent CI/CD role, so both map to a holder.
+function cicdAuthorizationPath(matchedOn) {
+  if (matchedOn === 'cicd-admin') {
+    return 'tenant_cicd_admin_team';
+  }
+  return matchedOn === 'admin' ? 'tenant_admin_maintainer' : 'none';
+}
+
 // Shared by the runner resolver and the tenant-variables validator so the two CI/CD
 // gates cannot drift. Stops at the first team the requester is active in.
 async function probeCicdTeamMembership(input = {}) {
@@ -277,6 +286,7 @@ async function resolveTenantCicdContextFromRegistry(input = {}, options = {}) {
       cicd_admin_team_exists: eligibleCicdTeams.length > 0,
       governance_relation_status: governanceRelationStatus,
       requester_cicd_membership_state: requesterCicdMembershipState,
+      requester_authorization_path: cicdAuthorizationPath(cicdProbe.cicd_admin_team_matched_on),
       authorization_status: authorizationStatus,
       source_file: record._source_file,
     });
@@ -330,6 +340,7 @@ async function resolveTenantCicdContextFromRegistry(input = {}, options = {}) {
 
 module.exports = {
   buildCicdContextMarker,
+  cicdAuthorizationPath,
   buildTenantNamespacePrefix,
   deriveCanonicalTenantTeams,
   deriveCicdAdminTeam,

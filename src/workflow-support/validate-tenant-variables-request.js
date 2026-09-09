@@ -11,7 +11,7 @@ const {
   parseTenantVariablesRequest,
 } = require('./parse-tenant-variables-request');
 const { readTenantRegistryRecords } = require('./resolve-tenant-context-from-registry');
-const { readTopologyView, probeCicdTeamMembership } = require('./resolve-tenant-cicd-context-from-registry');
+const { readTopologyView, probeCicdTeamMembership, cicdAuthorizationPath } = require('./resolve-tenant-cicd-context-from-registry');
 
 function normalizeLogin(value) {
   return String(value || '').trim().toLowerCase();
@@ -395,6 +395,7 @@ async function validateTenantVariablesRequest(input = {}, options = {}) {
       requester_membership_state: requesterMembershipState,
       requester_cicd_membership_state: requesterCicdMembershipState,
       cicd_admin_team_matched_on: cicdAdminTeamMatchedOn,
+      requester_authorization_path: cicdAuthorizationPath(cicdAdminTeamMatchedOn),
       variable_operation: variableOperation,
       variable_prefix: prefix,
       variable_plan: planEntries,

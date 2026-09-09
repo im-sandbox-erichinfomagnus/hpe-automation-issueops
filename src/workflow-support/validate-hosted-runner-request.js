@@ -341,6 +341,7 @@ async function validateHostedRunnerRequest(input = {}, options = {}) {
       tenant_resolution_status: tenantResolution.tenant_resolution_status,
       governance_relation_status: canonicalTenantContext ? canonicalTenantContext.governance_relation_status : 'unknown',
       requester_cicd_membership_state: canonicalTenantContext ? canonicalTenantContext.requester_cicd_membership_state : 'unknown',
+      requester_authorization_path: canonicalTenantContext ? canonicalTenantContext.requester_authorization_path : 'none',
       context_marker: canonicalTenantContext ? canonicalTenantContext.context_marker : '',
       runner_name_derivation: request.runner_name_derivation,
       runner_exists: runnerExists,

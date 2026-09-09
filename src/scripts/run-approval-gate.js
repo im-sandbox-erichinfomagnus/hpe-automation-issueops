@@ -89,6 +89,26 @@ function buildAssignmentNote(operation) {
   return 'Central issue assignment is for queue ownership only and does not authorize membership mutation.';
 }
 
+// CI/CD-gated ops whose requester gate already proves the tenant CI/CD role at intake,
+// so a role holder does not additionally wait for an approval comment.
+const CICD_FAST_LANE_OPERATIONS = [
+  'hosted_runner_creation',
+  'hosted_runner_deletion',
+  'hosted_runner_move',
+  'runner_group_creation',
+  'tenant_variable_management',
+];
+
+const CICD_ROLE_HOLDER_PATHS = ['tenant_cicd_admin_team', 'tenant_admin_maintainer'];
+
+function isCicdRoleHolderFastLane(operation, auditArtifact) {
+  if (!CICD_FAST_LANE_OPERATIONS.includes(String(operation || ''))) {
+    return false;
+  }
+  const findings = auditArtifact.validation && auditArtifact.validation.validation_findings;
+  return Boolean(findings) && CICD_ROLE_HOLDER_PATHS.includes(findings.requester_authorization_path);
+}
+
 async function runApprovalGate(options = {}) {
   const env = options.env || process.env;
   const shouldSetProcessExitCode = options.setProcessExitCode !== false && env === process.env;
@@ -171,6 +191,61 @@ async function runApprovalGate(options = {}) {
     writeGitHubOutput('audit-artifact-name', path.basename(artifactPath), env.GITHUB_OUTPUT);
     writeGitHubOutput('audit-artifact-retention-days', env.AUDIT_ARTIFACT_RETENTION_DAYS || '', env.GITHUB_OUTPUT);
     return selfServeArtifact;
+  }
+
+  if (isCicdRoleHolderFastLane(operation, auditArtifact)) {
+    auditArtifact.assignment = auditArtifact.assignment || {
+      assignment_status: 'not_attempted',
+      assigned_login: '',
+      assignment_note: 'Central issue assignment is skipped because the requester holds the tenant CI/CD role.',
+      assigned_at: null,
+    };
+    const authorizationPath = auditArtifact.validation.validation_findings.requester_authorization_path;
+    auditArtifact.approval = {
+      approval_status: 'approved',
+      approver_login: auditArtifact.request.requester_login || '',
+      approver_role: 'tenant_role_holder',
+      approver_authorization_state: 'authorized',
+      approved_context_marker: auditArtifact.request.context_marker || null,
+      latest_context_marker: auditArtifact.request.context_marker || null,
+      approved_at: new Date().toISOString(),
+      decision_source: 'policy',
+      decision_note: `No approval comment is required because the requester holds the tenant CI/CD role (${authorizationPath}); requester authorization was validated at intake.`,
+    };
+    auditArtifact.request.request_status = 'approved';
+    auditArtifact.execution.summary = 'Request is validated and proceeds directly to execution because the requester holds the tenant CI/CD role. No mutation was attempted in this phase.';
+
+    const fastLaneArtifact = buildAuditArtifact({
+      request: auditArtifact.request,
+      validation: auditArtifact.validation,
+      assignment: auditArtifact.assignment,
+      approval: auditArtifact.approval,
+      reconciliationPlan: auditArtifact.reconciliation,
+      executionOutcome: auditArtifact.execution,
+      runContext: {
+        run_id: env.GITHUB_RUN_ID || auditArtifact.metadata && auditArtifact.metadata.run_id,
+        run_attempt: env.GITHUB_RUN_ATTEMPT || auditArtifact.metadata && auditArtifact.metadata.run_attempt,
+        operation: auditArtifact.metadata && auditArtifact.metadata.operation,
+      },
+    });
+
+    fs.writeFileSync(artifactPath, toAuditArtifactJson({
+      request: fastLaneArtifact.request,
+      validation: fastLaneArtifact.validation,
+      assignment: fastLaneArtifact.assignment,
+      approval: fastLaneArtifact.approval,
+      executionOutcome: fastLaneArtifact.execution,
+      runContext: fastLaneArtifact.metadata,
+      reconciliationPlan: fastLaneArtifact.reconciliation,
+    }), 'utf8');
+
+    emitAuditSummary(fastLaneArtifact, { summaryPath: env.GITHUB_STEP_SUMMARY, overwrite: true });
+    writeGitHubOutput('approval-status', 'approved', env.GITHUB_OUTPUT);
+    writeGitHubOutput('assigned-login', fastLaneArtifact.assignment.assigned_login || '', env.GITHUB_OUTPUT);
+    writeGitHubOutput('audit-artifact-path', artifactPath, env.GITHUB_OUTPUT);
+    writeGitHubOutput('audit-artifact-name', path.basename(artifactPath), env.GITHUB_OUTPUT);
+    writeGitHubOutput('audit-artifact-retention-days', env.AUDIT_ARTIFACT_RETENTION_DAYS || '', env.GITHUB_OUTPUT);
+    return fastLaneArtifact;
   }
 
   auditArtifact.assignment = auditArtifact.assignment || {
