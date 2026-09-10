@@ -3,6 +3,7 @@
 const crypto = require('crypto');
 
 const { readTenantRegistryRecords } = require('./resolve-tenant-context-from-registry');
+const { orderedTeamCandidates, probeTeamMembership } = require('./probe-team-membership');
 
 function normalizeLogin(value) {
   return String(value || '').trim().toLowerCase();
@@ -101,76 +102,46 @@ function readTopologyView(record = {}) {
 // Release sheet order: CICDAdmins is the primary CI/CD role, the tenant admin team is
 // the accepted fallback. teamExists, when supplied, drops teams absent from the org so
 // a tenant without a dedicated cicd-admin team still authorizes against admin.
-function orderedCicdTeamCandidates(input = {}) {
-  const seen = new Set();
+function cicdTeamSlugCandidates(input = {}) {
   return [
-    { slug: normalizeLogin(input.cicdAdminTeamSlug), matched_on: 'cicd-admin' },
-    { slug: normalizeLogin(input.adminTeamSlug), matched_on: 'admin' },
-  ].filter((candidate) => {
-    if (!candidate.slug || seen.has(candidate.slug)) {
-      return false;
-    }
-    seen.add(candidate.slug);
-    return typeof input.teamExists === 'function' ? Boolean(input.teamExists(candidate.slug)) : true;
+    { slug: input.cicdAdminTeamSlug, matched_on: 'cicd-admin' },
+    { slug: input.adminTeamSlug, matched_on: 'admin' },
+  ];
+}
+
+function orderedCicdTeamCandidates(input = {}) {
+  return orderedTeamCandidates({
+    teamSlugs: cicdTeamSlugCandidates(input),
+    teamExists: input.teamExists,
   });
 }
 
-function normalizeMembershipState(membership) {
-  const state = membership && membership.state ? String(membership.state).toLowerCase() : 'absent';
-  const role = membership && membership.membership && membership.membership.role
-    ? String(membership.membership.role).toLowerCase()
-    : '';
-
-  if (state === 'active') {
-    return role === 'maintainer' ? 'active_maintainer' : 'active_member';
+// Single definition of the matched_on -> authorization-path mapping. The CI/CD gate
+// accepts the tenant admin team as an equivalent CI/CD role, so both map to a holder.
+function cicdAuthorizationPath(matchedOn) {
+  if (matchedOn === 'cicd-admin') {
+    return 'tenant_cicd_admin_team';
   }
-  return state === 'pending' ? 'pending' : state === 'absent' ? 'absent' : 'unknown';
-}
-
-function isActiveCicdMembershipState(state) {
-  return state === 'active_member' || state === 'active_maintainer';
+  return matchedOn === 'admin' ? 'tenant_admin_maintainer' : 'none';
 }
 
 // Shared by the runner resolver and the tenant-variables validator so the two CI/CD
 // gates cannot drift. Stops at the first team the requester is active in.
 async function probeCicdTeamMembership(input = {}) {
-  const candidates = orderedCicdTeamCandidates(input);
-  const base = {
-    cicd_admin_team_slug: candidates.length ? candidates[0].slug : '',
-    cicd_admin_team_matched_on: null,
-    candidate_team_slugs: candidates.map((candidate) => candidate.slug),
-    membership_state: 'unknown',
-    authorized: false,
-  };
-
-  if (typeof input.getMembershipForUser !== 'function' || candidates.length === 0) {
-    return base;
-  }
-
-  const observedStates = [];
-  for (const candidate of candidates) {
-    const membership = await input.getMembershipForUser({
-      organization: input.organization,
-      teamSlug: candidate.slug,
-      username: input.username,
-    });
-    const membershipState = normalizeMembershipState(membership);
-    observedStates.push(membershipState);
-
-    if (isActiveCicdMembershipState(membershipState)) {
-      return {
-        ...base,
-        cicd_admin_team_slug: candidate.slug,
-        cicd_admin_team_matched_on: candidate.matched_on,
-        membership_state: membershipState,
-        authorized: true,
-      };
-    }
-  }
+  const result = await probeTeamMembership({
+    organization: input.organization,
+    username: input.username,
+    getMembershipForUser: input.getMembershipForUser,
+    teamSlugs: cicdTeamSlugCandidates(input),
+    teamExists: input.teamExists,
+  });
 
   return {
-    ...base,
-    membership_state: observedStates.includes('unknown') ? 'unknown' : observedStates[0],
+    cicd_admin_team_slug: result.team_slug,
+    cicd_admin_team_matched_on: result.matched_on,
+    candidate_team_slugs: result.candidate_team_slugs,
+    membership_state: result.membership_state,
+    authorized: result.authorized,
   };
 }
 
@@ -315,6 +286,7 @@ async function resolveTenantCicdContextFromRegistry(input = {}, options = {}) {
       cicd_admin_team_exists: eligibleCicdTeams.length > 0,
       governance_relation_status: governanceRelationStatus,
       requester_cicd_membership_state: requesterCicdMembershipState,
+      requester_authorization_path: cicdAuthorizationPath(cicdProbe.cicd_admin_team_matched_on),
       authorization_status: authorizationStatus,
       source_file: record._source_file,
     });
@@ -368,6 +340,7 @@ async function resolveTenantCicdContextFromRegistry(input = {}, options = {}) {
 
 module.exports = {
   buildCicdContextMarker,
+  cicdAuthorizationPath,
   buildTenantNamespacePrefix,
   deriveCanonicalTenantTeams,
   deriveCicdAdminTeam,

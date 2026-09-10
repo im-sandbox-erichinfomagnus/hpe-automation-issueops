@@ -16,6 +16,7 @@ const { hashAttachmentContent } = require('./hash-attachment-content');
 const { resolveCsvAttachmentComment } = require('./resolve-csv-attachment-comment');
 const { readTenantRegistryRecords } = require('./resolve-tenant-context-from-registry');
 const { readTopologyView } = require('./resolve-tenant-cicd-context-from-registry');
+const { probeTeamMembership } = require('./probe-team-membership');
 
 const CICD_ADMIN_TEAM_SUFFIX = '-cicd-admin';
 
@@ -347,11 +348,17 @@ async function validateCicdAdminMembershipRequest(input = {}, options = {}) {
   const tenantTeamSlug = resolvedView ? resolvedView.tenant_root_team_slug : '';
   const cicdAdminTeamSlug = deriveDedicatedCicdAdminTeamSlug(tenantKey);
 
-  // Authorization gate: only an active maintainer of the tenant root team (a
-  // Tenant Admin) may call this operation. This is intentionally stricter than
-  // the tenant-variables OR-gate per the design doc for NetGear-GHAS-TAS#26.
+  // Authorization gate: an active maintainer of the tenant root team (a Tenant
+  // Admin), or an active member of the tenant CI/CD admin team, may call this
+  // operation. The CI/CD-team path was added for the 1.0.6 approver model; the
+  // gate was previously root-maintainer only, which left CI/CD admins unable to
+  // manage their own team.
   let requesterMembershipState = 'unknown';
   let isTopTeamMaintainer = false;
+  let isCicdAdminTeamMember = false;
+  let requesterCicdMembershipState = 'unknown';
+  let cicdAdminTeamMatchedOn = null;
+  let cicdAdminProbeError = null;
   if (resolvedView && !tenantTeamSlug) {
     errors.push(`Tenant '${tenantDisplayName}' has no resolvable top team and cannot authorize CI/CD admin membership management.`);
   } else if (resolvedView && typeof options.getMembershipForUser === 'function') {
@@ -374,10 +381,37 @@ async function validateCicdAdminMembershipRequest(input = {}, options = {}) {
           : 'unknown';
     isTopTeamMaintainer = requesterMembershipState === 'active_maintainer';
 
-    if (!isTopTeamMaintainer) {
-      errors.push(`Requester '${request.requester_login}' is not an active maintainer of the tenant top team '${tenantTeamSlug}' and cannot manage CI/CD admin membership for tenant '${tenantDisplayName}'.`);
+    // A probe failure must not deny a requester the pre-1.0.6 gate would have allowed, so it
+    // degrades to top-team maintainership instead of propagating.
+    try {
+      const cicdAdminProbe = await probeTeamMembership({
+        organization,
+        username: requesterLogin,
+        getMembershipForUser: options.getMembershipForUser,
+        teamSlugs: [cicdAdminTeamSlug],
+      });
+      isCicdAdminTeamMember = cicdAdminProbe.authorized;
+      requesterCicdMembershipState = cicdAdminProbe.membership_state;
+      cicdAdminTeamMatchedOn = cicdAdminProbe.matched_on;
+    } catch (error) {
+      cicdAdminProbeError = error && error.message ? error.message : 'unknown error';
+      warnings.push(
+        `Could not inspect membership of the tenant CI/CD admin team '${cicdAdminTeamSlug}' (${cicdAdminProbeError}); authorization fell back to tenant top-team maintainership.`
+      );
+    }
+
+    if (!isTopTeamMaintainer && !isCicdAdminTeamMember) {
+      errors.push(`Requester '${request.requester_login}' is not an active maintainer of the tenant top team '${tenantTeamSlug}' and is not an active member of the tenant CI/CD admin team '${cicdAdminTeamSlug}' and cannot manage CI/CD admin membership for tenant '${tenantDisplayName}'.`);
     }
   }
+
+  // Names the tenant role the requester actually holds. The gate above is an OR, so
+  // its evaluation order carries no meaning; this records the most specific role.
+  const requesterAuthorizationPath = isCicdAdminTeamMember
+    ? 'tenant_cicd_admin_team'
+    : isTopTeamMaintainer
+      ? 'tenant_admin_maintainer'
+      : 'none';
 
   let rootTeamExists = false;
   let rootTeamId = null;
@@ -478,6 +512,9 @@ async function validateCicdAdminMembershipRequest(input = {}, options = {}) {
         tenant_team_slug: tenantTeamSlug,
         cicd_admin_team_slug: cicdAdminTeamSlug,
         requester_membership_state: requesterMembershipState,
+        requester_cicd_membership_state: requesterCicdMembershipState,
+        cicd_admin_team_matched_on: cicdAdminTeamMatchedOn,
+        requester_authorization_path: requesterAuthorizationPath,
         tenant_resolution_status: tenantResolutionStatus,
         context_marker: contextMarker,
       }
@@ -539,6 +576,10 @@ async function validateCicdAdminMembershipRequest(input = {}, options = {}) {
     validation_findings: {
       tenant_resolution_status: tenantResolutionStatus,
       requester_membership_state: requesterMembershipState,
+      requester_cicd_membership_state: requesterCicdMembershipState,
+      cicd_admin_team_matched_on: cicdAdminTeamMatchedOn,
+      cicd_admin_probe_error: cicdAdminProbeError,
+      requester_authorization_path: requesterAuthorizationPath,
       cicd_admin_team_slug: cicdAdminTeamSlug,
       cicd_admin_team_exists: cicdAdminTeamExists,
       team_action: plan.team_action,

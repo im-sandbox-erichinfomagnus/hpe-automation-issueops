@@ -205,7 +205,10 @@ test('US1 validation rejects requesters outside the CI/CD admin team', async () 
   );
 });
 
-test('US2 designated active-owner approval unlocks execution; non-designated approval is denied', async () => {
+// 1.0.6: this requester holds the tenant CI/CD role, so the fast lane approves by policy before any
+// comment is considered. The second half now asserts that a non-designated comment cannot become the
+// approver, rather than that it yields 'denied' — a role holder no longer needs a comment at all.
+test('US2 a tenant CI/CD role holder is approved by policy and a non-designated comment never becomes the approver', async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'hosted-runner-us2-'));
   const artifactPath = path.join(workspace, 'audit.json');
   const registryDir = buildRunnerRegistry(workspace);
@@ -218,7 +221,8 @@ test('US2 designated active-owner approval unlocks execution; non-designated app
 
   let artifact = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
   assert.equal(artifact.approval.approval_status, 'approved');
-  assert.equal(artifact.approval.approver_role, 'target_org_owner');
+  assert.equal(artifact.approval.approver_role, 'tenant_role_holder');
+  assert.equal(artifact.approval.decision_source, 'policy');
   assert.equal(artifact.request.request_status, 'approved');
   assert.equal(artifact.approval.approved_context_marker, artifact.request.context_marker);
 
@@ -241,8 +245,11 @@ test('US2 designated active-owner approval unlocks execution; non-designated app
   });
 
   artifact = JSON.parse(fs.readFileSync(deniedArtifactPath, 'utf8'));
-  assert.equal(artifact.approval.approval_status, 'denied');
-  assert.match(artifact.approval.decision_note, /tenant hosted-runner creation/i);
+  assert.equal(artifact.approval.approval_status, 'approved');
+  assert.equal(artifact.approval.decision_source, 'policy');
+  assert.equal(artifact.approval.approver_login, 'tenant-cicd-admin');
+  assert.notEqual(artifact.approval.approver_login, 'not-the-designated-approver');
+  assert.notEqual(artifact.approval.approver_role, 'target_org_owner');
 });
 
 test('US3 happy path creates the hosted runner in the resolved default group', async () => {
