@@ -102,7 +102,7 @@ function normalizeLifecycleStatus(value) {
   if (['blocked', 'inactive', 'suspended'].includes(normalized)) {
     return 'blocked';
   }
-  if (['partial_failure', 'partial-failure', 'failed_after_approved_execution', 'partially_executed'].includes(normalized)) {
+  if (['partial_failure', 'partial-failure', 'approved_failed', 'failed_after_approved_execution', 'partially_executed'].includes(normalized)) {
     return 'partial_failure';
   }
   if (['decommissioned', 'retired'].includes(normalized)) {

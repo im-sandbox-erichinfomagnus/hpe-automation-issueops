@@ -153,7 +153,7 @@ jobs:
           for label in \
             "issueops:add-team-repo-access:executed" \
             "issueops:add-team-repo-access:partially_executed" \
-            "issueops:add-team-repo-access:failed_after_approved_execution" \
+            "issueops:add-team-repo-access:approved_failed" \
             "issueops:add-team-repo-access:failed"; do
             gh label create "$label" \
               --repo "${{ github.repository }}" \

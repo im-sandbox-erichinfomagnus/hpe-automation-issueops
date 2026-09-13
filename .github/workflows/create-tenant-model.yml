@@ -180,7 +180,7 @@ jobs:
           for label in \
             "issueops:create-tenant:executed" \
             "issueops:create-tenant:partially_executed" \
-            "issueops:create-tenant:failed_after_approved_execution" \
+            "issueops:create-tenant:approved_failed" \
             "issueops:create-tenant:failed"; do
             gh label create "$label" \
               --repo "${{ github.repository }}" \

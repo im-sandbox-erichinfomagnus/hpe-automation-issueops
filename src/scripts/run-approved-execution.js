@@ -108,9 +108,13 @@ function buildTerminalLabelPrefixes(operation) {
   return [...new Set(prefixes)];
 }
 
+// GitHub rejects a label name longer than 50 characters, and the prefixes here run to 37,
+// so a status written into a label has to stay short. approved_failed keeps the longest
+// label the code can produce to 48.
+const TERMINAL_STATE_LABEL_STATUSES = ['executed', 'partially_executed', 'approved_failed', 'failed'];
+
 function buildTerminalStateLabels(prefixes = []) {
-  const statuses = ['executed', 'partially_executed', 'failed_after_approved_execution', 'failed'];
-  return prefixes.flatMap((prefix) => statuses.map((status) => `${prefix}${status}`));
+  return prefixes.flatMap((prefix) => TERMINAL_STATE_LABEL_STATUSES.map((status) => `${prefix}${status}`));
 }
 
 function readAuditArtifact(filePath) {
@@ -425,7 +429,7 @@ function deriveApprovedExecutionTerminalState(executionOutcome, options = {}) {
     operation === 'team_hierarchy' &&
     intakeMode === 'csv_attachment'
   ) {
-    return 'failed_after_approved_execution';
+    return 'approved_failed';
   }
 
   return baseStatus;

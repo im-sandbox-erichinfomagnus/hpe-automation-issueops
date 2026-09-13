@@ -166,7 +166,7 @@ jobs:
           for label in \
             "issueops:add-team-members:executed" \
             "issueops:add-team-members:partially_executed" \
-            "issueops:add-team-members:failed_after_approved_execution" \
+            "issueops:add-team-members:approved_failed" \
             "issueops:add-team-members:failed"; do
             gh label create "$label" \
               --repo "${{ github.repository }}" \

@@ -41,8 +41,8 @@ function requiredStatuses(operation) {
     { operation, intakeMode: 'csv_attachment', approvalStatus: 'approved' },
   );
 
-  if (totalFailureAfterApproval === 'failed_after_approved_execution') {
-    statuses.push('failed_after_approved_execution');
+  if (totalFailureAfterApproval === 'approved_failed') {
+    statuses.push('approved_failed');
   }
 
   return statuses;

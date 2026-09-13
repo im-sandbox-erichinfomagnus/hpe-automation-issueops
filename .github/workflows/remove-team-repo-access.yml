@@ -164,7 +164,7 @@ jobs:
           for label in \
             "issueops:remove-team-repo-access:executed" \
             "issueops:remove-team-repo-access:partially_executed" \
-            "issueops:remove-team-repo-access:failed_after_approved_execution" \
+            "issueops:remove-team-repo-access:approved_failed" \
             "issueops:remove-team-repo-access:failed"; do
             gh label create "$label" \
               --repo "${{ github.repository }}" \

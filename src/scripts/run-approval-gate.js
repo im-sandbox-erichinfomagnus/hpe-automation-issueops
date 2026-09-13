@@ -124,7 +124,7 @@ async function runApprovalGate(options = {}) {
     (operation === 'team_membership' || operation === 'team_creation' || operation === 'team_hierarchy' || operation === 'team_repo_access' || operation === 'team_repo_access_removal' || operation === 'tenant_creation' || operation === 'tenant_repo_creation' || operation === 'tenant_subteam_creation' || operation === 'repo_admin_membership' || operation === 'cicd_admin_membership') &&
     auditArtifact.request &&
     auditArtifact.request.intake_mode === 'csv_attachment' &&
-    ['executed', 'partially_executed', 'failed', 'failed_after_approved_execution'].includes(auditArtifact.request.request_status)
+    ['executed', 'partially_executed', 'failed', 'approved_failed', 'failed_after_approved_execution'].includes(auditArtifact.request.request_status)
   ) {
     writeGitHubOutput('approval-status', 'not_requested', env.GITHUB_OUTPUT);
     emitAuditSummary(auditArtifact, { summaryPath: env.GITHUB_STEP_SUMMARY, overwrite: true });
