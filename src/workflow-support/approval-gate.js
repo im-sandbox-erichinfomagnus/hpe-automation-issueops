@@ -96,7 +96,7 @@ function buildPendingApprovalNote(approvalMode, approvalCommand) {
   }
 
   if (approvalMode === 'tenant_creation') {
-    return `Add an issue comment containing exactly '${approvalCommand}' from the designated active target organization owner to authorize execution.`;
+    return `Add an issue comment containing exactly '${approvalCommand}' from the tenant admin named on the request, or from an active target organization owner, to authorize execution. If the requester named themselves as tenant admin, only an organization owner can authorize it.`;
   }
 
   if (approvalMode === 'tenant_repo_creation') {
@@ -128,7 +128,7 @@ function buildPendingAttachmentApprovalNote(approvalMode, approvalCommand) {
   }
 
   if (approvalMode === 'tenant_creation') {
-    return `Add an issue comment containing exactly '${approvalCommand}' from the designated active target organization owner after the accepted CSV attachment comment to authorize execution.`;
+    return `Add an issue comment containing exactly '${approvalCommand}' from the tenant admin named on the request, or from an active target organization owner, after the accepted CSV attachment comment to authorize execution. If the requester named themselves as tenant admin, only an organization owner can authorize it.`;
   }
 
   if (approvalMode === 'tenant_repo_creation') {
@@ -454,6 +454,7 @@ async function evaluateApprovalGate(input = {}, options = {}) {
 module.exports = {
   APPROVAL_COMMAND,
   buildPendingApprovalNote,
+  buildPendingAttachmentApprovalNote,
   evaluateApprovalGate,
   findLatestApprovalComment,
   isApprovalComment,

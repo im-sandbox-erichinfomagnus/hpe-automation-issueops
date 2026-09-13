@@ -5,7 +5,12 @@ const test = require('node:test');
 
 const { parseTenantCreationRequest } = require('../../src/workflow-support/parse-tenant-creation-request');
 const { validateTenantCreationRequest } = require('../../src/workflow-support/validate-tenant-creation-request');
-const { evaluateApprovalGate } = require('../../src/workflow-support/approval-gate');
+const {
+  evaluateApprovalGate,
+  buildPendingApprovalNote,
+  buildPendingAttachmentApprovalNote,
+  APPROVAL_COMMAND,
+} = require('../../src/workflow-support/approval-gate');
 const {
   TENANT_SELF_SERVE_OPERATIONS,
   isTenantSelfServeOperation,
@@ -248,5 +253,56 @@ test('tenant creation execution still requires approval and an organization-muta
       tokenInfo: adequateToken,
     }).allowed,
     false
+  );
+});
+
+// The note a waiting approver actually reads. Piece 4 rewrote the approved and denied
+// notes for the new model and left both pending notes saying only an organization owner
+// could authorize - which tells the named tenant admin, the very person the request is
+// waiting on, that they are the wrong person. Asserted against the rule, not against the
+// module's own string.
+function assertNamesBothAuthorities(note, label) {
+  assert.match(note, /tenant admin/i, `${label} must name the tenant admin as an authority`);
+  assert.match(note, /organization owner/i, `${label} must still name the organization owner`);
+  assert.doesNotMatch(
+    note,
+    /from the designated active target organization owner to authorize/i,
+    `${label} must not name the organization owner as the only authority`
+  );
+}
+
+test('the pending approval note tells a tenant creation requester who can actually approve', () => {
+  const note = buildPendingApprovalNote('tenant_creation', APPROVAL_COMMAND);
+  assertNamesBothAuthorities(note, 'the manual-intake pending note');
+  assert.match(
+    note,
+    /named themselves|names themselves/i,
+    'the manual-intake pending note should say what happens when the requester self-nominates'
+  );
+});
+
+test('the attachment pending approval note names the same authorities', () => {
+  const note = buildPendingAttachmentApprovalNote('tenant_creation', APPROVAL_COMMAND);
+  assertNamesBothAuthorities(note, 'the csv_attachment pending note');
+});
+
+test('the pending note for other operations is unchanged by the tenant creation wording', () => {
+  // Only tenant_creation routes to a named tenant admin. Every other mode must keep its
+  // own authority wording, so this fails if the fix is applied too widely.
+  assert.match(
+    buildPendingApprovalNote('team_hierarchy', APPROVAL_COMMAND),
+    /designated hierarchy approver/i
+  );
+  assert.match(
+    buildPendingApprovalNote('team_creation', APPROVAL_COMMAND),
+    /active intended owner/i
+  );
+  assert.match(
+    buildPendingApprovalNote('tenant_repo_creation', APPROVAL_COMMAND),
+    /designated active target organization owner/i
+  );
+  assert.doesNotMatch(
+    buildPendingApprovalNote('tenant_repo_creation', APPROVAL_COMMAND),
+    /tenant admin/i
   );
 });
