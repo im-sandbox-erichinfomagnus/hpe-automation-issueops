@@ -68,7 +68,9 @@ recording guides.
   does not prevent authorized rows from being evaluated.
 - Re-running a completed request converges on current GitHub state. Operations
   that are already satisfied are reported as no-ops instead of being applied
-  again.
+  again. Two cases are rejected at validation instead: a ruleset deletion
+  naming a ruleset that does not exist, and a tenant repository whose name the
+  tenant already owns.
 
 ## Results and Audit Evidence
 
