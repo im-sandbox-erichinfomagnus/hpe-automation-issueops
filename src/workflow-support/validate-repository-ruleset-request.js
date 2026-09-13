@@ -327,8 +327,14 @@ async function validateRepositoryRulesetRequest(input = {}, options = {}) {
     if (rulesetOperation === 'create') {
       enriched.ruleset_payload = buildRepositoryRulesetPayload(entry);
       enriched.action = enriched.ruleset_exists ? 'noop' : 'create';
+    } else if (!enriched.ruleset_exists) {
+      // A delete naming a ruleset that is not there is a mistyped name, not a converged no-op.
+      enriched.failure_reason = 'ruleset_not_found';
+      warnings.push(`Ruleset '${rulesetName}' does not exist on '${organization}/${repository}'; there is nothing to delete and the row was rejected.`);
+      planEntries.push(enriched);
+      continue;
     } else {
-      enriched.action = enriched.ruleset_exists ? 'delete' : 'noop';
+      enriched.action = 'delete';
     }
     enriched.row_status = 'valid';
     planEntries.push(enriched);
