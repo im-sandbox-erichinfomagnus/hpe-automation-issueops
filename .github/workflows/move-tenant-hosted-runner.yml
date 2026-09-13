@@ -142,7 +142,7 @@ jobs:
           for label in \
             "issueops:move-tenant-hosted-runner:executed" \
             "issueops:move-tenant-hosted-runner:failed" \
-            "issueops:move-tenant-hosted-runner:partially_executed"; do
+            "issueops:move-tenant-hosted-runner:partial"; do
             gh label create "$label" \
               --repo "${{ github.repository }}" \
               --force 2>/dev/null || true

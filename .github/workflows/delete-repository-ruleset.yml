@@ -141,7 +141,7 @@ jobs:
           for label in \
             "issueops:delete-repository-ruleset:executed" \
             "issueops:delete-repository-ruleset:failed" \
-            "issueops:delete-repository-ruleset:partially_executed"; do
+            "issueops:delete-repository-ruleset:partial"; do
             gh label create "$label" \
               --repo "${{ github.repository }}" \
               --force 2>/dev/null || true

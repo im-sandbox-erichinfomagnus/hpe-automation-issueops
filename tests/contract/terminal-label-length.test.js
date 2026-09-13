@@ -6,18 +6,23 @@ const test = require('node:test');
 const {
   deriveApprovedExecutionTerminalState,
 } = require('../../src/scripts/run-approved-execution');
+const {
+  terminalStateLabel,
+  terminalStateLabelVariants,
+  labelSuffixForStatus,
+  statusForLabelSuffix,
+} = require('../../src/workflow-support/terminal-state-labels');
 
-// GitHub rejects a label whose name exceeds 50 characters with
+// GitHub rejects a label name longer than 50 characters with
 // HTTP 422 "name is too long (maximum is 50 characters)". The terminal state label is
-// built as <prefix><status>, and the prefixes run to 37 characters, so a status name
-// that reads well in an audit artifact can still be unusable as a label. That is not
-// hypothetical: issueops:add-child-teams:failed_after_approved_execution was 56
-// characters, so it could never be created and the one operation that reaches the
-// status was left with no terminal label at all.
+// <prefix><suffix> and the prefixes run to 37, so a status that reads well in an audit
+// artifact can still be unusable as a label. Two have been:
+// issueops:add-child-teams:failed_after_approved_execution was 56, and
+// issueops:create-tenant-hosted-runner:partially_executed is 55.
 const GITHUB_LABEL_MAX_LENGTH = 50;
 
 // Deliberately literal rather than imported: importing the map would assert it equals
-// itself, and the point here is to measure the strings that actually reach GitHub.
+// itself, and the point is to measure the strings that actually reach GitHub.
 const OPERATION_LABEL_PREFIXES = [
   ['team_creation', 'issueops:create-org-teams:'],
   ['team_hierarchy', 'issueops:add-child-teams:'],
@@ -39,14 +44,11 @@ const OPERATION_LABEL_PREFIXES = [
   ['repository_ruleset_deletion', 'issueops:delete-repository-ruleset:'],
 ];
 
-// partially_executed is deliberately excluded here and pinned separately below: it
-// overflows for ten operations, which is a second and wider instance of the same defect
-// and needs its own decision about migrating existing labels.
-const ALWAYS_REACHABLE_STATUSES = ['executed', 'failed'];
+const ALWAYS_REACHABLE_STATUSES = ['executed', 'partially_executed', 'failed'];
 
 // Ask the real derivation whether an operation can reach the post-approval failure
-// status, rather than hardcoding the answer. If the gate is ever widened, this test
-// starts measuring the newly reachable operations automatically.
+// status rather than hardcoding the answer, so widening that gate later brings newly
+// reachable operations under the guard automatically.
 function postApprovalFailureStatusFor(operation) {
   return deriveApprovedExecutionTerminalState(
     { failure_count: 1, mutation_count: 0, noop_count: 0, pending_count: 0 },
@@ -54,20 +56,24 @@ function postApprovalFailureStatusFor(operation) {
   );
 }
 
-test('every terminal state label an operation can reach fits GitHub label length limit', () => {
+function reachableStatusesFor(operation) {
+  const statuses = [...ALWAYS_REACHABLE_STATUSES];
+  const postApproval = postApprovalFailureStatusFor(operation);
+  if (!statuses.includes(postApproval)) {
+    statuses.push(postApproval);
+  }
+
+  return statuses;
+}
+
+test('every terminal state label the code can apply fits GitHub label length limit', () => {
   const tooLong = [];
 
   for (const [operation, prefix] of OPERATION_LABEL_PREFIXES) {
-    const statuses = [...ALWAYS_REACHABLE_STATUSES];
-    const postApproval = postApprovalFailureStatusFor(operation);
-    if (!statuses.includes(postApproval)) {
-      statuses.push(postApproval);
-    }
-
-    for (const status of statuses) {
-      const label = `${prefix}${status}`;
+    for (const status of reachableStatusesFor(operation)) {
+      const label = terminalStateLabel(prefix, status);
       if (label.length > GITHUB_LABEL_MAX_LENGTH) {
-        tooLong.push(`${label} (${label.length} chars, operation ${operation})`);
+        tooLong.push(`${label} (${label.length} chars, operation ${operation}, status ${status})`);
       }
     }
   }
@@ -79,46 +85,42 @@ test('every terminal state label an operation can reach fits GitHub label length
   );
 });
 
-test('the post-approval failure status is short enough for every prefix that could adopt it', () => {
-  // The six workflows changed for #114 create this label defensively, even where the
-  // status is not reachable today, so the name has to fit prefixes beyond the one
-  // operation that currently produces it.
-  const status = postApprovalFailureStatusFor('team_hierarchy');
-  assert.notEqual(status, 'failed', 'team_hierarchy must still reach a distinct post-approval failure status');
-
-  const defensivePrefixes = [
-    'issueops:create-org-teams:',
-    'issueops:add-child-teams:',
-    'issueops:add-team-members:',
-    'issueops:add-team-repo-access:',
-    'issueops:remove-team-repo-access:',
+test('a label that already fits keeps its exact spelling so live labels are not orphaned', () => {
+  // These eight are under the limit today and are applied on real issues in the sandbox
+  // and at HPE. Shortening them would strand every label already out there.
+  const alreadyFitting = [
     'issueops:create-tenant:',
+    'issueops:add-child-teams:',
+    'issueops:create-org-teams:',
+    'issueops:add-team-members:',
+    'issueops:create-tenant-repos:',
+    'issueops:manage-org-variables:',
+    'issueops:add-team-repo-access:',
+    'issueops:create-tenant-subteam:',
   ];
 
-  for (const prefix of defensivePrefixes) {
-    const label = `${prefix}${status}`;
-    assert.ok(
-      label.length <= GITHUB_LABEL_MAX_LENGTH,
-      `${label} is ${label.length} characters, over the ${GITHUB_LABEL_MAX_LENGTH} limit`
+  for (const prefix of alreadyFitting) {
+    assert.equal(
+      terminalStateLabel(prefix, 'partially_executed'),
+      `${prefix}partially_executed`,
+      `${prefix} already fits and must keep the long spelling`
     );
+  }
+
+  // executed and failed are short enough everywhere and must never be rewritten.
+  for (const [, prefix] of OPERATION_LABEL_PREFIXES) {
+    assert.equal(terminalStateLabel(prefix, 'executed'), `${prefix}executed`);
+    assert.equal(terminalStateLabel(prefix, 'failed'), `${prefix}failed`);
   }
 });
 
-// Pinned, not fixed. partially_executed is 18 characters and overflows for ten of the
-// eighteen prefixes, so those operations cannot label a partial execution - the same
-// failure mode as #114, on a far more commonly reached status. Shortening it means
-// changing a persisted request_status used across 43 files, or decoupling the label
-// suffix from the status value, and either way existing labels would be orphaned. That
-// is a separate decision. This test pins the exact known-bad set so the problem cannot
-// quietly grow, and fails the moment the set changes in either direction.
-test('the known partially_executed label overflow has not changed', () => {
-  const overflowing = OPERATION_LABEL_PREFIXES
-    .map(([operation, prefix]) => [operation, `${prefix}partially_executed`])
-    .filter(([, label]) => label.length > GITHUB_LABEL_MAX_LENGTH)
+test('only the prefixes that would overflow get the shortened suffix', () => {
+  const shortened = OPERATION_LABEL_PREFIXES
+    .filter(([, prefix]) => labelSuffixForStatus(prefix, 'partially_executed') !== 'partially_executed')
     .map(([operation]) => operation)
     .sort();
 
-  assert.deepEqual(overflowing, [
+  assert.deepEqual(shortened, [
     'cicd_admin_membership',
     'hosted_runner_creation',
     'hosted_runner_deletion',
@@ -129,7 +131,38 @@ test('the known partially_executed label overflow has not changed', () => {
     'runner_group_creation',
     'team_repo_access_removal',
     'tenant_variable_management',
-  ], 'the set of operations that cannot label a partial execution has changed - if it shrank, update this pin; if it grew, a new prefix has pushed another operation over the limit');
+  ], 'the set of operations needing a shortened suffix has changed');
+
+  // And every one of them now fits.
+  for (const [operation, prefix] of OPERATION_LABEL_PREFIXES) {
+    const label = terminalStateLabel(prefix, 'partially_executed');
+    assert.ok(
+      label.length <= GITHUB_LABEL_MAX_LENGTH,
+      `${label} is ${label.length} characters for ${operation}`
+    );
+  }
+});
+
+test('reading a label back accepts the long spelling that may already be live', () => {
+  // An issue labelled before this change carries the long form even for a prefix that
+  // now writes the short one. Both must resolve to the same status.
+  const overflowingPrefix = 'issueops:create-tenant-hosted-runner:';
+  const variants = terminalStateLabelVariants(overflowingPrefix, 'partially_executed');
+
+  assert.ok(
+    variants.includes(`${overflowingPrefix}partially_executed`),
+    'the older long spelling must still be recognised'
+  );
+  assert.ok(
+    variants.includes(`${overflowingPrefix}partial`),
+    'the new short spelling must be recognised'
+  );
+
+  assert.equal(statusForLabelSuffix('partial'), 'partially_executed');
+  assert.equal(statusForLabelSuffix('partially_executed'), 'partially_executed');
+  assert.equal(statusForLabelSuffix('executed'), 'executed');
+  assert.equal(statusForLabelSuffix('failed'), 'failed');
+  assert.equal(statusForLabelSuffix('approved_failed'), 'approved_failed');
 });
 
 test('the post-approval failure status stays distinguishable from a plain failure', () => {

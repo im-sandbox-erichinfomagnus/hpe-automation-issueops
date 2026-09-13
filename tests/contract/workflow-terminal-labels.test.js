@@ -6,6 +6,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const { deriveApprovedExecutionTerminalState } = require('../../src/scripts/run-approved-execution');
+const { terminalStateLabel } = require('../../src/workflow-support/terminal-state-labels');
 
 const WORKFLOWS_DIR = path.join(__dirname, '..', '..', '.github', 'workflows');
 
@@ -58,9 +59,17 @@ for (const [operation, workflow, prefix] of OPERATION_WORKFLOWS) {
     );
 
     for (const status of requiredStatuses(operation)) {
+      // The label suffix is not always the status: where the descriptive status would
+      // push the name past GitHub's 50-character limit it is shortened for that prefix
+      // only, so the workflow must create whichever spelling will actually be applied.
+      const label = terminalStateLabel(prefix, status);
       assert.ok(
-        workflowYaml.includes(`"${prefix}${status}"`),
-        `${workflow} must create the label ${prefix}${status}`,
+        label.length <= 50,
+        `${workflow} would need the label ${label}, which is ${label.length} characters`,
+      );
+      assert.ok(
+        workflowYaml.includes(`"${label}"`),
+        `${workflow} must create the label ${label}`,
       );
     }
   });

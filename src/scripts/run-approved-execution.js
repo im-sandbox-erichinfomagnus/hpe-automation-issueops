@@ -61,6 +61,7 @@ const { validateRepositoryRulesetRequest } = require('../workflow-support/valida
 const { createGitHubRepoRulesetsApi } = require('../workflow-support/github-repo-rulesets-api');
 const { assertRunnerGroupCreationAllowed: assertTenantVariablesMutationAllowed } = require('../actions/runner-group-policy');
 const { assertTenantSelfServeMutationAllowed } = require('../actions/tenant-self-serve-policy');
+const { terminalStateLabel, terminalStateLabelVariants } = require('../workflow-support/terminal-state-labels');
 const { assertRunnerGroupCreationAllowed: assertRepositoryRulesetMutationAllowed } = require('../actions/runner-group-policy');
 
 // Fast-lane ops accept a policy auto-approval from a tenant CI/CD role holder in addition to the
@@ -108,13 +109,13 @@ function buildTerminalLabelPrefixes(operation) {
   return [...new Set(prefixes)];
 }
 
-// GitHub rejects a label name longer than 50 characters, and the prefixes here run to 37,
-// so a status written into a label has to stay short. approved_failed keeps the longest
-// label the code can produce to 48.
 const TERMINAL_STATE_LABEL_STATUSES = ['executed', 'partially_executed', 'approved_failed', 'failed'];
 
+// Every spelling a managed terminal label may carry, so the stale-label sweep removes an
+// older long spelling instead of leaving it beside the new one.
 function buildTerminalStateLabels(prefixes = []) {
-  return prefixes.flatMap((prefix) => TERMINAL_STATE_LABEL_STATUSES.map((status) => `${prefix}${status}`));
+  return prefixes.flatMap((prefix) =>
+    TERMINAL_STATE_LABEL_STATUSES.flatMap((status) => terminalStateLabelVariants(prefix, status)));
 }
 
 function readAuditArtifact(filePath) {
@@ -744,7 +745,7 @@ async function executeTenantVariableManagement(context = {}) {
     typeof teamApi.addIssueLabels === 'function'
   ) {
     const labelPrefix = terminalStateLabelPrefix(operation);
-    const targetLabel = `${labelPrefix}${updatedArtifact.request.request_status}`;
+    const targetLabel = terminalStateLabel(labelPrefix, updatedArtifact.request.request_status);
     try {
       if (typeof teamApi.listIssueLabels === 'function' && typeof teamApi.removeIssueLabel === 'function') {
         const existingLabels = await teamApi.listIssueLabels({
@@ -949,7 +950,7 @@ async function executeOrgVariableManagement(context = {}) {
     typeof teamApi.addIssueLabels === 'function'
   ) {
     const labelPrefix = terminalStateLabelPrefix(operation);
-    const targetLabel = `${labelPrefix}${updatedArtifact.request.request_status}`;
+    const targetLabel = terminalStateLabel(labelPrefix, updatedArtifact.request.request_status);
     try {
       if (typeof teamApi.listIssueLabels === 'function' && typeof teamApi.removeIssueLabel === 'function') {
         const existingLabels = await teamApi.listIssueLabels({
@@ -1341,7 +1342,7 @@ async function executeTenantSubteamCreation(context = {}) {
     typeof teamApi.addIssueLabels === 'function'
   ) {
     const labelPrefix = terminalStateLabelPrefix(operation);
-    const targetLabel = `${labelPrefix}${updatedArtifact.request.request_status}`;
+    const targetLabel = terminalStateLabel(labelPrefix, updatedArtifact.request.request_status);
     try {
       if (typeof teamApi.listIssueLabels === 'function' && typeof teamApi.removeIssueLabel === 'function') {
         const existingLabels = await teamApi.listIssueLabels({
@@ -1750,7 +1751,7 @@ async function executeRepoAdminMembership(context = {}) {
     typeof teamApi.addIssueLabels === 'function'
   ) {
     const labelPrefix = terminalStateLabelPrefix(operation);
-    const targetLabel = `${labelPrefix}${updatedArtifact.request.request_status}`;
+    const targetLabel = terminalStateLabel(labelPrefix, updatedArtifact.request.request_status);
     try {
       if (typeof teamApi.listIssueLabels === 'function' && typeof teamApi.removeIssueLabel === 'function') {
         const existingLabels = await teamApi.listIssueLabels({
@@ -2159,7 +2160,7 @@ async function executeCicdAdminMembership(context = {}) {
     typeof teamApi.addIssueLabels === 'function'
   ) {
     const labelPrefix = terminalStateLabelPrefix(operation);
-    const targetLabel = `${labelPrefix}${updatedArtifact.request.request_status}`;
+    const targetLabel = terminalStateLabel(labelPrefix, updatedArtifact.request.request_status);
     try {
       if (typeof teamApi.listIssueLabels === 'function' && typeof teamApi.removeIssueLabel === 'function') {
         const existingLabels = await teamApi.listIssueLabels({
@@ -2375,7 +2376,7 @@ async function executeRepositoryRulesetManagement(context = {}) {
     typeof teamApi.addIssueLabels === 'function'
   ) {
     const labelPrefix = terminalStateLabelPrefix(operation);
-    const targetLabel = `${labelPrefix}${updatedArtifact.request.request_status}`;
+    const targetLabel = terminalStateLabel(labelPrefix, updatedArtifact.request.request_status);
     try {
       if (typeof teamApi.listIssueLabels === 'function' && typeof teamApi.removeIssueLabel === 'function') {
         const existingLabels = await teamApi.listIssueLabels({
@@ -2583,7 +2584,7 @@ async function executeTenantRepoCreationBatch(context = {}) {
     typeof teamApi.addIssueLabels === 'function'
   ) {
     const labelPrefix = terminalStateLabelPrefix(operation);
-    const targetLabel = `${labelPrefix}${updatedArtifact.request.request_status}`;
+    const targetLabel = terminalStateLabel(labelPrefix, updatedArtifact.request.request_status);
     try {
       if (typeof teamApi.listIssueLabels === 'function' && typeof teamApi.removeIssueLabel === 'function') {
         const existingLabels = await teamApi.listIssueLabels({
@@ -5208,7 +5209,7 @@ async function runApprovedExecution(options = {}) {
 
   if (shouldAddTerminalLabel) {
     const labelPrefix = terminalStateLabelPrefix(operation);
-    const targetLabel = `${labelPrefix}${updatedArtifact.request.request_status}`;
+    const targetLabel = terminalStateLabel(labelPrefix, updatedArtifact.request.request_status);
     try {
       if (typeof api.listIssueLabels === 'function' && typeof api.removeIssueLabel === 'function') {
         const existingLabels = await api.listIssueLabels({

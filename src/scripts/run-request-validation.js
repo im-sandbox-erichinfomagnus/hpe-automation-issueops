@@ -11,6 +11,7 @@ const { createGitHubRunnerApi } = require('../workflow-support/github-runner-api
 const { createGitHubOrgVariablesApi } = require('../workflow-support/github-org-variables-api');
 const { createGitHubRepoRulesetsApi } = require('../workflow-support/github-repo-rulesets-api');
 const { loadWorkflowToken } = require('../workflow-support/load-workflow-token');
+const { terminalStateLabelVariants } = require('../workflow-support/terminal-state-labels');
 const { parseTeamCreationRequest } = require('../workflow-support/parse-team-creation-request');
 const { parseTenantRepoRequest } = require('../workflow-support/parse-tenant-repo-request');
 const { parseTenantCreationRequest } = require('../workflow-support/parse-tenant-creation-request');
@@ -707,7 +708,9 @@ function deriveTerminalStatusFromIssueLabels(labels = [], operation = null) {
 
   for (const status of ['executed', 'partially_executed', 'approved_failed', 'failed_after_approved_execution', 'failed']) {
     for (const prefix of prefixes) {
-      if (labels.includes(`${prefix}${status}`)) {
+      // Accept every spelling this status may already be labelled under, so an issue
+      // carrying the older long form still resolves to the same status value.
+      if (terminalStateLabelVariants(prefix, status).some((label) => labels.includes(label))) {
         return status;
       }
     }

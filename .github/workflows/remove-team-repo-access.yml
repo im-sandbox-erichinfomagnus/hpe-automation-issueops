@@ -163,7 +163,7 @@ jobs:
           set -euo pipefail
           for label in \
             "issueops:remove-team-repo-access:executed" \
-            "issueops:remove-team-repo-access:partially_executed" \
+            "issueops:remove-team-repo-access:partial" \
             "issueops:remove-team-repo-access:approved_failed" \
             "issueops:remove-team-repo-access:failed"; do
             gh label create "$label" \
