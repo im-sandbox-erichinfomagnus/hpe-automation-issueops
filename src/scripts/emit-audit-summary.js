@@ -5,6 +5,33 @@ const path = require('path');
 
 const { determineOperation } = require('../workflow-support/build-audit-artifact');
 
+// Every supported operation declares its own summary header here. Without this the
+// branchless operations fall through to an unrelated branch and render its title.
+const OPERATION_SUMMARY_HEADERS = {
+  tenant_creation: '# Create Tenant Model Workflow Summary',
+  tenant_repo_creation: '# Create Tenant Repositories Workflow Summary',
+  tenant_subteam_creation: '# Create Tenant Subteam Workflow Summary',
+  hosted_runner_creation: '# Create Tenant GitHub-Hosted Runner Workflow Summary',
+  hosted_runner_deletion: '# Delete Tenant GitHub-Hosted Runner Workflow Summary',
+  hosted_runner_move: '# Move Tenant GitHub-Hosted Runner Workflow Summary',
+  runner_group_creation: '# Create Tenant Runner Group Workflow Summary',
+  cicd_admin_membership: '# Add CICD Admin to Tenant Workflow Summary',
+  repo_admin_membership: '# Add Repo Admin to Tenant Workflow Summary',
+  tenant_variable_management: '# Manage Tenant Variables Workflow Summary',
+  org_variable_management: '# Manage Org Variables Workflow Summary',
+  repository_ruleset_creation: '# Create Repository Ruleset Workflow Summary',
+  repository_ruleset_deletion: '# Delete Repository Ruleset Workflow Summary',
+  team_creation: '# Create Organization Teams Workflow Summary',
+  team_membership: '# Add Team Members Workflow Summary',
+  team_hierarchy: '# Add Child Teams Workflow Summary',
+  team_repo_access: '# Add Team Repository Access Workflow Summary',
+  team_repo_access_removal: '# Remove Team Repository Access Workflow Summary',
+};
+
+function resolveSummaryHeader(operation) {
+  return OPERATION_SUMMARY_HEADERS[String(operation || '')] || null;
+}
+
 function readBulkCsvCount(executionValue, submissionValue) {
   return executionValue ?? submissionValue ?? 0;
 }
@@ -18,6 +45,8 @@ function formatAuditSummary(auditArtifact = {}) {
   const execution = auditArtifact.execution || {};
   const metadata = auditArtifact.metadata || {};
   const operation = metadata.operation || determineOperation(request);
+  // Null for an unrecognised operation, so each branch keeps its original literal.
+  const summaryHeader = resolveSummaryHeader(operation);
   const isBulkCsv = request.intake_mode === 'bulk_csv';
   const isCsvAttachment = request.intake_mode === 'csv_attachment';
   const isTeamRepoAccess = operation === 'team_repo_access';
@@ -40,7 +69,7 @@ function formatAuditSummary(auditArtifact = {}) {
 
   if (isTenantRepoCreation) {
     return [
-      '# Create Tenant Repositories Workflow Summary',
+      summaryHeader || '# Create Tenant Repositories Workflow Summary',
       '',
       `- Request ID: ${request.request_id || 'n/a'}`,
       `- Repository: ${request.repository || 'n/a'}`,
@@ -146,11 +175,11 @@ function formatAuditSummary(auditArtifact = {}) {
 
   if (isHostedRunnerCreation || isHostedRunnerDeletion || isHostedRunnerMove) {
     return [
-      isHostedRunnerMove
+      summaryHeader || (isHostedRunnerMove
         ? '# Move Tenant GitHub-Hosted Runner Workflow Summary'
         : isHostedRunnerDeletion
         ? '# Delete Tenant GitHub-Hosted Runner Workflow Summary'
-        : '# Create Tenant GitHub-Hosted Runner Workflow Summary',
+        : '# Create Tenant GitHub-Hosted Runner Workflow Summary'),
       '',
       `- Request ID: ${request.request_id || 'n/a'}`,
       `- Repository: ${request.repository || 'n/a'}`,
@@ -236,7 +265,7 @@ function formatAuditSummary(auditArtifact = {}) {
 
   if (isRunnerGroupCreation) {
     return [
-      '# Create Tenant Runner Group Workflow Summary',
+      summaryHeader || '# Create Tenant Runner Group Workflow Summary',
       '',
       `- Request ID: ${request.request_id || 'n/a'}`,
       `- Repository: ${request.repository || 'n/a'}`,
@@ -300,7 +329,7 @@ function formatAuditSummary(auditArtifact = {}) {
 
   if (isTenantCreation) {
     return [
-      '# Create Tenant Model Workflow Summary',
+      summaryHeader || '# Create Tenant Model Workflow Summary',
       '',
       `- Request ID: ${request.request_id || 'n/a'}`,
       `- Repository: ${request.repository || 'n/a'}`,
@@ -372,7 +401,7 @@ function formatAuditSummary(auditArtifact = {}) {
 
   if (isTeamRepoAccessRemoval) {
     return [
-      '# Remove Team Repository Access Workflow Summary',
+      summaryHeader || '# Remove Team Repository Access Workflow Summary',
       '',
       `- Request ID: ${request.request_id || 'n/a'}`,
       `- Repository: ${request.repository || 'n/a'}`,
@@ -421,7 +450,7 @@ function formatAuditSummary(auditArtifact = {}) {
 
   if (isTeamRepoAccess) {
     return [
-      '# Add Team Repository Access Workflow Summary',
+      summaryHeader || '# Add Team Repository Access Workflow Summary',
       '',
       `- Request ID: ${request.request_id || 'n/a'}`,
       `- Repository: ${request.repository || 'n/a'}`,
@@ -493,7 +522,7 @@ function formatAuditSummary(auditArtifact = {}) {
 
   if (isTeamHierarchy) {
     return [
-      '# Add Child Teams Workflow Summary',
+      summaryHeader || '# Add Child Teams Workflow Summary',
       '',
       `- Request ID: ${request.request_id || 'n/a'}`,
       `- Repository: ${request.repository || 'n/a'}`,
@@ -564,7 +593,7 @@ function formatAuditSummary(auditArtifact = {}) {
 
   if (isTeamCreation) {
     return [
-      '# Create Organization Teams Workflow Summary',
+      summaryHeader || '# Create Organization Teams Workflow Summary',
       '',
       `- Request ID: ${request.request_id || 'n/a'}`,
       `- Repository: ${request.repository || 'n/a'}`,
@@ -638,7 +667,7 @@ function formatAuditSummary(auditArtifact = {}) {
   }
 
   return [
-    '# Add Team Members Workflow Summary',
+    summaryHeader || '# Add Team Members Workflow Summary',
     '',
     `- Request ID: ${request.request_id || 'n/a'}`,
     `- Repository: ${request.repository || 'n/a'}`,
