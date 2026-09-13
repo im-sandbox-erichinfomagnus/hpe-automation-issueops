@@ -699,6 +699,28 @@ function readIssueLabelsFromEnv(env = process.env) {
   }
 }
 
+// Whether a comment on an issue that already carries a terminal state label should
+// replay that state instead of revalidating the request from scratch.
+//
+// The two real guards are the ones below: the run has to be comment-driven, and the issue
+// has to already carry a terminal state label, which only an executed request gets. When a
+// request has finished, re-reading live GitHub can only disagree with it - the work it
+// describes has already been done, so the world no longer matches the request.
+//
+// This deliberately does not look at intake_mode. It used to require 'csv_attachment'
+// because it arrived as part of the CSV-attachment feature, not because manual intake was
+// meant to be excluded, and that accident is a defect: repository ruleset and variable
+// requests are always parsed as 'manual', so a completed ruleset deletion revalidated on
+// any later comment re-queried GitHub, correctly found the ruleset already gone, and
+// recorded validation_failed over the audit record of the delete that had just succeeded.
+function shouldReplayTerminalState(request = {}, terminalStatusFromIssueLabels = null) {
+  return Boolean(
+    terminalStatusFromIssueLabels &&
+    request.comment_context &&
+    request.comment_context.comment_id
+  );
+}
+
 function deriveTerminalStatusFromIssueLabels(labels = [], operation = null) {
   const prefixes = [terminalStateLabelPrefix(operation)];
   if (operation === 'tenant_creation') {
@@ -1098,11 +1120,7 @@ async function runRequestValidation(options = {}) {
   let approvalArtifact = null;
   let executionOutcome = null;
   try {
-    if (
-      request.intake_mode === 'csv_attachment' &&
-      request.comment_context.comment_id &&
-      terminalStatusFromIssueLabels
-    ) {
+    if (shouldReplayTerminalState(request, terminalStatusFromIssueLabels)) {
       validation = buildTerminalStateValidation({
         request: {
           ...request,
@@ -2473,6 +2491,7 @@ module.exports = {
   buildCanonicalTenantRecordFromRequest,
   mapLegacyLifecycleStatus,
   deriveTerminalStatusFromIssueLabels,
+  shouldReplayTerminalState,
   isTenantRepoCreationParsedRequest,
   isTenantCreationParsedRequest,
   isTeamRepoAccessParsedRequest,
