@@ -144,6 +144,22 @@ jobs:
           AUDIT_ARTIFACT_PATH: ${{ env.AUDIT_ARTIFACT_PATH }}
         run: node src/scripts/run-approval-gate.js
 
+      - name: Ensure terminal state labels exist
+        if: ${{ always() && steps.request_scope.outputs.matches-request == 'true' && steps.approval_gate.outputs['approval-status'] == 'approved' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for label in \
+            "issueops:add-team-repo-access:executed" \
+            "issueops:add-team-repo-access:partially_executed" \
+            "issueops:add-team-repo-access:failed_after_approved_execution" \
+            "issueops:add-team-repo-access:failed"; do
+            gh label create "$label" \
+              --repo "${{ github.repository }}" \
+              --force 2>/dev/null || true
+          done
+
       - name: Execute approved repository-access reconciliation
         id: execute_request
         if: ${{ always() && steps.request_scope.outputs.matches-request == 'true' && steps.approval_gate.outputs['approval-status'] == 'approved' }}
