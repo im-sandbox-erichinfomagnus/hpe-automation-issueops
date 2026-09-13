@@ -66,9 +66,9 @@ test('validateTenantCreationRequest passes valid dry-run request and emits no-mu
   assert.match(validation.warnings.join('\n'), /Dry-run is enabled/i);
 });
 
-test('validateTenantCreationRequest rejects a requester who is not an active organization owner', async () => {
+test('validateTenantCreationRequest accepts an active organization member as requester', async () => {
   const request = parseTenantCreationRequest({
-    parsedRequest: buildValidParsedRequest(),
+    parsedRequest: buildValidParsedRequest({ tenant_admin_login: 'tenant-admin-user' }),
     issue: { number: 910, user: { login: 'requester-user' } },
     repository: 'octo-org/issueops-speckit',
   });
@@ -86,9 +86,17 @@ test('validateTenantCreationRequest rejects a requester who is not an active org
     })
   );
 
-  assert.equal(validation.is_valid, false);
-  assert.match(validation.errors.join('\n'), /Requester must be an active owner/i);
+  // Any active organization member may raise a tenant request; the approval gate decides
+  // who may approve it.
+  assert.equal(validation.is_valid, true, JSON.stringify(validation.errors));
+  assert.equal(validation.request_status, 'awaiting_approval');
+  assert.equal(validation.validation_findings.requester_membership_gate, 'authorized');
+  // The requester is not an owner, and the artifact still records that accurately.
   assert.equal(validation.validation_findings.requester_owner_gate, 'unauthorized');
+  assert.ok(
+    !validation.errors.some((error) => /must be an active owner/i.test(error)),
+    'org ownership is no longer required to raise a tenant request'
+  );
 });
 
 test('validateTenantCreationRequest rejects derived team slug collision', async () => {

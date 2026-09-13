@@ -317,6 +317,8 @@ async function runApprovalGate(options = {}) {
         accepted_attachment_submission: auditArtifact.request.accepted_attachment_submission,
         intendedOwnerLogin: auditArtifact.request.intended_owner_login,
         designatedApproverLogin: auditArtifact.request.designated_approver_login,
+        tenantAdminLogin: auditArtifact.request.tenant_admin_login,
+        requesterLogin: auditArtifact.request.requester_login,
         parentTeamSlug: auditArtifact.request.parent_team_slug,
         requestedChildLinks: auditArtifact.request.requested_child_links || [],
         approvalMode: auditArtifact.metadata && auditArtifact.metadata.operation === 'team_creation'

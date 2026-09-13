@@ -13,6 +13,11 @@ const { resolveRepositoryRulesetApprover } = require('./resolve-repository-rules
 
 const APPROVAL_COMMAND = 'approved';
 
+// Tenant creation accepts either authority: the tenant admin named on the request, or an
+// organization owner. resolveTenantCreationApprover withholds 'tenant_admin' when the
+// requester nominated themselves, so self-nomination leaves only the owner.
+const TENANT_CREATION_APPROVER_ROLES = ['target_org_owner', 'tenant_admin'];
+
 const TENANT_RUNNER_APPROVAL_MODES = [
   'hosted_runner_creation',
   'hosted_runner_deletion',
@@ -250,6 +255,10 @@ async function evaluateApprovalGate(input = {}, options = {}) {
     approverLogin: approvalComment.user && approvalComment.user.login,
     intendedOwnerLogin: input.intendedOwnerLogin || input.intended_owner_login,
     designatedApproverLogin: input.designatedApproverLogin || input.designated_approver_login,
+    // Tenant creation routes approval to the tenant admin named on the request, and falls
+    // back to an org owner when the requester nominated themselves, so both logins travel.
+    tenantAdminLogin: input.tenantAdminLogin || input.tenant_admin_login,
+    requesterLogin: input.requesterLogin || input.requester_login,
     parentTeamSlug: input.parentTeamSlug || input.parent_team_slug,
     requestedChildLinks: input.requestedChildLinks || input.requested_child_links || [],
   });
@@ -330,7 +339,7 @@ async function evaluateApprovalGate(input = {}, options = {}) {
   }
 
   if (approvalMode === 'tenant_creation') {
-    if (approver.approver_role !== 'target_org_owner') {
+    if (!TENANT_CREATION_APPROVER_ROLES.includes(approver.approver_role)) {
       return {
         approval_status: 'denied',
         approver_login: approverLogin,
@@ -339,7 +348,9 @@ async function evaluateApprovalGate(input = {}, options = {}) {
         approver_membership_state: approver.approver_membership_state || 'unknown',
         approved_at: approvalComment.created_at || null,
         decision_source: 'comment',
-        decision_note: `The approval comment '${approvalCommand}' was not added by the authorized designated target organization owner and does not authorize tenant bootstrap mutation.`,
+        decision_note: approver.requester_self_nominated_tenant_admin
+          ? `The approval comment '${approvalCommand}' was not added by an active target organization owner. The requester named themselves as tenant admin, so only an organization owner can authorize this tenant bootstrap mutation.`
+          : `The approval comment '${approvalCommand}' was not added by the named tenant admin or an active target organization owner and does not authorize tenant bootstrap mutation.`,
       };
     }
 
@@ -351,7 +362,9 @@ async function evaluateApprovalGate(input = {}, options = {}) {
       approver_membership_state: approver.approver_membership_state || 'active',
       approved_at: approvalComment.created_at || null,
       decision_source: 'comment',
-      decision_note: `The approval comment '${approvalCommand}' was added by the authorized designated target organization owner for this tenant bootstrap request.`,
+      decision_note: approver.approver_role === 'tenant_admin'
+        ? `The approval comment '${approvalCommand}' was added by the tenant admin named on this tenant bootstrap request.`
+        : `The approval comment '${approvalCommand}' was added by an authorized active target organization owner for this tenant bootstrap request.`,
     };
   }
 

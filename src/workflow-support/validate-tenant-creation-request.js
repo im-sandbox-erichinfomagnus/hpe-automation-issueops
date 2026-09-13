@@ -2,6 +2,10 @@
 
 const { parseTenantCreationRequest } = require('./parse-tenant-creation-request');
 
+function normalizeLogin(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
 function isValidEmail(value) {
   if (!value) {
     return false;
@@ -257,7 +261,9 @@ async function validateTenantCreationRequest(input = {}, options = {}) {
     }
   }
 
-  // Tenant creation is self-serve: the requester org-owner gate below is the authorization.
+  // Tenant creation is approved by the tenant admin named on the form, or by an org
+  // owner in any case, so the approver is resolved at the approval gate rather than
+  // declared here. The requester gate below only establishes org membership.
   const designatedApproverAuthorization = {
     state: 'not_applicable',
     role: 'not_applicable',
@@ -285,8 +291,10 @@ async function validateTenantCreationRequest(input = {}, options = {}) {
         : 'other',
     };
 
-    if (!requesterEligibility.exists || requesterEligibility.state !== 'active' || requesterEligibility.role !== 'admin') {
-      errors.push('Requester must be an active owner in the target organization to create a tenant.');
+    // Any active organization member may request a tenant; the approval gate decides who
+    // may approve it. Org ownership is no longer required to raise the request.
+    if (!requesterEligibility.exists || requesterEligibility.state !== 'active') {
+      errors.push('Requester must be an active member of the target organization to create a tenant.');
     }
   }
 
@@ -428,9 +436,20 @@ async function validateTenantCreationRequest(input = {}, options = {}) {
       dry_run_no_mutation: Boolean(request.dry_run),
       intake_mode: request.intake_mode,
       csv_row_count: request.csv_row_count || 0,
+      // Unchanged meaning: whether the requester is an org owner. It is no longer the
+      // gate, but it still decides who may approve, so the artifact keeps recording it.
       requester_owner_gate: requesterEligibility.state === 'active' && requesterEligibility.role === 'admin'
         ? 'authorized'
         : 'unauthorized',
+      // The gate that now actually admits the request.
+      requester_membership_gate: requesterEligibility.state === 'active'
+        ? 'authorized'
+        : 'unauthorized',
+      // Requester named themselves as the tenant admin, so only an org owner may approve.
+      requester_self_nominated_tenant_admin: Boolean(
+        normalizeLogin(request.requester_login)
+          && normalizeLogin(request.requester_login) === normalizeLogin(request.tenant_admin_login)
+      ),
       tenant_admin_membership: tenantAdminEligibility.state === 'active'
         ? 'active'
         : 'inactive_or_unknown',
