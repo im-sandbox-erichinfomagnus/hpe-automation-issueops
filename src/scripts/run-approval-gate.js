@@ -101,12 +101,42 @@ const CICD_FAST_LANE_OPERATIONS = [
 
 const CICD_ROLE_HOLDER_PATHS = ['tenant_cicd_admin_team', 'tenant_admin_maintainer'];
 
-function isCicdRoleHolderFastLane(operation, auditArtifact) {
-  if (!CICD_FAST_LANE_OPERATIONS.includes(String(operation || ''))) {
-    return false;
-  }
+// A fast lane is a request that needs no approval comment because the requester already
+// holds the authority the approval would confirm. Returns the notes to record, or null
+// when the request has to go through the comment gate.
+function resolveFastLane(operation, auditArtifact) {
+  const operationName = String(operation || '');
   const findings = auditArtifact.validation && auditArtifact.validation.validation_findings;
-  return Boolean(findings) && CICD_ROLE_HOLDER_PATHS.includes(findings.requester_authorization_path);
+  if (!findings) {
+    return null;
+  }
+
+  if (
+    CICD_FAST_LANE_OPERATIONS.includes(operationName) &&
+    CICD_ROLE_HOLDER_PATHS.includes(findings.requester_authorization_path)
+  ) {
+    return {
+      approver_role: 'tenant_role_holder',
+      assignment_note: 'Central issue assignment is skipped because the requester holds the tenant CI/CD role.',
+      decision_note: `No approval comment is required because the requester holds the tenant CI/CD role (${findings.requester_authorization_path}); requester authorization was validated at intake.`,
+      execution_summary: 'Request is validated and proceeds directly to execution because the requester holds the tenant CI/CD role. No mutation was attempted in this phase.',
+    };
+  }
+
+  // Tenant creation carries no approval step for an organization owner. That is the 1.0.6
+  // behaviour and the Org Owner column of the approval matrix. It is keyed on the requester,
+  // not the operation, so a requester who is not an owner is untouched and still routes to
+  // the tenant admin named on the request.
+  if (operationName === 'tenant_creation' && findings.requester_owner_gate === 'authorized') {
+    return {
+      approver_role: 'target_org_owner',
+      assignment_note: 'Central issue assignment is skipped because the requester is an active organization owner.',
+      decision_note: 'No approval comment is required because the requester is an active organization owner; requester authorization was validated at intake.',
+      execution_summary: 'Request is validated and proceeds directly to execution because the requester is an active organization owner. No mutation was attempted in this phase.',
+    };
+  }
+
+  return null;
 }
 
 async function runApprovalGate(options = {}) {
@@ -193,27 +223,27 @@ async function runApprovalGate(options = {}) {
     return selfServeArtifact;
   }
 
-  if (isCicdRoleHolderFastLane(operation, auditArtifact)) {
+  const fastLane = resolveFastLane(operation, auditArtifact);
+  if (fastLane) {
     auditArtifact.assignment = auditArtifact.assignment || {
       assignment_status: 'not_attempted',
       assigned_login: '',
-      assignment_note: 'Central issue assignment is skipped because the requester holds the tenant CI/CD role.',
+      assignment_note: fastLane.assignment_note,
       assigned_at: null,
     };
-    const authorizationPath = auditArtifact.validation.validation_findings.requester_authorization_path;
     auditArtifact.approval = {
       approval_status: 'approved',
       approver_login: auditArtifact.request.requester_login || '',
-      approver_role: 'tenant_role_holder',
+      approver_role: fastLane.approver_role,
       approver_authorization_state: 'authorized',
       approved_context_marker: auditArtifact.request.context_marker || null,
       latest_context_marker: auditArtifact.request.context_marker || null,
       approved_at: new Date().toISOString(),
       decision_source: 'policy',
-      decision_note: `No approval comment is required because the requester holds the tenant CI/CD role (${authorizationPath}); requester authorization was validated at intake.`,
+      decision_note: fastLane.decision_note,
     };
     auditArtifact.request.request_status = 'approved';
-    auditArtifact.execution.summary = 'Request is validated and proceeds directly to execution because the requester holds the tenant CI/CD role. No mutation was attempted in this phase.';
+    auditArtifact.execution.summary = fastLane.execution_summary;
 
     const fastLaneArtifact = buildAuditArtifact({
       request: auditArtifact.request,

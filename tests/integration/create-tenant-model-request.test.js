@@ -122,7 +122,9 @@ test('runApprovalGate holds tenant creation until the named tenant admin approve
 
         return {
           exists: true,
-          membership: { role: 'admin', state: 'active' },
+          // A member, not an owner: an owner requester is fast-laned to approved, which
+          // would defeat what this test exists to prove.
+          membership: { role: 'member', state: 'active' },
         };
       },
       listOrgTeams: async () => [],
@@ -288,7 +290,9 @@ test('runApprovalGate centrally assigns tenant creation while it awaits approval
 
         return {
           exists: true,
-          membership: { role: 'admin', state: 'active' },
+          // A member, not an owner: an owner requester is fast-laned to approved, which
+          // would defeat what this test exists to prove.
+          membership: { role: 'member', state: 'active' },
         };
       },
       listOrgTeams: async () => [],
