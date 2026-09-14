@@ -273,32 +273,44 @@ async function runApprovalGate(options = {}) {
     };
   } else {
     const api = options.api || createGitHubTeamApi({ token: tokenInfo.token });
-    const assignableOwners = await api.getAssignableOwners({
-      repository: auditArtifact.request.repository,
-    });
-    const selectedAssignee = pickCentralIssueAssignee(
-      assignableOwners,
-      auditArtifact.request.requester_login
-    );
+    try {
+      const assignableOwners = await api.getAssignableOwners({
+        repository: auditArtifact.request.repository,
+      });
+      const selectedAssignee = pickCentralIssueAssignee(
+        assignableOwners,
+        auditArtifact.request.requester_login
+      );
 
-    if (!selectedAssignee) {
+      if (!selectedAssignee) {
+        auditArtifact.assignment = {
+          assignment_status: 'failed',
+          assigned_login: '',
+          assignment_note: 'No assignable central-repository owner was available for queue ownership.',
+          assigned_at: null,
+        };
+      } else {
+        const assignmentResult = await api.addIssueAssignees({
+          repository: auditArtifact.request.repository,
+          issueNumber: auditArtifact.request.issue_number,
+          assignees: [selectedAssignee],
+        });
+        auditArtifact.assignment = {
+          assignment_status: assignmentResult.status || 'assigned',
+          assigned_login: selectedAssignee,
+          assignment_note: buildAssignmentNote(operation),
+          assigned_at: new Date().toISOString(),
+        };
+      }
+    } catch (assignmentError) {
+      // Non-fatal: central assignment is queue routing only and never authorizes execution,
+      // so it must not fail an approval gate whose validation and routing already succeeded.
+      console.warn(`[warn] Failed to assign the central issue: ${assignmentError.message}`);
       auditArtifact.assignment = {
         assignment_status: 'failed',
         assigned_login: '',
-        assignment_note: 'No assignable central-repository owner was available for queue ownership.',
+        assignment_note: `Central issue assignment failed and was skipped: ${assignmentError.message}`,
         assigned_at: null,
-      };
-    } else {
-      const assignmentResult = await api.addIssueAssignees({
-        repository: auditArtifact.request.repository,
-        issueNumber: auditArtifact.request.issue_number,
-        assignees: [selectedAssignee],
-      });
-      auditArtifact.assignment = {
-        assignment_status: assignmentResult.status || 'assigned',
-        assigned_login: selectedAssignee,
-        assignment_note: buildAssignmentNote(operation),
-        assigned_at: new Date().toISOString(),
       };
     }
 
