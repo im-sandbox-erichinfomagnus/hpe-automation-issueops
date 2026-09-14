@@ -61,6 +61,7 @@ const { validateRepositoryRulesetRequest } = require('../workflow-support/valida
 const { createGitHubRepoRulesetsApi } = require('../workflow-support/github-repo-rulesets-api');
 const { assertRunnerGroupCreationAllowed: assertTenantVariablesMutationAllowed } = require('../actions/runner-group-policy');
 const { assertTenantSelfServeMutationAllowed } = require('../actions/tenant-self-serve-policy');
+const { terminalStateLabel, terminalStateLabelVariants } = require('../workflow-support/terminal-state-labels');
 const { assertRunnerGroupCreationAllowed: assertRepositoryRulesetMutationAllowed } = require('../actions/runner-group-policy');
 
 // Fast-lane ops accept a policy auto-approval from a tenant CI/CD role holder in addition to the
@@ -108,9 +109,13 @@ function buildTerminalLabelPrefixes(operation) {
   return [...new Set(prefixes)];
 }
 
+const TERMINAL_STATE_LABEL_STATUSES = ['executed', 'partially_executed', 'approved_failed', 'failed'];
+
+// Every spelling a managed terminal label may carry, so the stale-label sweep removes an
+// older long spelling instead of leaving it beside the new one.
 function buildTerminalStateLabels(prefixes = []) {
-  const statuses = ['executed', 'partially_executed', 'failed_after_approved_execution', 'failed'];
-  return prefixes.flatMap((prefix) => statuses.map((status) => `${prefix}${status}`));
+  return prefixes.flatMap((prefix) =>
+    TERMINAL_STATE_LABEL_STATUSES.flatMap((status) => terminalStateLabelVariants(prefix, status)));
 }
 
 function readAuditArtifact(filePath) {
@@ -425,7 +430,7 @@ function deriveApprovedExecutionTerminalState(executionOutcome, options = {}) {
     operation === 'team_hierarchy' &&
     intakeMode === 'csv_attachment'
   ) {
-    return 'failed_after_approved_execution';
+    return 'approved_failed';
   }
 
   return baseStatus;
@@ -740,7 +745,7 @@ async function executeTenantVariableManagement(context = {}) {
     typeof teamApi.addIssueLabels === 'function'
   ) {
     const labelPrefix = terminalStateLabelPrefix(operation);
-    const targetLabel = `${labelPrefix}${updatedArtifact.request.request_status}`;
+    const targetLabel = terminalStateLabel(labelPrefix, updatedArtifact.request.request_status);
     try {
       if (typeof teamApi.listIssueLabels === 'function' && typeof teamApi.removeIssueLabel === 'function') {
         const existingLabels = await teamApi.listIssueLabels({
@@ -945,7 +950,7 @@ async function executeOrgVariableManagement(context = {}) {
     typeof teamApi.addIssueLabels === 'function'
   ) {
     const labelPrefix = terminalStateLabelPrefix(operation);
-    const targetLabel = `${labelPrefix}${updatedArtifact.request.request_status}`;
+    const targetLabel = terminalStateLabel(labelPrefix, updatedArtifact.request.request_status);
     try {
       if (typeof teamApi.listIssueLabels === 'function' && typeof teamApi.removeIssueLabel === 'function') {
         const existingLabels = await teamApi.listIssueLabels({
@@ -1337,7 +1342,7 @@ async function executeTenantSubteamCreation(context = {}) {
     typeof teamApi.addIssueLabels === 'function'
   ) {
     const labelPrefix = terminalStateLabelPrefix(operation);
-    const targetLabel = `${labelPrefix}${updatedArtifact.request.request_status}`;
+    const targetLabel = terminalStateLabel(labelPrefix, updatedArtifact.request.request_status);
     try {
       if (typeof teamApi.listIssueLabels === 'function' && typeof teamApi.removeIssueLabel === 'function') {
         const existingLabels = await teamApi.listIssueLabels({
@@ -1746,7 +1751,7 @@ async function executeRepoAdminMembership(context = {}) {
     typeof teamApi.addIssueLabels === 'function'
   ) {
     const labelPrefix = terminalStateLabelPrefix(operation);
-    const targetLabel = `${labelPrefix}${updatedArtifact.request.request_status}`;
+    const targetLabel = terminalStateLabel(labelPrefix, updatedArtifact.request.request_status);
     try {
       if (typeof teamApi.listIssueLabels === 'function' && typeof teamApi.removeIssueLabel === 'function') {
         const existingLabels = await teamApi.listIssueLabels({
@@ -2155,7 +2160,7 @@ async function executeCicdAdminMembership(context = {}) {
     typeof teamApi.addIssueLabels === 'function'
   ) {
     const labelPrefix = terminalStateLabelPrefix(operation);
-    const targetLabel = `${labelPrefix}${updatedArtifact.request.request_status}`;
+    const targetLabel = terminalStateLabel(labelPrefix, updatedArtifact.request.request_status);
     try {
       if (typeof teamApi.listIssueLabels === 'function' && typeof teamApi.removeIssueLabel === 'function') {
         const existingLabels = await teamApi.listIssueLabels({
@@ -2371,7 +2376,7 @@ async function executeRepositoryRulesetManagement(context = {}) {
     typeof teamApi.addIssueLabels === 'function'
   ) {
     const labelPrefix = terminalStateLabelPrefix(operation);
-    const targetLabel = `${labelPrefix}${updatedArtifact.request.request_status}`;
+    const targetLabel = terminalStateLabel(labelPrefix, updatedArtifact.request.request_status);
     try {
       if (typeof teamApi.listIssueLabels === 'function' && typeof teamApi.removeIssueLabel === 'function') {
         const existingLabels = await teamApi.listIssueLabels({
@@ -2579,7 +2584,7 @@ async function executeTenantRepoCreationBatch(context = {}) {
     typeof teamApi.addIssueLabels === 'function'
   ) {
     const labelPrefix = terminalStateLabelPrefix(operation);
-    const targetLabel = `${labelPrefix}${updatedArtifact.request.request_status}`;
+    const targetLabel = terminalStateLabel(labelPrefix, updatedArtifact.request.request_status);
     try {
       if (typeof teamApi.listIssueLabels === 'function' && typeof teamApi.removeIssueLabel === 'function') {
         const existingLabels = await teamApi.listIssueLabels({
@@ -5196,15 +5201,25 @@ async function runApprovedExecution(options = {}) {
     updatedArtifact.execution.audit_persistence_result = auditPersistenceResult;
   }
 
+  // Every operation that reaches this point applies its terminal state label. This used
+  // to name the operations one at a time: the label began as a csv_attachment-only
+  // feature and each later operation was appended as its own feature landed, so an
+  // operation nobody appended silently executed and was never labelled. That is exactly
+  // what #114 reports for add-team-members and add-child-teams, whose labels are created
+  // by their workflows and were then never applied on the manual intake path.
+  //
+  // Listing operations here is not a safety property. The operations with their own
+  // execution function apply the label there and return before this point, so they cannot
+  // be double-labelled, and a dry run stops short of here without consulting this
+  // condition at all.
   const shouldAddTerminalLabel =
     updatedArtifact.request &&
     updatedArtifact.request.issue_number != null &&
-    typeof api.addIssueLabels === 'function' &&
-    (updatedArtifact.request.intake_mode === 'csv_attachment' || isTenantRepoCreation || isTenantCreation || isTeamCreation || isTenantRunnerOperation);
+    typeof api.addIssueLabels === 'function';
 
   if (shouldAddTerminalLabel) {
     const labelPrefix = terminalStateLabelPrefix(operation);
-    const targetLabel = `${labelPrefix}${updatedArtifact.request.request_status}`;
+    const targetLabel = terminalStateLabel(labelPrefix, updatedArtifact.request.request_status);
     try {
       if (typeof api.listIssueLabels === 'function' && typeof api.removeIssueLabel === 'function') {
         const existingLabels = await api.listIssueLabels({

@@ -114,7 +114,11 @@ test('T029: validateTenantCreationRequest preserves approval-gate semantics with
   assert.equal(validation.designated_approver_authorization.role, 'not_applicable');
 });
 
-test('T029: validateTenantCreationRequest does not break approval checks with CICD team addition', async () => {
+// Renamed: this never exercised CICD team addition. It passed because the requester was
+// not an organization owner, which is no longer a reason to reject. What it usefully
+// covers now is that the legacy designated_approver value has no influence: the form does
+// not collect one, and approval is routed by tenant_admin_login.
+test('T029: validateTenantCreationRequest ignores a legacy designated approver value', async () => {
   const request = parseTenantCreationRequest({
     parsedRequest: buildValidParsedRequest({ designated_approver: 'non-admin-user' }),
     issue: { number: 5003, user: { login: 'requester-user' } },
@@ -134,8 +138,14 @@ test('T029: validateTenantCreationRequest does not break approval checks with CI
     },
   });
 
-  assert.equal(validation.is_valid, false);
-  assert.ok(validation.errors && validation.errors.length > 0);
+  assert.equal(validation.is_valid, true, JSON.stringify(validation.errors));
+  assert.equal(validation.request_status, 'awaiting_approval');
+  // A stale designated approver neither authorizes nor blocks anything.
+  assert.equal(validation.designated_approver_authorization.state, 'not_applicable');
+  assert.ok(
+    !validation.errors.some((error) => /designated approver/i.test(error)),
+    'the legacy designated approver value must not produce a validation error'
+  );
 });
 
 test('T031: validateTenantCreationRequest preserves dry-run semantics with CICD capability intent', async () => {
@@ -183,7 +193,7 @@ test('T031C: parseTenantCreationRequest preserves baseline request_id field unch
   assert.match(request.request_id, /octo-org\/issueops-speckit#5006/);
 });
 
-test('T031C: validateTenantCreationRequest requires the requester to be an active organization owner', async () => {
+test('T031C: validateTenantCreationRequest requires the requester to be an active organization member', async () => {
   const request = parseTenantCreationRequest({
     parsedRequest: buildValidParsedRequest(),
     issue: { number: 5007, user: { login: 'non-member-user' } },
@@ -213,8 +223,11 @@ test('T031C: validateTenantCreationRequest requires the requester to be an activ
     },
   });
 
+  // Widening the gate to any active member did not widen it to anyone: a login that is
+  // not an organization member at all is still refused.
   assert.equal(validation.is_valid, false);
-  assert.match(validation.errors.join('\n'), /must be an active owner/i);
+  assert.match(validation.errors.join('\n'), /must be an active member/i);
+  assert.equal(validation.validation_findings.requester_membership_gate, 'unauthorized');
 });
 
 test('T031C: validateTenantCreationRequest does not break governance flag validation with CICD team', async () => {

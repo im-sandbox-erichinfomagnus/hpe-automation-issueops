@@ -1,6 +1,6 @@
 # Tenant IssueOps Runbook
 
-Use the issue form for the operation, paste the spreadsheet data, keep dry-run enabled for the first pass, and have the designated active organization owner comment exactly `approved`. Review the per-row issue result and JSON audit artifact before running live.
+Use the issue form for the operation, paste the spreadsheet data, keep dry-run enabled for the first pass, and have the designated approver comment exactly `approved`. Review the Actions step summary and the JSON audit artifact, which records the per-row outcome, before running live.
 
 ## Spreadsheet Schemas
 
@@ -24,7 +24,7 @@ Create tenant and each runner lifecycle form accept exactly one data row. The ot
 
 ## Authorization Checks
 
-- Create tenant requires the requester and designated approver to be active organization owners. The CSV tenant admin must be an active organization member.
+- Create tenant requires the requester to be an active organization member. Approval comes from the tenant admin named on the request, or from an active organization owner. If the requester names themselves as tenant admin, only an organization owner can approve. The tenant admin must be an active organization member.
 - Tenant repositories require the requester to satisfy the tenant RepoAdmin or tenant-admin authorization path.
 - Rulesets authorize every row by direct repository admin permission or the matching tenant RepoAdmin or tenant-admin path.
 - Variables require tenant-admin authorization.

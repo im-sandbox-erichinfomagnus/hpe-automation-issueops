@@ -2604,7 +2604,17 @@ async function buildApprovedTenantCreationArtifact(workspacePrefix) {
     api: {
       getAssignableOwners: async () => ['aeruvakalpanaa'],
       addIssueAssignees: async () => ({ status: 'assigned' }),
-      listIssueComments: async () => [],
+      // The requester named themselves as tenant admin, so only an organization owner can
+      // release this request. himanshu-im is an owner in this fixture, so the approval
+      // comment is his.
+      listIssueComments: async () => [
+        {
+          id: 1,
+          body: 'approved',
+          created_at: '2026-09-13T10:00:00Z',
+          user: { login: 'himanshu-im' },
+        },
+      ],
       getOrganizationMembership: async () => ({
         exists: true,
         membership: { role: 'admin', state: 'active' },
@@ -2628,12 +2638,13 @@ function buildGuardExecutionEnv(artifactPath, registryDirectory) {
   };
 }
 
-test('runApprovedExecution dispatches tenant creation through the self-serve policy with a PAT-backed token', async () => {
+test('runApprovedExecution dispatches owner-approved tenant creation with a PAT-backed token', async () => {
   const state = { nextTeamId: 8100, teams: [], memberships: [] };
   const { artifactPath, registryDirectory } = await buildApprovedTenantCreationArtifact('create-tenant-model-guard-allow-');
 
   const persisted = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
-  assert.equal(persisted.approval.approver_role, 'tenant_self_serve');
+  assert.equal(persisted.approval.approver_role, 'target_org_owner');
+  assert.equal(persisted.approval.approval_status, 'approved');
 
   const result = await runApprovedExecution({
     env: buildGuardExecutionEnv(artifactPath, registryDirectory),

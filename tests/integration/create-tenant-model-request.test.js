@@ -104,7 +104,7 @@ test('runRequestValidation for create-tenant-model dry-run emits reconciliation 
   assert.match(persisted.execution.summary, /No tenant bootstrap mutation was attempted/i);
 });
 
-test('runApprovalGate auto-approves tenant creation under the tenant self-serve policy', async () => {
+test('runApprovalGate holds tenant creation until the named tenant admin approves', async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'create-tenant-model-approval-'));
   const artifactPath = path.join(workspace, 'audit.json');
 
@@ -122,7 +122,9 @@ test('runApprovalGate auto-approves tenant creation under the tenant self-serve 
 
         return {
           exists: true,
-          membership: { role: 'admin', state: 'active' },
+          // A member, not an owner: an owner requester is fast-laned to approved, which
+          // would defeat what this test exists to prove.
+          membership: { role: 'member', state: 'active' },
         };
       },
       listOrgTeams: async () => [],
@@ -147,11 +149,43 @@ test('runApprovalGate auto-approves tenant creation under the tenant self-serve 
     setProcessExitCode: false,
   });
 
-  assert.equal(approvalResult.approval.approval_status, 'approved');
-  assert.equal(approvalResult.approval.approver_role, 'tenant_self_serve');
-  assert.equal(approvalResult.approval.decision_source, 'policy');
-  assert.equal(approvalResult.approval.approver_login, approvalResult.request.requester_login);
-  assert.equal(approvalResult.request.request_status, 'approved');
+  // Tenant creation is no longer self-serve: with no approval comment it waits.
+  assert.notEqual(approvalResult.approval.approval_status, 'approved');
+  assert.notEqual(approvalResult.request.request_status, 'approved');
+
+  // The tenant admin named on the request is the one who releases it.
+  const approvedResult = await runApprovalGate({
+    env: {
+      AUDIT_ARTIFACT_PATH: artifactPath,
+      GITHUB_TOKEN: 'test-token',
+    },
+    api: {
+      getAssignableOwners: async () => ['queue-owner'],
+      addIssueAssignees: async () => ({ status: 'assigned' }),
+      listIssueComments: async () => [
+        {
+          id: 11,
+          body: 'approved',
+          created_at: '2026-09-13T10:00:00Z',
+          user: { login: 'tenant-admin-user' },
+        },
+      ],
+      getOrganizationMembership: async ({ username }) => ({
+        exists: true,
+        membership: {
+          role: username === 'org-owner-user' ? 'admin' : 'member',
+          state: 'active',
+        },
+      }),
+    },
+    setProcessExitCode: false,
+  });
+
+  assert.equal(approvedResult.approval.approval_status, 'approved');
+  assert.equal(approvedResult.approval.approver_role, 'tenant_admin');
+  assert.equal(approvedResult.approval.decision_source, 'comment');
+  assert.equal(approvedResult.approval.approver_login, 'tenant-admin-user');
+  assert.equal(approvedResult.request.request_status, 'approved');
 });
 
 test('runApprovalGate never approves tenant creation when validation failed', async () => {
@@ -189,7 +223,7 @@ test('runApprovalGate never approves tenant creation when validation failed', as
   assert.notEqual(approvalResult.approval.approval_status, 'approved');
 });
 
-test('runRequestValidation blocks tenant creation when the requester is not an active org owner', async () => {
+test('runRequestValidation admits a member-raised tenant creation which then awaits approval', async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'create-tenant-model-requester-not-owner-'));
   const artifactPath = path.join(workspace, 'audit.json');
 
@@ -209,11 +243,14 @@ test('runRequestValidation blocks tenant creation when the requester is not an a
     setProcessExitCode: false,
   });
 
-  assert.equal(result.validation.is_valid, false);
+  // The requester is a plain member. That is now sufficient to raise the request.
+  assert.equal(result.validation.is_valid, true, JSON.stringify(result.validation.errors));
   assert.equal(
     result.validation.errors.includes('Requester must be an active owner in the target organization to create a tenant.'),
-    true
+    false
   );
+  assert.equal(result.validation.validation_findings.requester_membership_gate, 'authorized');
+  assert.equal(result.validation.validation_findings.requester_owner_gate, 'unauthorized');
 
   const approvalResult = await runApprovalGate({
     env: {
@@ -235,7 +272,7 @@ test('runRequestValidation blocks tenant creation when the requester is not an a
   assert.notEqual(approvalResult.approval.approval_status, 'approved');
 });
 
-test('runApprovalGate skips central assignment for tenant creation self-serve requests', async () => {
+test('runApprovalGate centrally assigns tenant creation while it awaits approval', async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'create-tenant-model-assignment-only-'));
   const artifactPath = path.join(workspace, 'audit.json');
 
@@ -253,7 +290,9 @@ test('runApprovalGate skips central assignment for tenant creation self-serve re
 
         return {
           exists: true,
-          membership: { role: 'admin', state: 'active' },
+          // A member, not an owner: an owner requester is fast-laned to approved, which
+          // would defeat what this test exists to prove.
+          membership: { role: 'member', state: 'active' },
         };
       },
       listOrgTeams: async () => [],
@@ -278,10 +317,13 @@ test('runApprovalGate skips central assignment for tenant creation self-serve re
     setProcessExitCode: false,
   });
 
-  assert.equal(approvalResult.assignment.assignment_status, 'not_attempted');
-  assert.equal(approvalResult.approval.approval_status, 'approved');
-  assert.equal(approvalResult.approval.approver_role, 'tenant_self_serve');
-  assert.equal(approvalResult.request.request_status, 'approved');
+  // Self-serve operations skip central assignment because nobody needs to act on them.
+  // Tenant creation now needs a human approver, so it is assigned to the queue like every
+  // other approval-gated operation.
+  assert.equal(approvalResult.assignment.assignment_status, 'assigned');
+  assert.notEqual(approvalResult.approval.approval_status, 'approved');
+  assert.notEqual(approvalResult.approval.approver_role, 'tenant_self_serve');
+  assert.notEqual(approvalResult.request.request_status, 'approved');
 });
 
 test('runRequestValidation fails closed for tenant creation when workflow token is missing', async () => {

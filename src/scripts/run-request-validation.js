@@ -11,6 +11,7 @@ const { createGitHubRunnerApi } = require('../workflow-support/github-runner-api
 const { createGitHubOrgVariablesApi } = require('../workflow-support/github-org-variables-api');
 const { createGitHubRepoRulesetsApi } = require('../workflow-support/github-repo-rulesets-api');
 const { loadWorkflowToken } = require('../workflow-support/load-workflow-token');
+const { terminalStateLabelVariants } = require('../workflow-support/terminal-state-labels');
 const { parseTeamCreationRequest } = require('../workflow-support/parse-team-creation-request');
 const { parseTenantRepoRequest } = require('../workflow-support/parse-tenant-repo-request');
 const { parseTenantCreationRequest } = require('../workflow-support/parse-tenant-creation-request');
@@ -569,7 +570,7 @@ function mapLegacyLifecycleStatus(value) {
   if (['blocked', 'inactive', 'suspended'].includes(normalized)) {
     return 'blocked';
   }
-  if (['partial_failure', 'partial-failure', 'failed_after_approved_execution', 'partially_executed'].includes(normalized)) {
+  if (['partial_failure', 'partial-failure', 'approved_failed', 'failed_after_approved_execution', 'partially_executed'].includes(normalized)) {
     return 'partial_failure';
   }
   if (['decommissioned', 'retired'].includes(normalized)) {
@@ -657,7 +658,7 @@ function buildCanonicalTenantRecordFromRequest(request = {}) {
 }
 
 function isTerminalRequestStatus(status) {
-  return ['executed', 'partially_executed', 'failed', 'failed_after_approved_execution'].includes(status);
+  return ['executed', 'partially_executed', 'failed', 'approved_failed', 'failed_after_approved_execution'].includes(status);
 }
 
 function terminalStateLabelPrefix(operation) {
@@ -698,6 +699,28 @@ function readIssueLabelsFromEnv(env = process.env) {
   }
 }
 
+// Whether a comment on an issue that already carries a terminal state label should
+// replay that state instead of revalidating the request from scratch.
+//
+// The two real guards are the ones below: the run has to be comment-driven, and the issue
+// has to already carry a terminal state label, which only an executed request gets. When a
+// request has finished, re-reading live GitHub can only disagree with it - the work it
+// describes has already been done, so the world no longer matches the request.
+//
+// This deliberately does not look at intake_mode. It used to require 'csv_attachment'
+// because it arrived as part of the CSV-attachment feature, not because manual intake was
+// meant to be excluded, and that accident is a defect: repository ruleset and variable
+// requests are always parsed as 'manual', so a completed ruleset deletion revalidated on
+// any later comment re-queried GitHub, correctly found the ruleset already gone, and
+// recorded validation_failed over the audit record of the delete that had just succeeded.
+function shouldReplayTerminalState(request = {}, terminalStatusFromIssueLabels = null) {
+  return Boolean(
+    terminalStatusFromIssueLabels &&
+    request.comment_context &&
+    request.comment_context.comment_id
+  );
+}
+
 function deriveTerminalStatusFromIssueLabels(labels = [], operation = null) {
   const prefixes = [terminalStateLabelPrefix(operation)];
   if (operation === 'tenant_creation') {
@@ -705,9 +728,11 @@ function deriveTerminalStatusFromIssueLabels(labels = [], operation = null) {
     prefixes.push('issueops:create-tenant-model:');
   }
 
-  for (const status of ['executed', 'partially_executed', 'failed_after_approved_execution', 'failed']) {
+  for (const status of ['executed', 'partially_executed', 'approved_failed', 'failed_after_approved_execution', 'failed']) {
     for (const prefix of prefixes) {
-      if (labels.includes(`${prefix}${status}`)) {
+      // Accept every spelling this status may already be labelled under, so an issue
+      // carrying the older long form still resolves to the same status value.
+      if (terminalStateLabelVariants(prefix, status).some((label) => labels.includes(label))) {
         return status;
       }
     }
@@ -1095,11 +1120,7 @@ async function runRequestValidation(options = {}) {
   let approvalArtifact = null;
   let executionOutcome = null;
   try {
-    if (
-      request.intake_mode === 'csv_attachment' &&
-      request.comment_context.comment_id &&
-      terminalStatusFromIssueLabels
-    ) {
+    if (shouldReplayTerminalState(request, terminalStatusFromIssueLabels)) {
       validation = buildTerminalStateValidation({
         request: {
           ...request,
@@ -2470,6 +2491,7 @@ module.exports = {
   buildCanonicalTenantRecordFromRequest,
   mapLegacyLifecycleStatus,
   deriveTerminalStatusFromIssueLabels,
+  shouldReplayTerminalState,
   isTenantRepoCreationParsedRequest,
   isTenantCreationParsedRequest,
   isTeamRepoAccessParsedRequest,

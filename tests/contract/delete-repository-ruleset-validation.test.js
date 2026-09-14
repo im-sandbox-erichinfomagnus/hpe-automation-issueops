@@ -108,7 +108,7 @@ test('a batch of delete rows across repos all become approval-ready for a repo a
   assert.equal(byRepo['acme-web'].action, 'delete');
 });
 
-test('delete per-row idempotent convergence: an absent ruleset name is a no-op', async () => {
+test('delete per-row: an absent ruleset name is rejected instead of converging silently', async () => {
   const registryDir = buildRegistry();
   const result = await validateRepositoryRulesetRequest(
     buildRequestInput(['acme-service-api,acme-main-protection', 'acme-web,does-not-exist']),
@@ -118,8 +118,55 @@ test('delete per-row idempotent convergence: an absent ruleset name is a no-op',
   assert.equal(result.is_valid, true, JSON.stringify(result.errors));
   const byRepo = Object.fromEntries(result.plan.entries.map((entry) => [entry.repository, entry]));
   assert.equal(byRepo['acme-service-api'].action, 'delete');
-  assert.equal(byRepo['acme-web'].action, 'noop');
+  assert.equal(byRepo['acme-web'].row_status, 'rejected');
+  assert.equal(byRepo['acme-web'].failure_reason, 'ruleset_not_found');
   assert.equal(byRepo['acme-web'].ruleset_exists, false);
+  assert.ok(result.warnings.some((warning) => warning.includes("Ruleset 'does-not-exist' does not exist")));
+});
+
+test('delete of a single absent ruleset fails the whole request so nothing is executed', async () => {
+  const registryDir = buildRegistry();
+  const result = await validateRepositoryRulesetRequest(
+    buildRequestInput(['acme-web,does-not-exist']),
+    buildOptions(registryDir, { existingRulesets: DEFAULT_EXISTING })
+  );
+
+  assert.equal(result.is_valid, false);
+  assert.equal(result.request_status, 'validation_failed');
+  assert.equal(result.plan.valid_entry_count, 0);
+  assert.equal(result.plan.entries.length, 1);
+  const entry = result.plan.entries[0];
+  assert.equal(entry.row_status, 'rejected');
+  assert.equal(entry.action, 'reject');
+  assert.equal(entry.failure_reason, 'ruleset_not_found');
+  assert.equal(entry.ruleset_exists, false);
+  assert.ok(
+    result.warnings.some((warning) => warning.includes("Ruleset 'does-not-exist' does not exist")),
+    'the warning must name the missing ruleset'
+  );
+  assert.ok(
+    result.errors.some((error) => error.includes('nothing to execute')),
+    'the request must carry an aggregate error so approval is never offered'
+  );
+});
+
+test('delete where every row names an absent ruleset rejects each row and fails the request', async () => {
+  const registryDir = buildRegistry();
+  const result = await validateRepositoryRulesetRequest(
+    buildRequestInput(['acme-web,nope-one', 'acme-service-api,nope-two']),
+    buildOptions(registryDir, { existingRulesets: DEFAULT_EXISTING })
+  );
+
+  assert.equal(result.is_valid, false);
+  assert.equal(result.request_status, 'validation_failed');
+  assert.equal(result.plan.valid_entry_count, 0);
+  assert.equal(result.plan.rejected_entry_count, 2);
+  for (const entry of result.plan.entries) {
+    assert.equal(entry.row_status, 'rejected');
+    assert.equal(entry.failure_reason, 'ruleset_not_found');
+  }
+  assert.ok(result.warnings.some((warning) => warning.includes("Ruleset 'nope-one' does not exist")));
+  assert.ok(result.warnings.some((warning) => warning.includes("Ruleset 'nope-two' does not exist")));
 });
 
 test('a delete row for a repo the requester does not admin fails while other rows pass', async () => {

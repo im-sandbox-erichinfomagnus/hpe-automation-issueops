@@ -157,6 +157,22 @@ jobs:
           AUDIT_ARTIFACT_PATH: artifacts/add-team-members-validation-${{ env.ISSUE_NUMBER || 'manual' }}.json
         run: node src/scripts/run-approval-gate.js
 
+      - name: Ensure terminal state labels exist
+        if: ${{ always() && steps.request_scope.outputs.matches-request == 'true' && steps.approval_gate.outputs.approval-status == 'approved' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for label in \
+            "issueops:add-team-members:executed" \
+            "issueops:add-team-members:partially_executed" \
+            "issueops:add-team-members:approved_failed" \
+            "issueops:add-team-members:failed"; do
+            gh label create "$label" \
+              --repo "${{ github.repository }}" \
+              --force 2>/dev/null || true
+          done
+
       - name: Execute approved reconciliation
         id: execute_request
         if: ${{ always() && steps.request_scope.outputs.matches-request == 'true' && steps.approval_gate.outputs.approval-status == 'approved' }}

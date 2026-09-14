@@ -143,7 +143,7 @@ jobs:
           for label in \
             "issueops:add-cicd-admin-to-tenant:executed" \
             "issueops:add-cicd-admin-to-tenant:failed" \
-            "issueops:add-cicd-admin-to-tenant:partially_executed"; do
+            "issueops:add-cicd-admin-to-tenant:partial"; do
             gh label create "$label" \
               --repo "${{ github.repository }}" \
               --force 2>/dev/null || true

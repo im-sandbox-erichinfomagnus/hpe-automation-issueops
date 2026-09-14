@@ -678,7 +678,7 @@ test('CSV-derived rejected hierarchy links remain rejected with row provenance a
   );
 });
 
-test('csv_attachment hierarchy execution that fully fails after approval records failed_after_approved_execution terminal state and label', async () => {
+test('csv_attachment hierarchy execution that fully fails after approval records approved_failed terminal state and label', async () => {
   const fixture = loadFixture('team-hierarchy-update-success.json');
   const artifact = structuredClone(fixture.approved_artifact);
   artifact.request.intake_mode = 'csv_attachment';
@@ -743,9 +743,9 @@ test('csv_attachment hierarchy execution that fully fails after approval records
     },
   });
 
-  assert.equal(result.request.request_status, 'failed_after_approved_execution');
+  assert.equal(result.request.request_status, 'approved_failed');
   assert.equal(result.execution.failure_count, 1);
-  assert.deepEqual(labels, ['issueops:add-child-teams:failed_after_approved_execution']);
+  assert.deepEqual(labels, ['issueops:add-child-teams:approved_failed']);
 });
 
 test('restoreRequestAuditArtifact prefers the newest terminal add-child-teams artifact over a newer reopened awaiting-approval artifact', async () => {

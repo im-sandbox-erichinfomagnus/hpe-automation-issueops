@@ -142,7 +142,7 @@ jobs:
           for label in \
             "issueops:manage-tenant-variables:executed" \
             "issueops:manage-tenant-variables:failed" \
-            "issueops:manage-tenant-variables:partially_executed"; do
+            "issueops:manage-tenant-variables:partial"; do
             gh label create "$label" \
               --repo "${{ github.repository }}" \
               --force 2>/dev/null || true

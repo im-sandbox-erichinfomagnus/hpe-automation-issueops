@@ -42,7 +42,7 @@ async function validateTenantRepoRequest(input = {}, options = {}) {
   const issueComments = options.issueComments || input.issueComments || input.issue_comments || [];
   const latestFailedValidationAt = options.latestFailedValidationAt || input.latestFailedValidationAt || null;
   const latestFailedValidationAttemptId = options.latestFailedValidationAttemptId || input.latestFailedValidationAttemptId || null;
-  const terminalStateReached = ['executed', 'partially_executed', 'failed', 'failed_after_approved_execution'].includes(request.request_status);
+  const terminalStateReached = ['executed', 'partially_executed', 'failed', 'approved_failed', 'failed_after_approved_execution'].includes(request.request_status);
   const attachmentMaxBytes = Number(options.maxAttachmentBytes) > 0
     ? Number(options.maxAttachmentBytes)
     : DEFAULT_ATTACHMENT_MAX_BYTES;

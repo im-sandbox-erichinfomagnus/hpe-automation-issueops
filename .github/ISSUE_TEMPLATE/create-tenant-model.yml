@@ -40,7 +40,7 @@ body:
     id: tenant_admin_login
     attributes:
       label: Tenant admin GitHub login (single-item fallback)
-      description: Active organization member who becomes maintainer of the tenant root, admin, RepoAdmin, and CICDAdmin teams. Used when Tenant CSV is empty.
+      description: Active organization member who becomes maintainer of the tenant root, admin, RepoAdmin, and CICDAdmin teams, and who approves this request. Used when Tenant CSV is empty. If you name yourself, an organization owner must approve instead.
       placeholder: user1
     validations:
       required: false

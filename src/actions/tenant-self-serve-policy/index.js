@@ -4,12 +4,14 @@ const { loadWorkflowToken } = require('../../workflow-support/load-workflow-toke
 
 // Tenant self-serve operations (per Evan's team): the caller gate validated at
 // intake is the authorization; no separate approval step is required.
+// tenant_creation is deliberately absent: any active organization member may now raise
+// one, so the intake gate no longer establishes authority on its own and the request is
+// approved by the named tenant admin or an organization owner at the approval gate.
 const TENANT_SELF_SERVE_OPERATIONS = [
   'cicd_admin_membership',
   'repo_admin_membership',
   'tenant_subteam_creation',
   'org_variable_management',
-  'tenant_creation',
   'tenant_repo_creation',
 ];
 

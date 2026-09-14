@@ -20,8 +20,9 @@ team topology, and ownership used to authorize tenant-scoped operations.
    request without changing GitHub organization state.
 6. After validation succeeds, the designated active approver comments exactly
    `approved` on the issue.
-7. Review the per-row result, Actions step summary, and JSON audit artifact.
-   Submit a live request only after the dry-run output is correct.
+7. Review the Actions step summary and the JSON audit artifact, which records
+   the per-row outcome. Submit a live request only after the dry-run output is
+   correct.
 
 When a form supports `csv_attachment`, submit the issue with its manual input
 field empty. The requester must then add an issue comment containing exactly one
@@ -68,20 +69,25 @@ recording guides.
   does not prevent authorized rows from being evaluated.
 - Re-running a completed request converges on current GitHub state. Operations
   that are already satisfied are reported as no-ops instead of being applied
-  again.
+  again. Two cases are rejected at validation instead: a ruleset deletion
+  naming a ruleset that does not exist, and a tenant repository whose name the
+  tenant already owns.
 
 ## Results and Audit Evidence
 
-Each request produces evidence in three places:
+Each request produces evidence in two places:
 
-1. Issue comments show validation, approval, and per-row execution results.
-2. The GitHub Actions step summary shows the planned and completed work.
-3. A machine-readable JSON artifact records request details, authorization,
-   reconciliation, retry, and execution outcomes.
+1. The GitHub Actions step summary shows the planned and completed work.
+2. A machine-readable JSON artifact records request details, authorization,
+   reconciliation, retry, and per-row execution outcomes.
+
+The tenant hosted-runner and runner group operations also post their step
+summary to the issue as a comment. The step summary carries some additional run
+detail that the comment does not. No other operation comments on the issue.
 
 Retry behavior is bounded and uses GitHub rate-limit response data. Partial
-failures remain visible in the issue result and audit artifact so operators can
-correct only the failed rows.
+failures remain visible in the step summary as counts, and the audit artifact
+names the individual rows so operators can correct only the failed ones.
 
 ## Repository Configuration
 
