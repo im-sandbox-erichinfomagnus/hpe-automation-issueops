@@ -65,7 +65,14 @@ function formatAuditSummary(auditArtifact = {}) {
       ? validation.designated_approver_authorization.state || 'unknown'
       : 'n/a';
 
-  const isTenantRepoCreation = operation === 'tenant_repo_creation' || Boolean(request.repository_name_normalized || request.repository_name_input);
+  // Each branch below selects on the operation alone. The operation is already
+  // resolved once, above: an explicit metadata.operation if the artifact carries one,
+  // and otherwise determineOperation, which infers it from exactly the request fields
+  // these branches used to re-check. Re-checking them here did not add a fallback, it
+  // overrode a correct answer - a request that carries a tenant key but is not a tenant
+  // creation, such as tenant variable management, rendered the tenant creation body
+  // under its own correct header.
+  const isTenantRepoCreation = operation === 'tenant_repo_creation';
 
   if (isTenantRepoCreation) {
     return [
@@ -168,10 +175,10 @@ function formatAuditSummary(auditArtifact = {}) {
     ].filter(Boolean).join('\n');
   }
 
-  const isHostedRunnerCreation = operation === 'hosted_runner_creation' || (!['hosted_runner_deletion', 'hosted_runner_move'].includes(operation) && Boolean(request.runner_image_id || request.runner_size));
-  const isHostedRunnerMove = operation === 'hosted_runner_move' || Boolean(request.runner_move_scope || request.target_runner_group_name_input);
-  const isHostedRunnerDeletion = operation === 'hosted_runner_deletion' || (!isHostedRunnerCreation && !isHostedRunnerMove && Boolean(request.runner_deletion_scope));
-  const isRunnerGroupCreation = operation === 'runner_group_creation' || Boolean(request.runner_group_name_derived || request.runner_group_base_name_input);
+  const isHostedRunnerCreation = operation === 'hosted_runner_creation';
+  const isHostedRunnerMove = operation === 'hosted_runner_move';
+  const isHostedRunnerDeletion = operation === 'hosted_runner_deletion';
+  const isRunnerGroupCreation = operation === 'runner_group_creation';
 
   if (isHostedRunnerCreation || isHostedRunnerDeletion || isHostedRunnerMove) {
     return [
@@ -325,7 +332,7 @@ function formatAuditSummary(auditArtifact = {}) {
     ].filter(Boolean).join('\n');
   }
 
-  const isTenantCreation = operation === 'tenant_creation' || Boolean(request.tenant_key || request.tenant_display_name);
+  const isTenantCreation = operation === 'tenant_creation';
 
   if (isTenantCreation) {
     return [
