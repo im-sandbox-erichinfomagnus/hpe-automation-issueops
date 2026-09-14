@@ -1,6 +1,6 @@
 # Tenant IssueOps Runbook
 
-Use the issue form for the operation, paste the spreadsheet data, keep dry-run enabled for the first pass, and have the designated approver comment exactly `approved`. Review the per-row issue result and JSON audit artifact before running live.
+Use the issue form for the operation, paste the spreadsheet data, keep dry-run enabled for the first pass, and have the designated approver comment exactly `approved`. Review the Actions step summary and the JSON audit artifact, which records the per-row outcome, before running live.
 
 ## Spreadsheet Schemas
 
