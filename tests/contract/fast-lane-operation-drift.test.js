@@ -19,6 +19,31 @@ const EXPECTED_FAST_LANE_OPERATIONS = [
   'tenant_variable_management',
 ];
 
+// Skipping the approval comment is not only the fast lane: the tenant self-serve policy
+// skips it too, under approver_role 'tenant_self_serve'. Until 1.0.8 that second list was
+// unconditional, so nothing here could tell the two apart. add-repo-admin and add-cicd-admin
+// are now requester-aware and only auto-approve for a requester who holds the tenant role,
+// so the full set of operations that reach execution without an approval comment is pinned
+// by authorization path, not just the fast-lane subset.
+const EXPECTED_POLICY_AUTO_APPROVED_FOR_ROLE_HOLDER = [
+  ...EXPECTED_FAST_LANE_OPERATIONS,
+  'cicd_admin_membership',
+  'org_variable_management',
+  'repo_admin_membership',
+  'tenant_repo_creation',
+  'tenant_subteam_creation',
+];
+
+// The same list with the two requester-routed operations removed: a requester holding no
+// tenant role no longer skips approval on either of them.
+const EXPECTED_POLICY_AUTO_APPROVED_FOR_NON_HOLDER = [
+  'org_variable_management',
+  'tenant_repo_creation',
+  'tenant_subteam_creation',
+];
+
+const REQUESTER_ROUTED_OPERATIONS = ['cicd_admin_membership', 'repo_admin_membership'];
+
 // Every metadata.operation value the product emits.
 const ALL_OPERATIONS = [
   'cicd_admin_membership',
@@ -120,6 +145,43 @@ test('no operation enters the fast lane for a non-holder', async () => {
 
 test('no operation enters the fast lane when the authorization path is absent', async () => {
   assert.deepEqual(await observedFastLaneOperations(undefined), []);
+});
+
+async function observedPolicyAutoApprovedOperations(authorizationPath) {
+  const observed = [];
+  for (const operation of ALL_OPERATIONS) {
+    const result = await gate(operation, authorizationPath);
+    if (result.approval.approval_status === 'approved' && result.approval.decision_source === 'policy') {
+      observed.push(operation);
+    }
+  }
+  return observed.sort();
+}
+
+for (const authorizationPath of ROLE_HOLDER_PATHS) {
+  test(`exactly the expected operations skip the approval comment for ${authorizationPath}`, async () => {
+    assert.deepEqual(
+      await observedPolicyAutoApprovedOperations(authorizationPath),
+      [...EXPECTED_POLICY_AUTO_APPROVED_FOR_ROLE_HOLDER].sort()
+    );
+  });
+}
+
+test('exactly the expected operations skip the approval comment for a non-holder', async () => {
+  assert.deepEqual(
+    await observedPolicyAutoApprovedOperations('none'),
+    [...EXPECTED_POLICY_AUTO_APPROVED_FOR_NON_HOLDER].sort()
+  );
+});
+
+test('the requester-routed operations wait for an approval comment when the requester holds no role', async () => {
+  for (const operation of REQUESTER_ROUTED_OPERATIONS) {
+    for (const authorizationPath of ['none', undefined]) {
+      const result = await gate(operation, authorizationPath);
+      assert.equal(result.approval.approval_status, 'pending', `${operation}/${authorizationPath}`);
+      assert.equal(result.request.request_status, 'awaiting_approval', `${operation}/${authorizationPath}`);
+    }
+  }
 });
 
 test('repository ruleset operations are never in the fast lane', async () => {

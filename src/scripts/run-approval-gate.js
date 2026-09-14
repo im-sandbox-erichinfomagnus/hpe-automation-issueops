@@ -101,6 +101,42 @@ const CICD_FAST_LANE_OPERATIONS = [
 
 const CICD_ROLE_HOLDER_PATHS = ['tenant_cicd_admin_team', 'tenant_admin_maintainer'];
 
+// Two tenant self-serve operations became requester-aware in 1.0.8. They stay on the
+// self-serve list because run-approved-execution keys its mutation policy on that list;
+// what changed is only who skips the approval step. A requester who already holds the
+// tenant role is unaffected and still auto-approves. A requester who holds none no longer
+// fails at intake — it routes to an approval comment from someone who does hold the role.
+const REQUESTER_ROUTED_SELF_SERVE_OPERATIONS = [
+  'repo_admin_membership',
+  'cicd_admin_membership',
+];
+
+const TENANT_ROLE_TEAM_APPROVAL_MODES = REQUESTER_ROUTED_SELF_SERVE_OPERATIONS;
+
+// True when a self-serve operation has to route this particular request. Reads the path the
+// validator stamped, and fails closed: an absent or unrecognised path routes rather than
+// auto-approves, so a validator that stops stamping cannot silently open the gate.
+function requiresRequesterApprovalRouting(operation, auditArtifact) {
+  if (!REQUESTER_ROUTED_SELF_SERVE_OPERATIONS.includes(String(operation || ''))) {
+    return false;
+  }
+
+  const findings = auditArtifact.validation && auditArtifact.validation.validation_findings;
+  const authorizationPath = findings && findings.requester_authorization_path;
+  return !authorizationPath || authorizationPath === 'none';
+}
+
+function describeTenantRoleMembershipMutation(operation) {
+  return operation === 'repo_admin_membership' ? 'repo admin membership' : 'CI/CD admin membership';
+}
+
+function eligibleApproverTeamSlugs(auditArtifact) {
+  const findings = auditArtifact.validation && auditArtifact.validation.validation_findings;
+  return findings && Array.isArray(findings.eligible_approver_team_slugs)
+    ? findings.eligible_approver_team_slugs
+    : [];
+}
+
 // A fast lane is a request that needs no approval comment because the requester already
 // holds the authority the approval would confirm. Returns the notes to record, or null
 // when the request has to go through the comment gate.
@@ -167,7 +203,7 @@ async function runApprovalGate(options = {}) {
     return auditArtifact;
   }
 
-  if (isTenantSelfServeOperation(operation)) {
+  if (isTenantSelfServeOperation(operation) && !requiresRequesterApprovalRouting(operation, auditArtifact)) {
     // Approval step removed per tenant self-serve policy: the caller gate at
     // validation is the authorization.
     auditArtifact.assignment = auditArtifact.assignment || {
@@ -363,7 +399,12 @@ async function runApprovalGate(options = {}) {
         requesterLogin: auditArtifact.request.requester_login,
         parentTeamSlug: auditArtifact.request.parent_team_slug,
         requestedChildLinks: auditArtifact.request.requested_child_links || [],
-        approvalMode: auditArtifact.metadata && auditArtifact.metadata.operation === 'team_creation'
+        // Recorded by the validator for a routed tenant membership request: the teams whose
+        // members carry the authority the approval comment has to come from.
+        eligibleApproverTeamSlugs: eligibleApproverTeamSlugs(auditArtifact),
+        approvalMode: auditArtifact.metadata && TENANT_ROLE_TEAM_APPROVAL_MODES.includes(auditArtifact.metadata.operation)
+          ? auditArtifact.metadata.operation
+          : auditArtifact.metadata && auditArtifact.metadata.operation === 'team_creation'
           ? 'team_creation'
           : auditArtifact.metadata && auditArtifact.metadata.operation === 'team_hierarchy'
             ? 'team_hierarchy'
@@ -477,6 +518,14 @@ async function runApprovalGate(options = {}) {
           : auditArtifact.approval.approval_status === 'invalidated'
             ? 'Approval was invalidated after the approval comment was removed. No repository ruleset mutation was attempted.'
             : 'Request is validated, centrally routed, and awaiting approval from the designated target organization owner. No repository ruleset mutation was attempted.'
+      : auditArtifact.metadata && TENANT_ROLE_TEAM_APPROVAL_MODES.includes(auditArtifact.metadata.operation)
+      ? auditArtifact.approval.approval_status === 'approved'
+        ? `Request approval was granted by an authorized tenant role holder. No ${describeTenantRoleMembershipMutation(auditArtifact.metadata.operation)} mutation was attempted in this phase.`
+        : auditArtifact.approval.approval_status === 'denied'
+          ? `Approval was denied because the approval comment did not come from an authorized tenant role holder. No ${describeTenantRoleMembershipMutation(auditArtifact.metadata.operation)} mutation was attempted.`
+          : auditArtifact.approval.approval_status === 'invalidated'
+            ? `Approval was invalidated after the approval comment was removed. No ${describeTenantRoleMembershipMutation(auditArtifact.metadata.operation)} mutation was attempted.`
+            : `Request is validated, centrally routed, and awaiting approval from an authorized tenant role holder. No ${describeTenantRoleMembershipMutation(auditArtifact.metadata.operation)} mutation was attempted.`
       : auditArtifact.approval.approval_status === 'approved'
         ? 'Request approval was granted by an active organization member. No membership mutation was attempted in this phase.'
         : auditArtifact.approval.approval_status === 'denied'

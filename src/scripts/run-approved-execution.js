@@ -69,6 +69,24 @@ const { assertRunnerGroupCreationAllowed: assertRepositoryRulesetMutationAllowed
 const FAST_LANE_APPROVER_ROLES = ['target_org_owner', 'tenant_role_holder'];
 const { emitAuditSummary } = require('./emit-audit-summary');
 
+// Boundary revalidation for the two requester-routed membership operations (1.0.8).
+//
+// Before 1.0.8 the boundary was just revalidation.is_valid, because a requester who lost
+// their tenant role between approval and execution made revalidation invalid. Routing
+// changed that: an unauthorized requester is now VALID and merely waiting on an approver,
+// so is_valid alone would let a demoted requester through the boundary it used to stop.
+//
+// The distinction the boundary needs is who supplied the authority. A request approved
+// under the self-serve policy was authorized by the requester's own role, so that role must
+// still be held at execution. A request approved by comment was authorized by someone else,
+// and the requester never had a role to lose.
+function requesterAuthorityLostSinceApproval(auditArtifact, revalidation) {
+  const approvedUnderRequesterOwnAuthority =
+    auditArtifact.approval && auditArtifact.approval.approver_role === 'tenant_self_serve';
+  const findings = revalidation && revalidation.validation_findings;
+  return Boolean(approvedUnderRequesterOwnAuthority && findings && findings.requires_approval_routing === true);
+}
+
 function terminalStateLabelPrefix(operation) {
   const operationPrefixes = {
     team_creation: 'issueops:create-org-teams:',
@@ -1410,7 +1428,8 @@ async function executeRepoAdminMembership(context = {}) {
     ...revalidation,
   };
 
-  const boundaryStatus = revalidation.is_valid ? 'matched' : 'mismatched';
+  const boundaryMatched = revalidation.is_valid && !requesterAuthorityLostSinceApproval(auditArtifact, revalidation);
+  const boundaryStatus = boundaryMatched ? 'matched' : 'mismatched';
   const executionResults = [];
   let reconciliationPlan = {
     boundary_revalidation_status: boundaryStatus,
@@ -1418,7 +1437,7 @@ async function executeRepoAdminMembership(context = {}) {
     state: 'failed',
   };
 
-  if (!revalidation.is_valid) {
+  if (!boundaryMatched) {
     executionResults.push({
       team_slug: auditArtifact.request.repo_admin_team_slug || null,
       result_kind: 'boundary_revalidation',
@@ -1819,7 +1838,8 @@ async function executeCicdAdminMembership(context = {}) {
     ...revalidation,
   };
 
-  const boundaryStatus = revalidation.is_valid ? 'matched' : 'mismatched';
+  const boundaryMatched = revalidation.is_valid && !requesterAuthorityLostSinceApproval(auditArtifact, revalidation);
+  const boundaryStatus = boundaryMatched ? 'matched' : 'mismatched';
   const executionResults = [];
   let reconciliationPlan = {
     boundary_revalidation_status: boundaryStatus,
@@ -1827,7 +1847,7 @@ async function executeCicdAdminMembership(context = {}) {
     state: 'failed',
   };
 
-  if (!revalidation.is_valid) {
+  if (!boundaryMatched) {
     executionResults.push({
       team_slug: auditArtifact.request.cicd_admin_team_slug || null,
       result_kind: 'boundary_revalidation',

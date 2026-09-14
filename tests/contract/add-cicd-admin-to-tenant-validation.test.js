@@ -124,7 +124,10 @@ test('an existing cicd-admin team is planned as a noop team action', async () =>
   assert.equal(result.plan.team_action, 'noop');
 });
 
-test('a requester who is only a root-team member is rejected', async () => {
+// 1.0.8: a requester holding no tenant CI/CD role is no longer rejected at intake. The
+// authority they lack is exactly what an approval supplies, so the request routes instead.
+// What must not change is that plain root-team membership is still not authority on its own.
+test('a requester who is only a root-team member is routed to approval rather than authorized', async () => {
   const registryDir = buildRegistry();
   const result = await validateCicdAdminMembershipRequest(
     buildRequestInput(),
@@ -138,11 +141,18 @@ test('a requester who is only a root-team member is rejected', async () => {
     })
   );
 
-  assert.equal(result.is_valid, false);
+  assert.equal(result.is_valid, true);
+  assert.equal(result.validation_findings.requester_authorization_path, 'none');
+  assert.equal(result.validation_findings.requires_approval_routing, true);
   assert.equal(
     result.errors.some((error) => /not an active maintainer of the tenant top team/i.test(error)),
-    true,
+    false,
     JSON.stringify(result.errors)
+  );
+  assert.equal(
+    result.warnings.some((warning) => /not an active maintainer of the tenant top team/i.test(warning)),
+    true,
+    JSON.stringify(result.warnings)
   );
 });
 
@@ -205,7 +215,7 @@ test('a root-team maintainer with no cicd-admin membership is still authorized a
   assert.equal(result.validation_findings.requester_membership_state, 'active_maintainer');
 });
 
-test('the widened gate still rejects a requester in neither team', async () => {
+test('the widened gate still withholds authority from a requester in neither team', async () => {
   const registryDir = buildRegistry();
   const result = await validateCicdAdminMembershipRequest(
     buildRequestInput({ requesterLogin: 'unrelated-user' }),
@@ -214,11 +224,14 @@ test('the widened gate still rejects a requester in neither team', async () => {
     })
   );
 
-  assert.equal(result.is_valid, false);
+  // 1.0.8 routes this requester instead of rejecting them, but it must never mistake them
+  // for a role holder: the path stays 'none' and the request waits for an approver.
+  assert.equal(result.validation_findings.requester_authorization_path, 'none');
+  assert.equal(result.validation_findings.requires_approval_routing, true);
   assert.equal(
-    result.errors.some((error) => /is not an active member of the tenant CI\/CD admin team/i.test(error)),
+    result.warnings.some((warning) => /is not an active member of the tenant CI\/CD admin team/i.test(warning)),
     true,
-    JSON.stringify(result.errors)
+    JSON.stringify(result.warnings)
   );
 });
 
@@ -287,7 +300,7 @@ test('a root-team maintainer stays authorized when the cicd-admin probe fails', 
   );
 });
 
-test('a requester with no other tenant role is still denied when the cicd-admin probe fails', async () => {
+test('a requester with no other tenant role is still not authorized when the cicd-admin probe fails', async () => {
   const registryDir = buildRegistry();
   const result = await validateCicdAdminMembershipRequest(
     buildRequestInput({ requesterLogin: 'unrelated-user' }),
@@ -296,12 +309,14 @@ test('a requester with no other tenant role is still denied when the cicd-admin 
     })
   );
 
-  assert.equal(result.is_valid, false);
+  // A probe failure must never be read as authority. 1.0.8 routes the request rather than
+  // rejecting it, but the unresolved probe still leaves the requester with no role.
   assert.equal(result.validation_findings.requester_authorization_path, 'none');
+  assert.equal(result.validation_findings.requires_approval_routing, true);
   assert.equal(
-    result.errors.some((error) => /is not an active maintainer of the tenant top team/i.test(error)),
+    result.warnings.some((warning) => /is not an active maintainer of the tenant top team/i.test(warning)),
     true,
-    JSON.stringify(result.errors)
+    JSON.stringify(result.warnings)
   );
 });
 

@@ -10,6 +10,7 @@ const { resolveHostedRunnerApprover } = require('./resolve-hosted-runner-approve
 const { resolveRunnerGroupApprover } = require('./resolve-runner-group-approver');
 const { resolveTenantVariablesApprover } = require('./resolve-tenant-variables-approver');
 const { resolveRepositoryRulesetApprover } = require('./resolve-repository-ruleset-approver');
+const { resolveTenantRoleTeamApprover } = require('./resolve-tenant-role-team-approver');
 
 const APPROVAL_COMMAND = 'approved';
 
@@ -17,6 +18,25 @@ const APPROVAL_COMMAND = 'approved';
 // organization owner. resolveTenantCreationApprover withholds 'tenant_admin' when the
 // requester nominated themselves, so self-nomination leaves only the owner.
 const TENANT_CREATION_APPROVER_ROLES = ['target_org_owner', 'tenant_admin'];
+
+// The two tenant membership operations that route to an approval comment when the requester
+// holds no tenant role (1.0.8). Authority for them lives in tenant team membership, not in a
+// login named on the request, so they resolve their approver from the teams the validator
+// recorded as eligible. An organization owner is the matrix alternate of last resort.
+const TENANT_ROLE_TEAM_APPROVAL_MODES = [
+  'repo_admin_membership',
+  'cicd_admin_membership',
+];
+
+const TENANT_ROLE_TEAM_APPROVER_ROLES = [
+  'tenant_role_team',
+  'tenant_admin_maintainer',
+  'target_org_owner',
+];
+
+function describeTenantRoleMembershipMutation(approvalMode) {
+  return approvalMode === 'repo_admin_membership' ? 'repo admin membership' : 'CI/CD admin membership';
+}
 
 const TENANT_RUNNER_APPROVAL_MODES = [
   'hosted_runner_creation',
@@ -78,7 +98,24 @@ function findLatestApprovalComment(issueComments = [], approvalCommand = APPROVA
   }) || null;
 }
 
-function buildPendingApprovalNote(approvalMode, approvalCommand) {
+// Names the eligible teams in the order the approval matrix names them, for a note the
+// requester can act on without having to know the tenant topology.
+function describeTenantRoleTeamApprovers(eligibleApproverTeamSlugs = []) {
+  const slugs = eligibleApproverTeamSlugs.filter(Boolean);
+  if (slugs.length === 0) {
+    return 'an active tenant role holder, or an active organization owner,';
+  }
+
+  const roleTeam = `an active member of '${slugs[0]}'`;
+  const topTeams = slugs.slice(1).map((slug) => `an active maintainer of '${slug}'`);
+  return [roleTeam, ...topTeams, 'or an active organization owner,'].join(', ');
+}
+
+function buildPendingApprovalNote(approvalMode, approvalCommand, options = {}) {
+  if (TENANT_ROLE_TEAM_APPROVAL_MODES.includes(approvalMode)) {
+    return `Add an issue comment containing exactly '${approvalCommand}' from ${describeTenantRoleTeamApprovers(options.eligibleApproverTeamSlugs)} to authorize ${describeTenantRoleMembershipMutation(approvalMode)} execution. The requester cannot authorize their own request.`;
+  }
+
   if (approvalMode === 'team_hierarchy') {
     return `Add an issue comment containing exactly '${approvalCommand}' from the designated hierarchy approver to authorize execution.`;
   }
@@ -163,7 +200,13 @@ async function evaluateApprovalGate(input = {}, options = {}) {
   const priorApprovalStatus = input.priorApprovalStatus || 'pending';
   const latestContextMarker = input.latestContextMarker || input.latest_context_marker || '';
   const priorApprovedContextMarker = input.priorApprovedContextMarker || input.prior_approved_context_marker || '';
+  const eligibleApproverTeamSlugs =
+    input.eligibleApproverTeamSlugs || input.eligible_approver_team_slugs || [];
   const resolveRole = options.resolveRole || ((args) => {
+    if (TENANT_ROLE_TEAM_APPROVAL_MODES.includes(approvalMode)) {
+      return resolveTenantRoleTeamApprover(args, options);
+    }
+
     if (approvalMode === 'team_creation') {
       return resolveTeamCreationApprover(args, options);
     }
@@ -246,7 +289,7 @@ async function evaluateApprovalGate(input = {}, options = {}) {
         ? `The approval comment '${approvalCommand}' is no longer present and execution must remain blocked.`
         : requiresFreshAttachmentApproval
           ? buildPendingAttachmentApprovalNote(approvalMode, approvalCommand)
-          : buildPendingApprovalNote(approvalMode, approvalCommand),
+          : buildPendingApprovalNote(approvalMode, approvalCommand, { eligibleApproverTeamSlugs }),
     };
   }
 
@@ -261,8 +304,46 @@ async function evaluateApprovalGate(input = {}, options = {}) {
     requesterLogin: input.requesterLogin || input.requester_login,
     parentTeamSlug: input.parentTeamSlug || input.parent_team_slug,
     requestedChildLinks: input.requestedChildLinks || input.requested_child_links || [],
+    // Routed tenant membership requests resolve their approver against these teams.
+    eligibleApproverTeamSlugs,
   });
   const approverLogin = approver.approver_login || (approvalComment.user && approvalComment.user.login) || '';
+
+  if (TENANT_ROLE_TEAM_APPROVAL_MODES.includes(approvalMode)) {
+    if (!TENANT_ROLE_TEAM_APPROVER_ROLES.includes(approver.approver_role)) {
+      return {
+        approval_status: 'denied',
+        approver_login: approverLogin,
+        approver_role: approver.approver_role,
+        approver_authorization_state: approver.approver_authorization_state || 'unauthorized',
+        approver_membership_state: approver.approver_membership_state || 'unknown',
+        approver_team_slug: approver.approver_team_slug || null,
+        requester_self_approval_blocked: Boolean(approver.requester_self_approval_blocked),
+        latest_context_marker: latestContextMarker || null,
+        approved_context_marker: priorApprovedContextMarker || null,
+        approved_at: approvalComment.created_at || null,
+        decision_source: 'comment',
+        decision_note: approver.requester_self_approval_blocked
+          ? `The approval comment '${approvalCommand}' came from the requester, who cannot authorize their own ${describeTenantRoleMembershipMutation(approvalMode)} request.`
+          : `The approval comment '${approvalCommand}' was not added by a holder of the tenant role this request needs and does not authorize ${describeTenantRoleMembershipMutation(approvalMode)} mutation.`,
+      };
+    }
+
+    return {
+      approval_status: 'approved',
+      approver_login: approverLogin,
+      approver_role: approver.approver_role,
+      approver_authorization_state: approver.approver_authorization_state || 'authorized',
+      approver_membership_state: approver.approver_membership_state || 'active',
+      approver_team_slug: approver.approver_team_slug || null,
+      requester_self_approval_blocked: false,
+      latest_context_marker: latestContextMarker || null,
+      approved_context_marker: latestContextMarker || null,
+      approved_at: approvalComment.created_at || null,
+      decision_source: 'comment',
+      decision_note: `The approval comment '${approvalCommand}' was added by an authorized tenant role holder for this ${describeTenantRoleMembershipMutation(approvalMode)} request.`,
+    };
+  }
 
   if (approvalMode === 'team_creation') {
     if (approver.approver_role !== 'intended_owner') {

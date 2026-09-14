@@ -362,6 +362,7 @@ async function validateRepoAdminMembershipRequest(input = {}, options = {}) {
   let requesterRepoAdminMembershipState = 'unknown';
   let repoAdminTeamMatchedOn = null;
   let repoAdminProbeError = null;
+  let requiresApprovalRouting = false;
   if (resolvedView && !tenantTeamSlug) {
     errors.push(`Tenant '${tenantDisplayName}' has no resolvable top team and cannot authorize repo admin membership management.`);
   } else if (resolvedView) {
@@ -419,10 +420,25 @@ async function validateRepoAdminMembershipRequest(input = {}, options = {}) {
       }
     }
 
+    // 1.0.8: holding no tenant repo-admin role is no longer a validation failure. The
+    // request is well formed; what it lacks is authority, and supplying authority is what
+    // an approval is for. It routes to the approval gate instead of being rejected at
+    // intake, which is the 'RAM; (TAM)' column of the approval matrix. Every other error in
+    // this validator still fails closed: malformed still rejects, unauthorized now routes.
     if (!isOrgAdmin && !isTopTeamMaintainer && !isRepoAdminTeamMember) {
-      errors.push(`Requester '${request.requester_login}' is not an active target organization owner and is not an active maintainer of the tenant top team '${tenantTeamSlug}' and is not an active member of the tenant repo admin team '${repoAdminTeamSlug}' and cannot manage repo admin membership for tenant '${tenantDisplayName}'.`);
+      requiresApprovalRouting = true;
+      warnings.push(
+        `Requester '${request.requester_login}' is not an active target organization owner and is not an active maintainer of the tenant top team '${tenantTeamSlug}' and is not an active member of the tenant repo admin team '${repoAdminTeamSlug}', so this request routes to approval by an active member of '${repoAdminTeamSlug}', an active maintainer of '${tenantTeamSlug}', or an active organization owner.`
+      );
     }
   }
+
+  // The teams whose members may approve when the request routes, most specific first. The
+  // gate reads these rather than re-deriving slugs it would have to keep in step with this
+  // validator. Empty whenever the requester already holds a role and nothing routes.
+  const eligibleApproverTeamSlugs = requiresApprovalRouting
+    ? [repoAdminTeamSlug, tenantTeamSlug].filter(Boolean)
+    : [];
 
   // Names the tenant role the requester actually holds. The gate above is an OR, so
   // its evaluation order carries no meaning; this records the most specific role.
@@ -602,6 +618,8 @@ async function validateRepoAdminMembershipRequest(input = {}, options = {}) {
       repo_admin_team_matched_on: repoAdminTeamMatchedOn,
       repo_admin_probe_error: repoAdminProbeError,
       requester_authorization_path: requesterAuthorizationPath,
+      requires_approval_routing: requiresApprovalRouting,
+      eligible_approver_team_slugs: eligibleApproverTeamSlugs,
       requester_org_role: requesterOrgRole,
       repo_admin_team_slug: repoAdminTeamSlug,
       repo_admin_team_exists: repoAdminTeamExists,

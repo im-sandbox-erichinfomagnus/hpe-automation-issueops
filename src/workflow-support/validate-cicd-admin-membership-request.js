@@ -359,6 +359,7 @@ async function validateCicdAdminMembershipRequest(input = {}, options = {}) {
   let requesterCicdMembershipState = 'unknown';
   let cicdAdminTeamMatchedOn = null;
   let cicdAdminProbeError = null;
+  let requiresApprovalRouting = false;
   if (resolvedView && !tenantTeamSlug) {
     errors.push(`Tenant '${tenantDisplayName}' has no resolvable top team and cannot authorize CI/CD admin membership management.`);
   } else if (resolvedView && typeof options.getMembershipForUser === 'function') {
@@ -400,10 +401,25 @@ async function validateCicdAdminMembershipRequest(input = {}, options = {}) {
       );
     }
 
+    // 1.0.8: holding no tenant CI/CD role is no longer a validation failure. The request is
+    // well formed; what it lacks is authority, and supplying authority is what an approval
+    // is for. It routes to the approval gate instead of being rejected at intake, which is
+    // the 'CAM; (TAM)' column of the approval matrix. Every other error in this validator
+    // still fails closed: malformed still rejects, unauthorized now routes.
     if (!isTopTeamMaintainer && !isCicdAdminTeamMember) {
-      errors.push(`Requester '${request.requester_login}' is not an active maintainer of the tenant top team '${tenantTeamSlug}' and is not an active member of the tenant CI/CD admin team '${cicdAdminTeamSlug}' and cannot manage CI/CD admin membership for tenant '${tenantDisplayName}'.`);
+      requiresApprovalRouting = true;
+      warnings.push(
+        `Requester '${request.requester_login}' is not an active maintainer of the tenant top team '${tenantTeamSlug}' and is not an active member of the tenant CI/CD admin team '${cicdAdminTeamSlug}', so this request routes to approval by an active member of '${cicdAdminTeamSlug}', an active maintainer of '${tenantTeamSlug}', or an active organization owner.`
+      );
     }
   }
+
+  // The teams whose members may approve when the request routes, most specific first. The
+  // gate reads these rather than re-deriving slugs it would have to keep in step with this
+  // validator. Empty whenever the requester already holds a role and nothing routes.
+  const eligibleApproverTeamSlugs = requiresApprovalRouting
+    ? [cicdAdminTeamSlug, tenantTeamSlug].filter(Boolean)
+    : [];
 
   // Names the tenant role the requester actually holds. The gate above is an OR, so
   // its evaluation order carries no meaning; this records the most specific role.
@@ -580,6 +596,8 @@ async function validateCicdAdminMembershipRequest(input = {}, options = {}) {
       cicd_admin_team_matched_on: cicdAdminTeamMatchedOn,
       cicd_admin_probe_error: cicdAdminProbeError,
       requester_authorization_path: requesterAuthorizationPath,
+      requires_approval_routing: requiresApprovalRouting,
+      eligible_approver_team_slugs: eligibleApproverTeamSlugs,
       cicd_admin_team_slug: cicdAdminTeamSlug,
       cicd_admin_team_exists: cicdAdminTeamExists,
       team_action: plan.team_action,

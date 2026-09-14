@@ -19,6 +19,14 @@ function isTenantSelfServeOperation(operation) {
   return TENANT_SELF_SERVE_OPERATIONS.includes(String(operation || ''));
 }
 
+// 1.0.8 decision, recorded rather than left implicit: this assert deliberately does NOT
+// check who approved. cicd_admin_membership and repo_admin_membership now reach 'approved'
+// two ways — the requester held the tenant role, or a role holder approved by comment — and
+// both are settled at the approval gate. Re-deciding authority here would put the same
+// question in two places that can drift out of step, and the one that drifts silently is the
+// one nobody is reading. The gate is the single authorization point; execution enforces that
+// a decision was made ('approved'), not who made it. Revisit only if execution ever runs from
+// an artifact the gate did not produce.
 function assertTenantSelfServeMutationAllowed(context = {}) {
   const approvalStatus = context.approval_status || context.approvalStatus || 'pending';
   const dryRun = Boolean(context.dry_run ?? context.dryRun);

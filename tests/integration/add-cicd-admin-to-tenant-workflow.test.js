@@ -412,3 +412,137 @@ test('US3 csv_attachment intake resolves the attachment, executes, and revalidat
     ]
   );
 });
+
+// --------------------------------------------------- 1.0.8 requester-routed approval
+
+// Runs validation and then the gate with a supplied comment list, so a routed request can be
+// approved by somebody other than the requester. runValidatedAndApprovedFlow cannot do this:
+// it hands the gate an empty comment list on purpose, which is what a self-serve run sees.
+async function runValidatedAndCommentApprovedFlow({ artifactPath, registryDir, teamApi, requesterLogin, issueComments }) {
+  await runRequestValidation({
+    env: buildValidationEnv(artifactPath, registryDir, { REQUESTER_LOGIN: requesterLogin }),
+    api: teamApi,
+    setProcessExitCode: false,
+  });
+
+  await runApprovalGate({
+    env: {
+      AUDIT_ARTIFACT_PATH: artifactPath,
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      GITHUB_TOKEN: 'pat-token',
+    },
+    api: {
+      ...teamApi,
+      listIssueComments: async () => issueComments || [],
+    },
+    setProcessExitCode: false,
+  });
+}
+
+test('1.0.8 a requester holding no tenant role reaches the approval gate and waits there', async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'cicd-admin-routed-'));
+  const artifactPath = path.join(workspace, 'audit.json');
+  const registryDir = buildRegistry(workspace);
+
+  await runValidatedAndCommentApprovedFlow({
+    artifactPath,
+    registryDir,
+    teamApi: buildTeamApi(),
+    requesterLogin: 'unrelated-user',
+    issueComments: [],
+  });
+
+  const artifact = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
+  assert.equal(artifact.validation.is_valid, true);
+  assert.equal(artifact.validation.validation_findings.requester_authorization_path, 'none');
+  assert.equal(artifact.approval.approval_status, 'pending');
+  assert.equal(artifact.request.request_status, 'awaiting_approval');
+  assert.match(artifact.approval.decision_note, /contosouk-cicd-admin/);
+});
+
+test('1.0.8 a routed request approved by a tenant role holder executes even though the requester still holds no role', async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'cicd-admin-routed-exec-'));
+  const artifactPath = path.join(workspace, 'audit.json');
+  const registryDir = buildRegistry(workspace);
+  const teamApi = buildTeamApi();
+
+  await runValidatedAndCommentApprovedFlow({
+    artifactPath,
+    registryDir,
+    teamApi,
+    requesterLogin: 'unrelated-user',
+    issueComments: [{
+      id: 5001,
+      body: 'approved',
+      created_at: '2026-09-15T10:00:00.000Z',
+      user: { login: 'tenant-root-maintainer' },
+    }],
+  });
+
+  const approved = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
+  assert.equal(approved.approval.approval_status, 'approved');
+  assert.equal(approved.approval.approver_role, 'tenant_admin_maintainer');
+  assert.equal(approved.approval.approver_login, 'tenant-root-maintainer');
+
+  const result = await runApprovedExecution({
+    env: {
+      AUDIT_ARTIFACT_PATH: artifactPath,
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      GITHUB_RUN_ID: '26670000006',
+      GITHUB_RUN_ATTEMPT: '6',
+      TENANT_REGISTRY_DIR: registryDir,
+      TENANT_REGISTRY_REF: 'main',
+    },
+    tokenInfo: PAT_TOKEN_INFO,
+    teamApi,
+    commitRegistryTopology: false,
+    setProcessExitCode: false,
+  });
+
+  // The boundary revalidation added for 1.0.8 must not read the requester's missing role as
+  // authority that was lost: the approval never came from the requester in the first place.
+  assert.equal(result.reconciliation.boundary_revalidation_status, 'matched');
+  assert.equal(result.request.request_status, 'executed');
+  assert.deepEqual(
+    teamApi.teamStore.memberships.filter((entry) => entry.endsWith(':member')).sort(),
+    [
+      'contosouk-cicd-admin:hubot:member',
+      'contosouk-cicd-admin:octocat:member',
+    ]
+  );
+});
+
+test('1.0.8 a self-serve approval whose requester later loses the role is still stopped at the boundary', async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'cicd-admin-routed-demote-'));
+  const artifactPath = path.join(workspace, 'audit.json');
+  const registryDir = buildRegistry(workspace);
+
+  await runValidatedAndApprovedFlow({ artifactPath, registryDir, teamApi: buildTeamApi() });
+
+  const approved = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
+  assert.equal(approved.approval.approver_role, 'tenant_self_serve');
+
+  // Demoted to plain member: routing now applies to the requester, and because the approval
+  // rested on their own role it no longer holds. is_valid alone would miss this.
+  const demotedTeamApi = buildTeamApi({ rootMembershipRole: 'member' });
+  const result = await runApprovedExecution({
+    env: {
+      AUDIT_ARTIFACT_PATH: artifactPath,
+      ISSUEOPS_GITHUB_TOKEN: 'pat-token',
+      GITHUB_RUN_ID: '26670000007',
+      GITHUB_RUN_ATTEMPT: '7',
+      TENANT_REGISTRY_DIR: registryDir,
+      TENANT_REGISTRY_REF: 'main',
+    },
+    tokenInfo: PAT_TOKEN_INFO,
+    teamApi: demotedTeamApi,
+    commitRegistryTopology: false,
+    setProcessExitCode: false,
+  });
+
+  assert.equal(result.validation.is_valid, true);
+  assert.equal(result.validation.validation_findings.requires_approval_routing, true);
+  assert.equal(result.reconciliation.boundary_revalidation_status, 'mismatched');
+  assert.equal(result.request.request_status, 'failed');
+  assert.deepEqual(demotedTeamApi.teamStore.memberships, []);
+});
