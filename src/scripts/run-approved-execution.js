@@ -5201,11 +5201,21 @@ async function runApprovedExecution(options = {}) {
     updatedArtifact.execution.audit_persistence_result = auditPersistenceResult;
   }
 
+  // Every operation that reaches this point applies its terminal state label. This used
+  // to name the operations one at a time: the label began as a csv_attachment-only
+  // feature and each later operation was appended as its own feature landed, so an
+  // operation nobody appended silently executed and was never labelled. That is exactly
+  // what #114 reports for add-team-members and add-child-teams, whose labels are created
+  // by their workflows and were then never applied on the manual intake path.
+  //
+  // Listing operations here is not a safety property. The operations with their own
+  // execution function apply the label there and return before this point, so they cannot
+  // be double-labelled, and a dry run stops short of here without consulting this
+  // condition at all.
   const shouldAddTerminalLabel =
     updatedArtifact.request &&
     updatedArtifact.request.issue_number != null &&
-    typeof api.addIssueLabels === 'function' &&
-    (updatedArtifact.request.intake_mode === 'csv_attachment' || isTenantRepoCreation || isTenantCreation || isTeamCreation || isTenantRunnerOperation);
+    typeof api.addIssueLabels === 'function';
 
   if (shouldAddTerminalLabel) {
     const labelPrefix = terminalStateLabelPrefix(operation);
