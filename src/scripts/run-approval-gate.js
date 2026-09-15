@@ -5,6 +5,7 @@ const path = require('path');
 
 const { evaluateApprovalGate } = require('../workflow-support/approval-gate');
 const { isTenantSelfServeOperation } = require('../actions/tenant-self-serve-policy');
+const { CICD_FAST_LANE_OPERATIONS, CICD_ROLE_HOLDER_PATHS } = require('../workflow-support/cicd-fast-lane');
 const { buildAuditArtifact, toAuditArtifactJson } = require('../workflow-support/build-audit-artifact');
 const { createGitHubTeamApi } = require('../workflow-support/github-team-api');
 const { loadWorkflowToken } = require('../workflow-support/load-workflow-token');
@@ -91,15 +92,9 @@ function buildAssignmentNote(operation) {
 
 // CI/CD-gated ops whose requester gate already proves the tenant CI/CD role at intake,
 // so a role holder does not additionally wait for an approval comment.
-const CICD_FAST_LANE_OPERATIONS = [
-  'hosted_runner_creation',
-  'hosted_runner_deletion',
-  'hosted_runner_move',
-  'runner_group_creation',
-  'tenant_variable_management',
-];
-
-const CICD_ROLE_HOLDER_PATHS = ['tenant_cicd_admin_team', 'tenant_admin_maintainer'];
+// Declared in ./cicd-fast-lane so the five validators that must predict this answer read the
+// same list the gate acts on. They diverged until 1.0.8: each validator demanded an approver
+// for a requester this lane was about to wave through.
 
 // Two tenant self-serve operations became requester-aware in 1.0.8. They stay on the
 // self-serve list because run-approved-execution keys its mutation policy on that list;

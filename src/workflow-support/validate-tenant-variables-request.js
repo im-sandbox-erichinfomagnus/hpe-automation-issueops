@@ -12,6 +12,7 @@ const {
 } = require('./parse-tenant-variables-request');
 const { readTenantRegistryRecords } = require('./resolve-tenant-context-from-registry');
 const { readTopologyView, probeCicdTeamMembership, cicdAuthorizationPath } = require('./resolve-tenant-cicd-context-from-registry');
+const { waivesApprovalComment } = require('./cicd-fast-lane');
 
 function normalizeLogin(value) {
   return String(value || '').trim().toLowerCase();
@@ -310,7 +311,14 @@ async function validateTenantVariablesRequest(input = {}, options = {}) {
       role: approverRole,
     };
 
-    if (designatedApproverAuthorization.state !== 'authorized') {
+    // 1.0.8: a requester the CI/CD fast lane will wave through needs no approver, so do not
+    // reject them for naming one who is not an owner. The approver they were made to name would
+    // never have been consulted. The lookup above still runs and is still recorded - only the
+    // rejection is waived, and only for a requester whose own role already carries the authority.
+    // A requester the lane will NOT waive still has to name a real owner, or the approval comment
+    // they are about to wait for could never be given by anyone.
+    if (designatedApproverAuthorization.state !== 'authorized'
+      && !waivesApprovalComment(cicdAuthorizationPath(cicdAdminTeamMatchedOn))) {
       errors.push('Designated approver must be an active target organization owner.');
     }
   }

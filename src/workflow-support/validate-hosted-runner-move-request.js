@@ -5,6 +5,7 @@ const {
   resolveNamespaceOwner,
   resolveTenantCicdContextFromRegistry,
 } = require('./resolve-tenant-cicd-context-from-registry');
+const { waivesApprovalComment } = require('./cicd-fast-lane');
 
 function normalizeLogin(value) {
   return String(value || '').trim().toLowerCase();
@@ -194,7 +195,14 @@ async function validateHostedRunnerMoveRequest(input = {}, options = {}) {
       state: approverState === 'active' && approverRole === 'admin' ? 'authorized' : 'unauthorized',
       role: approverRole,
     };
-    if (designatedApproverAuthorization.state !== 'authorized') {
+    // 1.0.8: a requester the CI/CD fast lane will wave through needs no approver, so do not
+    // reject them for naming one who is not an owner. The approver they were made to name would
+    // never have been consulted. The lookup above still runs and is still recorded - only the
+    // rejection is waived, and only for a requester whose own role already carries the authority.
+    // A requester the lane will NOT waive still has to name a real owner, or the approval comment
+    // they are about to wait for could never be given by anyone.
+    if (designatedApproverAuthorization.state !== 'authorized'
+      && !waivesApprovalComment(resolvedContext && resolvedContext.requester_authorization_path)) {
       errors.push('Designated approver must be an active target organization owner.');
     }
   }

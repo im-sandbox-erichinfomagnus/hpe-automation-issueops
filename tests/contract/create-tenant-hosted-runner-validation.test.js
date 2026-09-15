@@ -225,10 +225,35 @@ test('existing runner with the derived name marks the request for no-op converge
   );
 });
 
-test('non-owner designated approver is rejected', async () => {
+// 1.0.8: this test used to assert that a non-owner designated approver was rejected outright.
+// Its default requester (tenant-cicd-admin) is an active member of contosouk-admin, so the
+// CI/CD fast lane was always going to waive the approval comment for them - and they were being
+// rejected for failing to name an approver the product would never consult. That was the
+// customer-reported defect, so the rejection is now conditional on the requester.
+test('a non-owner designated approver is accepted when the requester holds the tenant role', async () => {
   const registryDir = buildRegistry();
   const result = await validateHostedRunnerRequest(
     buildRequestInput({ parsedRequest: { designated_approver: 'regular-member' } }),
+    buildOptions(registryDir)
+  );
+
+  assert.equal(result.is_valid, true, JSON.stringify(result.errors));
+  assert.equal(
+    result.errors.some((error) => /active target organization owner/i.test(error)),
+    false,
+    JSON.stringify(result.errors)
+  );
+  // The lookup still runs and is still recorded - only the rejection is waived.
+  assert.equal(result.designated_approver_authorization.state, 'unauthorized');
+});
+
+test('a non-owner designated approver is still rejected when the requester holds no tenant role', async () => {
+  const registryDir = buildRegistry();
+  const result = await validateHostedRunnerRequest(
+    buildRequestInput({
+      requesterLogin: 'unrelated-user',
+      parsedRequest: { designated_approver: 'regular-member' },
+    }),
     buildOptions(registryDir)
   );
 
