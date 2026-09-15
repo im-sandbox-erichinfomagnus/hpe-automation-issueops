@@ -20,7 +20,7 @@ function writeAuditArtifact(directory, overrides = {}) {
       request_id: 'repo#701/run.1',
       issue_number: 701,
       repository: 'im-sandbox-himanshu/issueops-speckit',
-      requester_login: 'himanshu-im',
+      requester_login: 'filing-teammate',
       organization: 'im-sandbox-himanshu',
       parent_team_slug: 'platform-engineering',
       parent_team_name: 'Platform Engineering',

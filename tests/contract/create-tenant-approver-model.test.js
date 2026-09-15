@@ -119,19 +119,37 @@ test('the tenant admin named on the request approves it', async () => {
   assert.equal(decision.approver_login, TENANT_ADMIN_LOGIN);
 });
 
-test('an organization owner approves a tenant request in any case', async () => {
-  // Every configuration, including the two where the requester nominated themselves.
+test('an organization owner approves a tenant request they did not raise themselves', async () => {
+  // Every configuration where the approving owner is not also the requester, including the one
+  // where the requester nominated themselves as tenant admin.
   const configurations = [
     [MEMBER_LOGIN, TENANT_ADMIN_LOGIN, 'member requests, names another'],
     [MEMBER_LOGIN, MEMBER_LOGIN, 'member requests, names themselves'],
-    [OWNER_LOGIN, TENANT_ADMIN_LOGIN, 'owner requests, names another'],
-    [OWNER_LOGIN, OWNER_LOGIN, 'owner requests, names themselves'],
   ];
 
   for (const [requester, tenantAdmin, label] of configurations) {
     const decision = await approvalBy(buildRequest(requester, tenantAdmin), OWNER_LOGIN);
     assert.equal(decision.approval_status, 'approved', label);
     assert.equal(decision.approver_role, 'target_org_owner', label);
+  }
+});
+
+// 1.0.8: an owner who raises the request no longer approves it with their own comment. This is
+// NOT a change to the org-owner fast lane - that is policy-driven, fires before any comment is
+// read, and still auto-approves a self-nominating owner (376a3bf, Eric's 1.0.6-continuity
+// ruling). It only closes the COMMENT route, which an owner reaches solely when the owner gate
+// was not established at intake - and in that state we do not have intake evidence that they are
+// an owner, so failing closed is the safer reading.
+test('an organization owner who raised the request cannot approve it by comment', async () => {
+  const configurations = [
+    [OWNER_LOGIN, TENANT_ADMIN_LOGIN, 'owner requests, names another'],
+    [OWNER_LOGIN, OWNER_LOGIN, 'owner requests, names themselves'],
+  ];
+
+  for (const [requester, tenantAdmin, label] of configurations) {
+    const decision = await approvalBy(buildRequest(requester, tenantAdmin), OWNER_LOGIN);
+    assert.equal(decision.approval_status, 'denied', label);
+    assert.equal(decision.requester_self_approval_blocked, true, label);
   }
 });
 
@@ -148,11 +166,19 @@ test('self-nomination withholds the tenant admin role so only an owner can appro
   const validation = await validateTenantCreationRequest(request, organizationOptions());
   assert.equal(validation.validation_findings.requester_self_nominated_tenant_admin, true);
 
-  // The requester is the named tenant admin, and is still refused.
+  // The requester is the named tenant admin, and is still refused - now by the self-approval
+  // exclusion, which is reached before the tenant-admin role is resolved at all.
   const selfDecision = await approvalBy(request, MEMBER_LOGIN);
   assert.equal(selfDecision.approval_status, 'denied');
   assert.equal(selfDecision.approver_role, 'other');
-  assert.match(selfDecision.decision_note, /named themselves as tenant admin/i);
+  assert.equal(selfDecision.requester_self_approval_blocked, true);
+
+  // The self-nomination rule itself still holds: the named tenant admin carries no authority
+  // when they are the requester, so a DIFFERENT member cannot be waved through as tenant_admin
+  // either. Without this the previous assertion would be the only thing keeping the rule honest.
+  const otherMemberDecision = await approvalBy(request, UNRELATED_LOGIN);
+  assert.equal(otherMemberDecision.approval_status, 'denied');
+  assert.equal(otherMemberDecision.approver_role, 'other');
 
   // An owner remains able to approve it.
   const ownerDecision = await approvalBy(request, OWNER_LOGIN);

@@ -14,6 +14,12 @@ const { resolveTenantRoleTeamApprover } = require('./resolve-tenant-role-team-ap
 
 const APPROVAL_COMMAND = 'approved';
 
+// GitHub logins are case-insensitive, so the self-approval comparison has to be too - otherwise
+// 'Filing-User' approving 'filing-user' walks straight past it.
+function normalizeLogin(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
 // Tenant creation accepts either authority: the tenant admin named on the request, or an
 // organization owner. resolveTenantCreationApprover withholds 'tenant_admin' when the
 // requester nominated themselves, so self-nomination leaves only the owner.
@@ -290,6 +296,40 @@ async function evaluateApprovalGate(input = {}, options = {}) {
         : requiresFreshAttachmentApproval
           ? buildPendingAttachmentApprovalNote(approvalMode, approvalCommand)
           : buildPendingApprovalNote(approvalMode, approvalCommand, { eligibleApproverTeamSlugs }),
+    };
+  }
+
+  // Nobody approves their own request on the comment path (1.0.8, Stephen's item 3).
+  //
+  // Until now no approver resolver except resolve-tenant-role-team-approver compared the
+  // commenter to the requester, so one person could file a request and post the approving
+  // comment on it. For add-team-members that was the whole authorization: any active org member
+  // may approve, and the requester is one.
+  //
+  // This sits in evaluateApprovalGate deliberately, which reaches every comment-driven mode at
+  // once and CANNOT reach the two shapes that record the requester as their own approver on
+  // purpose - tenant self-serve and the fast lanes, including the tenant_creation org-owner lane
+  // from 376a3bf. Those return from runApprovalGate before this function is called, so the
+  // separation is structural rather than a list that has to be maintained.
+  //
+  // It is refused before the role lookup: no credential the requester happens to hold can be
+  // walked back into their own request, and it closes the sequence "file with no role, acquire
+  // the role, approve yourself" even though the artifact still records the role they lacked.
+  const commentAuthorLogin = normalizeLogin(approvalComment.user && approvalComment.user.login);
+  const requestingLogin = normalizeLogin(input.requesterLogin || input.requester_login);
+  if (commentAuthorLogin && requestingLogin && commentAuthorLogin === requestingLogin) {
+    return {
+      approval_status: 'denied',
+      approver_login: commentAuthorLogin,
+      approver_role: 'other',
+      approver_authorization_state: 'unauthorized',
+      approver_membership_state: 'unknown',
+      requester_self_approval_blocked: true,
+      latest_context_marker: latestContextMarker || null,
+      approved_context_marker: priorApprovedContextMarker || null,
+      approved_at: approvalComment.created_at || null,
+      decision_source: 'comment',
+      decision_note: `The approval comment '${approvalCommand}' came from the requester, who cannot authorize their own request.`,
     };
   }
 

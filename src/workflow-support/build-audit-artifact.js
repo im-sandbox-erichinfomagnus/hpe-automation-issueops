@@ -418,6 +418,12 @@ function buildAuditArtifact(input = {}) {
       approved_at: approval.approved_at || null,
       decision_source: approval.decision_source || '',
       decision_note: approval.decision_note || '',
+      // Carried so a refused self-approval is legible in the persisted record and the step
+      // summary, not only in the decision note. Both fields were already being set by the
+      // approval gate and dropped here, which made the refusal invisible to anyone reading
+      // the artifact afterwards.
+      requester_self_approval_blocked: Boolean(approval.requester_self_approval_blocked),
+      approver_team_slug: approval.approver_team_slug || null,
     },
     reconciliation: {
       team_exists: reconciliationPlan.team_exists,
