@@ -1,0 +1,129 @@
+{
+  "tenantId": "demotenant001",
+  "tenantName": "DemoTenant001",
+  "tenantType": "application",
+  "topology": {
+    "organization": {
+      "orgName": "im-sandbox-erichinfomagnus"
+    },
+    "teams": {
+      "tenantRootTeam": "demotenant001-root",
+      "structure": [
+        {
+          "team": "demotenant001-root",
+          "parent": null,
+          "type": "root"
+        },
+        {
+          "team": "demotenant001-admin",
+          "parent": "demotenant001-root",
+          "type": "admin"
+        },
+        {
+          "team": "demotenant001-repo-admin",
+          "parent": "demotenant001-root",
+          "type": "repo-admin"
+        },
+        {
+          "team": "demotenant001-cicd-admin",
+          "parent": "demotenant001-root",
+          "type": "cicd-admin"
+        },
+        {
+          "team": "demotenant001-developers",
+          "parent": "demotenant001-root",
+          "type": "subteam"
+        }
+      ]
+    },
+    "repositories": {
+      "owned": [
+        {
+          "repoName": "demotenant001_demo-service",
+          "tenantId": "demotenant001",
+          "visibility": "private",
+          "repoType": "service",
+          "lifecycle": "active",
+          "migrationWave": "wave-1",
+          "source": "ghec",
+          "adminTeam": "demotenant001-repo-admin"
+        }
+      ]
+    },
+    "runnerTopology": {
+      "runnerGroups": []
+    },
+    "accessModel": {
+      "enforcement": "tenant-boundary",
+      "roles": [
+        "tenant-admin",
+        "repo-admin",
+        "developer",
+        "viewer"
+      ],
+      "organizationRoleSpecifications": [
+        {
+          "role_key": "tenant-admin",
+          "role_name": "demotenant001-tenant-admin",
+          "permission_intent": "create repos, create teams, manage repository access"
+        },
+        {
+          "role_key": "repo-admin",
+          "role_name": "demotenant001-repo-admin",
+          "permission_intent": "create repos and manage repository access"
+        },
+        {
+          "role_key": "developer",
+          "role_name": "demotenant001-developer",
+          "permission_intent": "contribute code to tenant repositories"
+        },
+        {
+          "role_key": "viewer",
+          "role_name": "demotenant001-viewer",
+          "permission_intent": "read-only access to tenant repositories"
+        }
+      ]
+    }
+  },
+  "externalMappings": {
+    "cmdbId": null,
+    "costCenter": null,
+    "businessUnit": null,
+    "environment": "nonprod"
+  },
+  "metadata": {
+    "primaryContact": "",
+    "secondaryContact": null,
+    "createdBy": "harism-infomagnus",
+    "createdDate": "2026-08-31T17:42:37.272Z"
+  },
+  "lifecycleStatus": "active",
+  "tenant_key": "demotenant001",
+  "tenant_display_name": "DemoTenant001",
+  "organization": "im-sandbox-erichinfomagnus",
+  "tenant_team_name": "demotenant001-root",
+  "tenant_team_slug": "demotenant001-root",
+  "repo_admin_team_name": "demotenant001-repo-admin",
+  "repo_admin_team_slug": "demotenant001-repo-admin",
+  "cicd_admin_team_name": "demotenant001-cicd-admin",
+  "cicd_admin_team_slug": "demotenant001-cicd-admin",
+  "cicd_topology_relation": {
+    "parent_team_name": "demotenant001-root",
+    "parent_team_slug": "demotenant001-root",
+    "child_team_name": "demotenant001-cicd-admin",
+    "child_team_slug": "demotenant001-cicd-admin",
+    "relation_status": "applied",
+    "conflict_reason": null
+  },
+  "cicd_capability_status": "applied",
+  "cicd_capability_reason_code": null,
+  "cicd_capability_evidence_ref": null,
+  "bootstrap_tenant_admin_login": "harism-infomagnus",
+  "requester_login": "harism-infomagnus",
+  "approver_login": "harism-infomagnus",
+  "lifecycle_status": "active",
+  "created_at": "2026-08-31T17:42:45.867Z",
+  "updated_at": "2026-08-31T17:42:45.867Z",
+  "source_issue_number": 122,
+  "source_run_id": "33421023020"
+}

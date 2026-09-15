@@ -1,0 +1,113 @@
+{
+  "tenantId": "grishitha",
+  "tenantName": "GRISHITHA",
+  "tenantType": "platform",
+  "topology": {
+    "organization": {
+      "orgName": "im-sandbox-erichinfomagnus"
+    },
+    "teams": {
+      "tenantRootTeam": "grishitha-root",
+      "structure": [
+        {
+          "team": "grishitha-root",
+          "parent": null,
+          "type": "root"
+        },
+        {
+          "team": "grishitha-admin",
+          "parent": "grishitha-root",
+          "type": "admin"
+        },
+        {
+          "team": "grishitha-repo-admin",
+          "parent": "grishitha-root",
+          "type": "repo-admin"
+        },
+        {
+          "team": "grishitha-cicd-admin",
+          "parent": "grishitha-root",
+          "type": "cicd-admin"
+        }
+      ]
+    },
+    "repositories": {
+      "owned": []
+    },
+    "runnerTopology": {
+      "runnerGroups": []
+    },
+    "accessModel": {
+      "enforcement": "tenant-boundary",
+      "roles": [
+        "tenant-admin",
+        "repo-admin",
+        "developer",
+        "viewer"
+      ],
+      "organizationRoleSpecifications": [
+        {
+          "role_key": "tenant-admin",
+          "role_name": "grishitha-tenant-admin",
+          "permission_intent": "create repos, create teams, manage repository access"
+        },
+        {
+          "role_key": "repo-admin",
+          "role_name": "grishitha-repo-admin",
+          "permission_intent": "create repos and manage repository access"
+        },
+        {
+          "role_key": "developer",
+          "role_name": "grishitha-developer",
+          "permission_intent": "contribute code to tenant repositories"
+        },
+        {
+          "role_key": "viewer",
+          "role_name": "grishitha-viewer",
+          "permission_intent": "read-only access to tenant repositories"
+        }
+      ]
+    }
+  },
+  "externalMappings": {
+    "cmdbId": "CMDB-ERIC-1001",
+    "costCenter": "CC-ERIC-1001",
+    "businessUnit": "Platform",
+    "environment": "nonprod"
+  },
+  "metadata": {
+    "primaryContact": "grishitha.vinta@infomagnus.com",
+    "secondaryContact": null,
+    "createdBy": "umamaheswarb-infomagnus",
+    "createdDate": "2026-08-24T15:27:20.209Z"
+  },
+  "lifecycleStatus": "active",
+  "tenant_key": "grishitha",
+  "tenant_display_name": "GRISHITHA",
+  "organization": "im-sandbox-erichinfomagnus",
+  "tenant_team_name": "grishitha-root",
+  "tenant_team_slug": "grishitha-root",
+  "repo_admin_team_name": "grishitha-repo-admin",
+  "repo_admin_team_slug": "grishitha-repo-admin",
+  "cicd_admin_team_name": "grishitha-cicd-admin",
+  "cicd_admin_team_slug": "grishitha-cicd-admin",
+  "cicd_topology_relation": {
+    "parent_team_name": "grishitha-root",
+    "parent_team_slug": "grishitha-root",
+    "child_team_name": "grishitha-cicd-admin",
+    "child_team_slug": "grishitha-cicd-admin",
+    "relation_status": "applied",
+    "conflict_reason": null
+  },
+  "cicd_capability_status": "applied",
+  "cicd_capability_reason_code": null,
+  "cicd_capability_evidence_ref": null,
+  "bootstrap_tenant_admin_login": "grishithav-infomagnus",
+  "requester_login": "umamaheswarb-infomagnus",
+  "approver_login": "umamaheswarb-infomagnus",
+  "lifecycle_status": "active",
+  "created_at": "2026-08-24T15:26:34.831Z",
+  "updated_at": "2026-08-24T15:27:25.662Z",
+  "source_issue_number": 62,
+  "source_run_id": "32744930953"
+}

@@ -20,6 +20,7 @@ body:
     attributes:
       label: Target organization
       description: GitHub organization whose org-wide Actions variables should be managed.
+      value: im-sandbox-erichinfomagnus
       placeholder: octo-org
     validations:
       required: true

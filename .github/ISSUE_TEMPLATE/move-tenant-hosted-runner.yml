@@ -10,6 +10,7 @@ body:
     attributes:
       label: Target organization
       description: GitHub organization containing the hosted runner and target runner group.
+      value: im-sandbox-erichinfomagnus
       placeholder: octo-org
     validations:
       required: true

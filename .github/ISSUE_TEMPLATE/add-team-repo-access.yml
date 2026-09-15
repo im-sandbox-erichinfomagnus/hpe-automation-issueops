@@ -10,6 +10,7 @@ body:
     attributes:
       label: Target organization
       description: GitHub organization where the requested repository access should be applied.
+      value: im-sandbox-erichinfomagnus
       placeholder: octo-org
     validations:
       required: true
